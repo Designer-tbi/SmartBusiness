@@ -427,44 +427,49 @@ export default function Portfolio() {
                       </div>
 
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-2 text-sm">
-                        {item.address && (
-                          <div className="flex items-start gap-2 text-slate-600">
-                            <MapPin size={16} className="mt-0.5 shrink-0" />
-                            <span>{item.address}{item.city ? `, ${item.city}` : ''}</span>
+                        <div className="flex items-start gap-2 text-slate-600">
+                          <MapPin size={16} className="mt-0.5 shrink-0" />
+                          <span>
+                            <span className="font-semibold">Adresse : </span>
+                            {item.address || 'Non renseignée'}
+                            {item.city ? ` - ${item.city}` : ''}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 text-slate-600">
+                          <Hash size={16} className="shrink-0" />
+                          <span><span className="font-semibold">Adresse postale : </span>{item.bp ? `BP ${item.bp}` : 'Non renseignée'}</span>
+                        </div>
+                        <div className="flex items-start gap-2 text-slate-600">
+                          <Phone size={16} className="mt-0.5 shrink-0" />
+                          <div className="flex flex-col">
+                            <span className="font-semibold">Tél : </span>
+                            {item.tel ? item.tel.split(/[\n/]+/).map((t, i) => (
+                              <span key={i}>{t.trim()}</span>
+                            )) : <span>Non renseigné</span>}
                           </div>
-                        )}
-                        {item.bp && (
-                          <div className="flex items-center gap-2 text-slate-600">
-                            <Hash size={16} className="shrink-0" />
-                            <span>BP: {item.bp}</span>
-                          </div>
-                        )}
-                        {item.tel && (
-                          <div className="flex items-start gap-2 text-slate-600">
-                            <Phone size={16} className="mt-0.5 shrink-0" />
-                            <div className="flex flex-col">
-                              {item.tel.split('\n').map((t, i) => (
-                                <span key={i}>{t}</span>
-                              ))}
-                            </div>
-                          </div>
-                        )}
+                        </div>
+                        <div className="flex items-center gap-2 text-slate-600">
+                          <Mail size={16} className="shrink-0" />
+                          <span>
+                            <span className="font-semibold">Mail : </span>
+                            {item.mail ? (
+                              <a href={`mailto:${item.mail}`} className="hover:text-indigo-600 transition-colors">{item.mail}</a>
+                            ) : 'Non renseigné'}
+                          </span>
+                        </div>
                         {item.fax && (
                           <div className="flex items-center gap-2 text-slate-600">
                             <Phone size={16} className="shrink-0" />
-                            <span>Fax: {item.fax}</span>
-                          </div>
-                        )}
-                        {item.mail && (
-                          <div className="flex items-center gap-2 text-slate-600">
-                            <Mail size={16} className="shrink-0" />
-                            <a href={`mailto:${item.mail}`} className="hover:text-indigo-600 transition-colors">{item.mail}</a>
+                            <span><span className="font-semibold">Fax : </span>{item.fax}</span>
                           </div>
                         )}
                         {item.web && (
                           <div className="flex items-center gap-2 text-slate-600">
                             <Globe size={16} className="shrink-0" />
-                            <a href={item.web.startsWith('http') ? item.web : `https://${item.web}`} target="_blank" rel="noopener noreferrer" className="hover:text-indigo-600 transition-colors">{item.web}</a>
+                            <span>
+                              <span className="font-semibold">Site Web : </span>
+                              <a href={item.web.startsWith('http') ? item.web : `https://${item.web}`} target="_blank" rel="noopener noreferrer" className="hover:text-indigo-600 transition-colors">{item.web}</a>
+                            </span>
                           </div>
                         )}
                       </div>

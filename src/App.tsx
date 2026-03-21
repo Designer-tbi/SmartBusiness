@@ -10,6 +10,18 @@ import Users from './pages/Users';
 import Reports from './pages/Reports';
 import Settings from './pages/Settings';
 import Portfolio from './pages/Portfolio';
+import Leads from './pages/Leads';
+import Opportunities from './pages/Opportunities';
+import Quotes from './pages/Quotes';
+import Activities from './pages/Activities';
+import Calendar from './pages/Calendar';
+import QuotePublicView from './pages/QuotePublicView';
+import Invoices from './pages/Invoices';
+import Commissions from './pages/Commissions';
+import Tracking from './pages/Tracking';
+import Products from './pages/Products';
+import Projects from './pages/Projects';
+import SalesAnalysis from './pages/SalesAnalysis';
 import Placeholder from './pages/Placeholder';
 import Layout from './components/Layout';
 
@@ -38,6 +50,7 @@ export default function App() {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
+          <Route path="/public/quotes/:id" element={<QuotePublicView />} />
           <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
             <Route index element={<Dashboard />} />
             <Route path="calls" element={<Calls />} />
@@ -48,20 +61,20 @@ export default function App() {
             
             {/* New Modules */}
             <Route path="portfolio" element={<Portfolio />} />
-            <Route path="opportunities" element={<Placeholder />} />
-            <Route path="leads" element={<Placeholder />} />
-            <Route path="quotes" element={<Placeholder />} />
-            <Route path="invoices" element={<Placeholder />} />
-            <Route path="commissions" element={<Placeholder />} />
-            <Route path="tracking" element={<Placeholder />} />
-            <Route path="activities" element={<Placeholder />} />
-            <Route path="calendar" element={<Placeholder />} />
+            <Route path="opportunities" element={<Opportunities />} />
+            <Route path="leads" element={<Leads />} />
+            <Route path="quotes" element={<Quotes />} />
+            <Route path="invoices" element={<Invoices />} />
+            <Route path="commissions" element={<Commissions />} />
+            <Route path="tracking" element={<Tracking />} />
+            <Route path="activities" element={<Activities />} />
+            <Route path="calendar" element={<Calendar />} />
             <Route path="goals" element={<Placeholder />} />
             <Route path="catalog" element={<Placeholder />} />
-            <Route path="products" element={<Placeholder />} />
-            <Route path="projects" element={<Placeholder />} />
+            <Route path="products" element={<Products />} />
+            <Route path="projects" element={<Projects />} />
             <Route path="documents" element={<Placeholder />} />
-            <Route path="sales-analysis" element={<Placeholder />} />
+            <Route path="sales-analysis" element={<SalesAnalysis />} />
           </Route>
         </Routes>
       </Router>

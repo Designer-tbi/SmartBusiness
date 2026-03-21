@@ -91,7 +91,7 @@ class AppDatabase {
         .replace(/SERIAL PRIMARY KEY/gi, "INTEGER PRIMARY KEY AUTOINCREMENT")
         .replace(/TIMESTAMP WITH TIME ZONE/gi, "DATETIME")
         .replace(/CURRENT_TIMESTAMP/gi, "CURRENT_TIMESTAMP")
-        .replace(/RETURNING .*/gi, ""); // SQLite doesn't support RETURNING in the same way
+        .replace(/RETURNING [\s\S]*/gi, ""); // SQLite doesn't support RETURNING in the same way
 
       const isInsert = finalQuery.trim().toUpperCase().startsWith("INSERT");
       const isDelete = finalQuery.trim().toUpperCase().startsWith("DELETE");
@@ -125,10 +125,45 @@ class AppDatabase {
 
       CREATE TABLE IF NOT EXISTS customers (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
+        type TEXT NOT NULL DEFAULT 'individual',
+        first_name TEXT,
+        last_name TEXT,
+        company_name TEXT,
+        name TEXT, -- Keeping for compatibility
         email TEXT,
         phone TEXT NOT NULL,
         address TEXT,
+        city TEXT,
+        industry TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS leads (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        type TEXT NOT NULL DEFAULT 'individual',
+        first_name TEXT,
+        last_name TEXT,
+        company_name TEXT,
+        email TEXT,
+        phone TEXT,
+        source TEXT,
+        status TEXT NOT NULL DEFAULT 'new',
+        notes TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS opportunities (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        customer_id INTEGER REFERENCES customers(id),
+        lead_id INTEGER REFERENCES leads(id),
+        title TEXT NOT NULL,
+        amount REAL,
+        stage TEXT NOT NULL DEFAULT 'discovery',
+        probability INTEGER,
+        expected_close_date TEXT,
+        notes TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
@@ -167,12 +202,134 @@ class AppDatabase {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (category_id) REFERENCES categories (id)
       );
+
+      CREATE TABLE IF NOT EXISTS products (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        category TEXT,
+        price REAL NOT NULL DEFAULT 0,
+        stock INTEGER NOT NULL DEFAULT 0,
+        unit TEXT,
+        description TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS quotes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        number TEXT UNIQUE NOT NULL,
+        customer_id INTEGER REFERENCES customers(id),
+        lead_id INTEGER REFERENCES leads(id),
+        amount REAL NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'Brouillon',
+        date TEXT NOT NULL,
+        expiry_date TEXT,
+        notes TEXT,
+        signature TEXT,
+        signature_date TEXT,
+        signed_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS quote_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        quote_id INTEGER NOT NULL REFERENCES quotes(id) ON DELETE CASCADE,
+        product_id INTEGER REFERENCES products(id),
+        description TEXT NOT NULL,
+        quantity REAL NOT NULL DEFAULT 1,
+        unit_price REAL NOT NULL DEFAULT 0,
+        total_price REAL NOT NULL DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS invoices (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        number TEXT UNIQUE NOT NULL,
+        customer_id INTEGER REFERENCES customers(id),
+        quote_id INTEGER REFERENCES quotes(id),
+        amount REAL NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'En attente',
+        date TEXT NOT NULL,
+        due_date TEXT,
+        paid_at TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS commissions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        agent_id TEXT REFERENCES users(uid),
+        invoice_id INTEGER REFERENCES invoices(id),
+        amount REAL NOT NULL DEFAULT 0,
+        rate REAL NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'En attente',
+        date TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS activities (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        type TEXT NOT NULL,
+        subject TEXT NOT NULL,
+        customer_id INTEGER REFERENCES customers(id),
+        lead_id INTEGER REFERENCES leads(id),
+        opportunity_id INTEGER REFERENCES opportunities(id),
+        agent_id TEXT REFERENCES users(uid),
+        status TEXT NOT NULL DEFAULT 'À faire',
+        date TEXT NOT NULL,
+        notes TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS projects (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        customer_id INTEGER REFERENCES customers(id),
+        status TEXT NOT NULL DEFAULT 'En cours',
+        start_date TEXT,
+        end_date TEXT,
+        description TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
     `;
     
     // Split schema into individual statements for SQLite
     const statements = schema.split(';').filter(s => s.trim());
     for (const statement of statements) {
-      sqlite.prepare(statement).run();
+      try {
+        sqlite.prepare(statement).run();
+      } catch (err: any) {
+        // Ignore errors for already existing tables/columns
+        if (!err.message.includes('already exists') && !err.message.includes('duplicate column name')) {
+          console.error(`Error executing SQLite statement: ${statement}`, err);
+        }
+      }
+    }
+
+    // Ensure columns exist for customers table (for existing databases)
+    const alterStatements = [
+      "ALTER TABLE customers ADD COLUMN type TEXT NOT NULL DEFAULT 'individual'",
+      "ALTER TABLE customers ADD COLUMN first_name TEXT",
+      "ALTER TABLE customers ADD COLUMN last_name TEXT",
+      "ALTER TABLE customers ADD COLUMN company_name TEXT",
+      "ALTER TABLE customers ADD COLUMN city TEXT",
+      "ALTER TABLE customers ADD COLUMN industry TEXT",
+      "ALTER TABLE customers ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP",
+      "ALTER TABLE opportunities ADD COLUMN lead_id INTEGER REFERENCES leads(id)"
+    ];
+
+    for (const statement of alterStatements) {
+      try {
+        sqlite.prepare(statement).run();
+      } catch (err: any) {
+        // Ignore "duplicate column name" error
+        if (!err.message.includes('duplicate column name')) {
+          // console.error(`Error altering SQLite table: ${statement}`, err);
+        }
+      }
     }
     
     // Ensure the specific user is an admin
@@ -196,7 +353,7 @@ async function initDb() {
 
   console.log("Attempting to connect to Postgres database...");
   try {
-    await db.query(`
+    const schema = `
       CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
         uid TEXT UNIQUE NOT NULL,
@@ -209,10 +366,45 @@ async function initDb() {
 
       CREATE TABLE IF NOT EXISTS customers (
         id SERIAL PRIMARY KEY,
-        name TEXT NOT NULL,
+        type TEXT NOT NULL DEFAULT 'individual',
+        first_name TEXT,
+        last_name TEXT,
+        company_name TEXT,
+        name TEXT, -- Keeping for compatibility
         email TEXT,
         phone TEXT NOT NULL,
         address TEXT,
+        city TEXT,
+        industry TEXT,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS leads (
+        id SERIAL PRIMARY KEY,
+        type TEXT NOT NULL DEFAULT 'individual',
+        first_name TEXT,
+        last_name TEXT,
+        company_name TEXT,
+        email TEXT,
+        phone TEXT,
+        source TEXT,
+        status TEXT NOT NULL DEFAULT 'new',
+        notes TEXT,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS opportunities (
+        id SERIAL PRIMARY KEY,
+        customer_id INTEGER REFERENCES customers(id),
+        lead_id INTEGER REFERENCES leads(id),
+        title TEXT NOT NULL,
+        amount NUMERIC,
+        stage TEXT NOT NULL DEFAULT 'discovery',
+        probability INTEGER,
+        expected_close_date DATE,
+        notes TEXT,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
@@ -250,12 +442,130 @@ async function initDb() {
         web TEXT,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
-    `);
+
+      CREATE TABLE IF NOT EXISTS products (
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL,
+        category TEXT,
+        price NUMERIC NOT NULL DEFAULT 0,
+        stock INTEGER NOT NULL DEFAULT 0,
+        unit TEXT,
+        description TEXT,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS quotes (
+        id SERIAL PRIMARY KEY,
+        number TEXT UNIQUE NOT NULL,
+        customer_id INTEGER REFERENCES customers(id),
+        lead_id INTEGER REFERENCES leads(id),
+        amount NUMERIC NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'Brouillon',
+        date DATE NOT NULL,
+        expiry_date DATE,
+        notes TEXT,
+        signature TEXT,
+        signature_date TIMESTAMP WITH TIME ZONE,
+        signed_by TEXT,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS quote_items (
+        id SERIAL PRIMARY KEY,
+        quote_id INTEGER NOT NULL REFERENCES quotes(id) ON DELETE CASCADE,
+        product_id INTEGER REFERENCES products(id),
+        description TEXT NOT NULL,
+        quantity NUMERIC NOT NULL DEFAULT 1,
+        unit_price NUMERIC NOT NULL DEFAULT 0,
+        total_price NUMERIC NOT NULL DEFAULT 0,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS invoices (
+        id SERIAL PRIMARY KEY,
+        number TEXT UNIQUE NOT NULL,
+        customer_id INTEGER REFERENCES customers(id),
+        quote_id INTEGER REFERENCES quotes(id),
+        amount NUMERIC NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'En attente',
+        date DATE NOT NULL,
+        due_date DATE,
+        paid_at TIMESTAMP WITH TIME ZONE,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS commissions (
+        id SERIAL PRIMARY KEY,
+        agent_id TEXT REFERENCES users(uid),
+        invoice_id INTEGER REFERENCES invoices(id),
+        amount NUMERIC NOT NULL DEFAULT 0,
+        rate NUMERIC NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'En attente',
+        date DATE NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS activities (
+        id SERIAL PRIMARY KEY,
+        type TEXT NOT NULL,
+        subject TEXT NOT NULL,
+        customer_id INTEGER REFERENCES customers(id),
+        lead_id INTEGER REFERENCES leads(id),
+        opportunity_id INTEGER REFERENCES opportunities(id),
+        agent_id TEXT REFERENCES users(uid),
+        status TEXT NOT NULL DEFAULT 'À faire',
+        date TIMESTAMP WITH TIME ZONE NOT NULL,
+        notes TEXT,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS projects (
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL,
+        customer_id INTEGER REFERENCES customers(id),
+        status TEXT NOT NULL DEFAULT 'En cours',
+        start_date DATE,
+        end_date DATE,
+        description TEXT,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+    `;
+
+    const statements = schema.split(';').filter(s => s.trim());
+    for (const statement of statements) {
+      await db.query(statement);
+    }
+
+    // Ensure columns exist for customers table (for existing databases)
+    const alterStatements = [
+      "ALTER TABLE customers ADD COLUMN IF NOT EXISTS type TEXT NOT NULL DEFAULT 'individual'",
+      "ALTER TABLE customers ADD COLUMN IF NOT EXISTS first_name TEXT",
+      "ALTER TABLE customers ADD COLUMN IF NOT EXISTS last_name TEXT",
+      "ALTER TABLE customers ADD COLUMN IF NOT EXISTS company_name TEXT",
+      "ALTER TABLE customers ADD COLUMN IF NOT EXISTS city TEXT",
+      "ALTER TABLE customers ADD COLUMN IF NOT EXISTS industry TEXT",
+      "ALTER TABLE customers ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP",
+      "ALTER TABLE opportunities ADD COLUMN IF NOT EXISTS lead_id INTEGER REFERENCES leads(id)"
+    ];
+
+    for (const statement of alterStatements) {
+      try {
+        await db.query(statement);
+      } catch (err) {
+        // Ignore errors
+      }
+    }
+
     console.log("Postgres database schema initialized");
   } catch (err: any) {
     console.error("Failed to initialize Postgres database:", err.message);
-    if (err.message.includes('getaddrinfo') || err.message.includes('EAI_AGAIN')) {
-      console.log("Falling back to SQLite due to Postgres connection error.");
+    if (err.message.includes('getaddrinfo') || err.message.includes('EAI_AGAIN') || err.message.includes('more than one statement')) {
+      console.log("Falling back to SQLite due to Postgres connection error or multi-statement incompatibility.");
       await db.initSqlite();
     }
   }
@@ -344,6 +654,82 @@ async function seedCategories() {
   }
 }
 
+async function seedCustomers() {
+  try {
+    const result = await db.query("SELECT COUNT(*) as count FROM customers");
+    if (parseInt(result.rows[0].count) === 0) {
+      console.log("Seeding initial customers...");
+      await db.query(
+        "INSERT INTO customers (type, first_name, last_name, company_name, email, phone, address, city, industry) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+        ['company', null, null, 'TBI Center', 'contact@tbi-center.fr', '06 666 66 66', 'Centre-ville', 'Pointe-Noire', 'Informatique']
+      );
+      await db.query(
+        "INSERT INTO customers (type, first_name, last_name, company_name, email, phone, address, city, industry) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+        ['individual', 'Jean', 'Dupont', null, 'jean.dupont@gmail.com', '05 555 55 55', 'Plateau', 'Brazzaville', 'Commerce']
+      );
+    }
+  } catch (err) {
+    console.error("Failed to seed customers:", err);
+  }
+}
+
+async function seedLeads() {
+  try {
+    const result = await db.query("SELECT COUNT(*) as count FROM leads");
+    if (parseInt(result.rows[0].count) === 0) {
+      console.log("Seeding initial leads...");
+      await db.query(
+        "INSERT INTO leads (type, first_name, last_name, company_name, email, phone, source, status) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+        ['company', null, null, 'SNDE', 'info@snde.cg', '06 999 99 99', 'Site Web', 'new']
+      );
+    }
+  } catch (err) {
+    console.error("Failed to seed leads:", err);
+  }
+}
+
+async function seedProducts() {
+  const products = [
+    { name: 'Sable de construction', category: 'Matériaux', price: 15000, stock: 500, unit: 'm3' },
+    { name: 'Ciment 50kg', category: 'Matériaux', price: 4500, stock: 1200, unit: 'sac' },
+    { name: 'Fer à béton 12mm', category: 'Matériaux', price: 5500, stock: 800, unit: 'barre' },
+  ];
+
+  try {
+    const result = await db.query("SELECT COUNT(*) as count FROM products");
+    if (parseInt(result.rows[0].count) === 0) {
+      console.log("Seeding initial products...");
+      for (const p of products) {
+        await db.query(
+          "INSERT INTO products (name, category, price, stock, unit) VALUES ($1, $2, $3, $4, $5)",
+          [p.name, p.category, p.price, p.stock, p.unit]
+        );
+      }
+    }
+  } catch (err) {
+    console.error("Failed to seed products:", err);
+  }
+}
+
+async function seedQuotes() {
+  try {
+    const result = await db.query("SELECT COUNT(*) as count FROM quotes");
+    if (parseInt(result.rows[0].count) === 0) {
+      // We need at least one customer or lead
+      const customers = await db.query("SELECT id FROM customers LIMIT 1");
+      if (customers.rows.length > 0) {
+        console.log("Seeding initial quotes...");
+        await db.query(
+          "INSERT INTO quotes (number, customer_id, amount, status, date, expiry_date) VALUES ($1, $2, $3, $4, $5, $6)",
+          ['QT-2024-001', customers.rows[0].id, 1500000, 'Envoyé', '2024-03-15', '2024-04-15']
+        );
+      }
+    }
+  } catch (err) {
+    console.error("Failed to seed quotes:", err);
+  }
+}
+
 async function startServer() {
   console.log("Starting server...");
   const app = express();
@@ -356,6 +742,15 @@ async function startServer() {
 
   app.use(express.json());
   app.use(cookieParser());
+  
+  // Initialize database and seed data
+  await initDb();
+  await seedAdmin();
+  await seedCategories();
+  await seedCustomers();
+  await seedLeads();
+  await seedProducts();
+  await seedQuotes();
   
   console.log("Configuring routes...");
 
@@ -664,7 +1059,13 @@ async function startServer() {
   // Customers Routes
   app.get("/api/customers", authenticateToken, async (req, res) => {
     try {
-      const result = await db.query("SELECT id, name, email, phone, address, created_at as \"createdAt\", updated_at as \"updatedAt\" FROM customers ORDER BY created_at DESC");
+      const result = await db.query(`
+        SELECT id, type, first_name as "firstName", last_name as "lastName", 
+               company_name as "companyName", name, email, phone, address, city, industry,
+               created_at as "createdAt", updated_at as "updatedAt" 
+        FROM customers 
+        ORDER BY created_at DESC
+      `);
       res.json(result.rows);
     } catch (err) {
       res.status(500).json({ error: "Server error" });
@@ -672,29 +1073,46 @@ async function startServer() {
   });
 
   app.post("/api/customers", authenticateToken, async (req, res) => {
-    const { name, email, phone, address } = req.body;
+    const { type, firstName, lastName, companyName, email, phone, address, city, industry } = req.body;
+    const name = type === 'company' ? companyName : `${firstName} ${lastName}`;
+    
     try {
       const result = await db.query(
-        "INSERT INTO customers (name, email, phone, address) VALUES ($1, $2, $3, $4) RETURNING id, name, email, phone, address, created_at as \"createdAt\", updated_at as \"updatedAt\"",
-        [name, email, phone, address]
+        `INSERT INTO customers (type, first_name, last_name, company_name, name, email, phone, address, city, industry) 
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) 
+         RETURNING id, type, first_name as "firstName", last_name as "lastName", 
+                   company_name as "companyName", name, email, phone, address, city, industry,
+                   created_at as "createdAt"`,
+        [type || 'individual', firstName, lastName, companyName, name, email, phone, address, city, industry]
       );
-      res.json(result.rows[0]);
+      res.status(201).json(result.rows[0]);
     } catch (err) {
-      res.status(500).json({ error: "Server error" });
+      console.error("Error creating customer:", err);
+      res.status(500).json({ error: "Server error", details: err instanceof Error ? err.message : String(err) });
     }
   });
 
   app.put("/api/customers/:id", authenticateToken, async (req, res) => {
     const { id } = req.params;
-    const { name, email, phone, address } = req.body;
+    const { type, firstName, lastName, companyName, email, phone, address, city, industry } = req.body;
+    const name = type === 'company' ? companyName : `${firstName} ${lastName}`;
+    
     try {
       const result = await db.query(
-        "UPDATE customers SET name = $1, email = $2, phone = $3, address = $4, updated_at = CURRENT_TIMESTAMP WHERE id = $5 RETURNING id, name, email, phone, address, created_at as \"createdAt\", updated_at as \"updatedAt\"",
-        [name, email, phone, address, id]
+        `UPDATE customers 
+         SET type = $1, first_name = $2, last_name = $3, company_name = $4, name = $5, 
+             email = $6, phone = $7, address = $8, city = $9, industry = $10, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $11
+         RETURNING id, type, first_name as "firstName", last_name as "lastName", 
+                   company_name as "companyName", name, email, phone, address, city, industry,
+                   updated_at as "updatedAt"`,
+        [type, firstName, lastName, companyName, name, email, phone, address, city, industry, id]
       );
+      if (result.rows.length === 0) return res.status(404).json({ error: "Customer not found" });
       res.json(result.rows[0]);
     } catch (err) {
-      res.status(500).json({ error: "Server error" });
+      console.error("Error updating customer:", err);
+      res.status(500).json({ error: "Server error", details: err instanceof Error ? err.message : String(err) });
     }
   });
 
@@ -704,7 +1122,181 @@ async function startServer() {
       await db.query("DELETE FROM customers WHERE id = $1", [id]);
       res.json({ success: true });
     } catch (err) {
-      res.status(500).json({ error: "Server error" });
+      console.error("Error deleting customer:", err);
+      res.status(500).json({ error: "Server error", details: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // Leads Routes
+  app.get("/api/leads", authenticateToken, async (req, res) => {
+    try {
+      const result = await db.query(`
+        SELECT id, type, first_name as "firstName", last_name as "lastName", 
+               company_name as "companyName", email, phone, source, status, notes,
+               created_at as "createdAt", updated_at as "updatedAt" 
+        FROM leads 
+        ORDER BY created_at DESC
+      `);
+      res.json(result.rows);
+    } catch (err) {
+      console.error("Error fetching leads:", err);
+      res.status(500).json({ error: "Server error", details: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.post("/api/leads", authenticateToken, async (req: any, res) => {
+    const { type, firstName, lastName, companyName, email, phone, source, status, notes } = req.body;
+    try {
+      const result = await db.query(
+        `INSERT INTO leads (type, first_name, last_name, company_name, email, phone, source, status, notes) 
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) 
+         RETURNING id, type, first_name as "firstName", last_name as "lastName", 
+                   company_name as "companyName", email, phone, source, status, notes,
+                   created_at as "createdAt"`,
+        [type || 'individual', firstName, lastName, companyName, email, phone, source, status || 'Nouveau', notes]
+      );
+      const leadId = result.rows[0].id;
+
+      // Automation: Create initial follow-up activity
+      try {
+        const dueDate = new Date();
+        dueDate.setDate(dueDate.getDate() + 1);
+        await db.query(
+          `INSERT INTO activities (type, subject, lead_id, agent_id, status, date, notes) 
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          ['Appel', `Premier contact - Lead #${leadId}`, leadId, req.user.uid, 'À faire', dueDate.toISOString(), `Contacter le nouveau prospect: ${type === 'company' ? companyName : firstName + ' ' + lastName}`]
+        );
+      } catch (actErr) {
+        console.error("Error creating automatic activity for lead:", actErr);
+      }
+
+      res.status(201).json(result.rows[0]);
+    } catch (err) {
+      console.error("Error creating lead:", err);
+      res.status(500).json({ error: "Server error", details: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.put("/api/leads/:id", authenticateToken, async (req, res) => {
+    const { id } = req.params;
+    const { type, firstName, lastName, companyName, email, phone, source, status, notes } = req.body;
+    try {
+      const result = await db.query(
+        `UPDATE leads 
+         SET type = $1, first_name = $2, last_name = $3, company_name = $4, email = $5, 
+             phone = $6, source = $7, status = $8, notes = $9, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $10
+         RETURNING id, type, first_name as "firstName", last_name as "lastName", 
+                   company_name as "companyName", email, phone, source, status, notes,
+                   updated_at as "updatedAt"`,
+        [type, firstName, lastName, companyName, email, phone, source, status, notes, id]
+      );
+      if (result.rows.length === 0) return res.status(404).json({ error: "Lead not found" });
+      res.json(result.rows[0]);
+    } catch (err) {
+      console.error("Error updating lead:", err);
+      res.status(500).json({ error: "Server error", details: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.delete("/api/leads/:id", authenticateToken, async (req, res) => {
+    const { id } = req.params;
+    try {
+      await db.query("DELETE FROM leads WHERE id = $1", [id]);
+      res.json({ success: true });
+    } catch (err) {
+      console.error("Error deleting lead:", err);
+      res.status(500).json({ error: "Server error", details: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // Opportunities Routes
+  app.get("/api/opportunities", authenticateToken, async (req, res) => {
+    try {
+      const result = await db.query(`
+        SELECT o.id, o.customer_id as "customerId", o.lead_id as "leadId", o.title, o.amount, o.stage, 
+               o.probability, o.expected_close_date as "expectedCloseDate", o.notes,
+               o.created_at as "createdAt", o.updated_at as "updatedAt",
+               c.name as "customerName",
+               CASE 
+                 WHEN l.type = 'company' THEN l.company_name 
+                 ELSE COALESCE(l.first_name, '') || ' ' || COALESCE(l.last_name, '')
+               END as "leadName"
+        FROM opportunities o
+        LEFT JOIN customers c ON o.customer_id = c.id
+        LEFT JOIN leads l ON o.lead_id = l.id
+        ORDER BY o.created_at DESC
+      `);
+      res.json(result.rows);
+    } catch (err) {
+      console.error("Error fetching opportunities:", err);
+      res.status(500).json({ error: "Server error", details: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.post("/api/opportunities", authenticateToken, async (req: any, res) => {
+    const { customerId, leadId, title, amount, stage, probability, expectedCloseDate, notes } = req.body;
+    try {
+      const result = await db.query(
+        `INSERT INTO opportunities (customer_id, lead_id, title, amount, stage, probability, expected_close_date, notes) 
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) 
+         RETURNING id, customer_id as "customerId", lead_id as "leadId", title, amount, stage, 
+                   probability, expected_close_date as "expectedCloseDate", notes,
+                   created_at as "createdAt"`,
+        [customerId || null, leadId || null, title, amount, stage || 'Prospection', probability, expectedCloseDate, notes]
+      );
+      const oppId = result.rows[0].id;
+
+      // Automation: Create activity for new opportunity
+      try {
+        const dueDate = new Date();
+        dueDate.setDate(dueDate.getDate() + 3);
+        await db.query(
+          `INSERT INTO activities (type, subject, customer_id, lead_id, agent_id, status, date, notes) 
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          ['Réunion', `Qualification - Opp #${oppId}`, customerId || null, leadId || null, req.user.uid, 'À faire', dueDate.toISOString(), `Qualifier les besoins pour l'opportunité: ${title}`]
+        );
+      } catch (actErr) {
+        console.error("Error creating automatic activity for opportunity:", actErr);
+      }
+
+      res.status(201).json(result.rows[0]);
+    } catch (err) {
+      console.error("Error creating opportunity:", err);
+      res.status(500).json({ error: "Server error", details: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.put("/api/opportunities/:id", authenticateToken, async (req, res) => {
+    const { id } = req.params;
+    const { customerId, leadId, title, amount, stage, probability, expectedCloseDate, notes } = req.body;
+    try {
+      const result = await db.query(
+        `UPDATE opportunities 
+         SET customer_id = $1, lead_id = $2, title = $3, amount = $4, stage = $5, 
+             probability = $6, expected_close_date = $7, notes = $8, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $9
+         RETURNING id, customer_id as "customerId", lead_id as "leadId", title, amount, stage, 
+                   probability, expected_close_date as "expectedCloseDate", notes,
+                   updated_at as "updatedAt"`,
+        [customerId || null, leadId || null, title, amount, stage, probability, expectedCloseDate, notes, id]
+      );
+      if (result.rows.length === 0) return res.status(404).json({ error: "Opportunity not found" });
+      res.json(result.rows[0]);
+    } catch (err) {
+      console.error("Error updating opportunity:", err);
+      res.status(500).json({ error: "Server error", details: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.delete("/api/opportunities/:id", authenticateToken, async (req, res) => {
+    const { id } = req.params;
+    try {
+      await db.query("DELETE FROM opportunities WHERE id = $1", [id]);
+      res.json({ success: true });
+    } catch (err) {
+      console.error("Error deleting opportunity:", err);
+      res.status(500).json({ error: "Server error", details: err instanceof Error ? err.message : String(err) });
     }
   });
 
@@ -758,6 +1350,418 @@ async function startServer() {
       );
       res.json(result.rows[0]);
     } catch (err) {
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // Products Routes
+  app.get("/api/products", authenticateToken, async (req, res) => {
+    try {
+      const result = await db.query("SELECT * FROM products ORDER BY name ASC");
+      res.json(result.rows);
+    } catch (err) {
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // Quotes Routes
+  app.get("/api/quotes", authenticateToken, async (req, res) => {
+    try {
+      const result = await db.query(`
+        SELECT q.*, c.name as "customerName", l.first_name || ' ' || l.last_name as "leadName"
+        FROM quotes q
+        LEFT JOIN customers c ON q.customer_id = c.id
+        LEFT JOIN leads l ON q.lead_id = l.id
+        ORDER BY q.date DESC
+      `);
+      res.json(result.rows.map(row => ({
+        ...row,
+        customerName: row.customerName || (row.leadName ? `Prospect: ${row.leadName}` : 'Inconnu'),
+        expiryDate: row.expiry_date
+      })));
+    } catch (err) {
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  app.get("/api/quotes/:id", authenticateToken, async (req, res) => {
+    const { id } = req.params;
+    try {
+      const quoteResult = await db.query(`
+        SELECT q.*, c.name as "customerName", c.email as "customerEmail", c.phone as "customerPhone", 
+               l.first_name || ' ' || l.last_name as "leadName", l.email as "leadEmail", l.phone as "leadPhone"
+        FROM quotes q
+        LEFT JOIN customers c ON q.customer_id = c.id
+        LEFT JOIN leads l ON q.lead_id = l.id
+        WHERE q.id = $1
+      `, [id]);
+
+      if (quoteResult.rows.length === 0) return res.status(404).json({ error: "Quote not found" });
+
+      const itemsResult = await db.query("SELECT * FROM quote_items WHERE quote_id = $1", [id]);
+      
+      const quote = quoteResult.rows[0];
+      res.json({
+        ...quote,
+        customerName: quote.customerName || quote.leadName,
+        customerEmail: quote.customerEmail || quote.leadEmail,
+        customerPhone: quote.customerPhone || quote.leadPhone,
+        items: itemsResult.rows
+      });
+    } catch (err) {
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  app.post("/api/quotes", authenticateToken, async (req, res) => {
+    const { number, customerId, leadId, amount, status, date, expiryDate, notes, items } = req.body;
+    try {
+      const result = await db.query(
+        "INSERT INTO quotes (number, customer_id, lead_id, amount, status, date, expiry_date, notes) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id",
+        [number, customerId, leadId, amount, status || 'Brouillon', date, expiryDate, notes]
+      );
+      const quoteId = result.rows[0].id;
+
+      if (items && items.length > 0) {
+        for (const item of items) {
+          await db.query(
+            "INSERT INTO quote_items (quote_id, product_id, description, quantity, unit_price, total_price) VALUES ($1, $2, $3, $4, $5, $6)",
+            [quoteId, item.productId, item.description, item.quantity, item.unitPrice, item.totalPrice]
+          );
+        }
+      }
+
+      res.status(201).json({ id: quoteId });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  app.put("/api/quotes/:id", authenticateToken, async (req, res) => {
+    const { id } = req.params;
+    const { amount, status, date, expiryDate, notes, items } = req.body;
+    try {
+      await db.query(
+        "UPDATE quotes SET amount = $1, status = $2, date = $3, expiry_date = $4, notes = $5, updated_at = CURRENT_TIMESTAMP WHERE id = $6",
+        [amount, status, date, expiryDate, notes, id]
+      );
+
+      if (items) {
+        await db.query("DELETE FROM quote_items WHERE quote_id = $1", [id]);
+        for (const item of items) {
+          await db.query(
+            "INSERT INTO quote_items (quote_id, product_id, description, quantity, unit_price, total_price) VALUES ($1, $2, $3, $4, $5, $6)",
+            [id, item.productId, item.description, item.quantity, item.unitPrice, item.totalPrice]
+          );
+        }
+      }
+
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // Public Quote Routes (No Auth)
+  app.get("/api/public/quotes/:id", async (req, res) => {
+    const { id } = req.params;
+    try {
+      const quoteResult = await db.query(`
+        SELECT q.*, c.name as "customerName", c.email as "customerEmail", c.phone as "customerPhone", 
+               l.first_name || ' ' || l.last_name as "leadName", l.email as "leadEmail", l.phone as "leadPhone"
+        FROM quotes q
+        LEFT JOIN customers c ON q.customer_id = c.id
+        LEFT JOIN leads l ON q.lead_id = l.id
+        WHERE q.id = $1
+      `, [id]);
+
+      if (quoteResult.rows.length === 0) return res.status(404).json({ error: "Quote not found" });
+
+      const itemsResult = await db.query("SELECT * FROM quote_items WHERE quote_id = $1", [id]);
+      
+      const quote = quoteResult.rows[0];
+      res.json({
+        ...quote,
+        customerName: quote.customerName || quote.leadName,
+        customerEmail: quote.customerEmail || quote.leadEmail,
+        customerPhone: quote.customerPhone || quote.leadPhone,
+        items: itemsResult.rows
+      });
+    } catch (err) {
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  app.post("/api/public/quotes/:id/sign", async (req, res) => {
+    const { id } = req.params;
+    const { signature, signedBy } = req.body;
+    try {
+      await db.query(
+        "UPDATE quotes SET signature = $1, signed_by = $2, signature_date = CURRENT_TIMESTAMP, status = 'Accepté' WHERE id = $3",
+        [signature, signedBy, id]
+      );
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // Invoices Routes
+  app.get("/api/invoices", authenticateToken, async (req, res) => {
+    try {
+      const result = await db.query(`
+        SELECT i.*, c.name as "customerName"
+        FROM invoices i
+        LEFT JOIN customers c ON i.customer_id = c.id
+        ORDER BY i.date DESC
+      `);
+      res.json(result.rows.map(row => ({
+        ...row,
+        dueDate: row.due_date,
+        paidAt: row.paid_at
+      })));
+    } catch (err) {
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // Commissions Routes
+  app.get("/api/commissions", authenticateToken, async (req: any, res) => {
+    try {
+      let query = `
+        SELECT cm.*, u.name as "agentName", i.number as "invoiceNumber"
+        FROM commissions cm
+        LEFT JOIN users u ON cm.agent_id = u.uid
+        LEFT JOIN invoices i ON cm.invoice_id = i.id
+      `;
+      let params: any[] = [];
+
+      if (req.user.role !== 'admin') {
+        query += ` WHERE cm.agent_id = $1`;
+        params.push(req.user.uid);
+      }
+
+      query += ` ORDER BY cm.date DESC`;
+      
+      const result = await db.query(query, params);
+      res.json(result.rows);
+    } catch (err) {
+      console.error("Error fetching commissions:", err);
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  app.post("/api/commissions", authenticateToken, async (req: any, res) => {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ error: "Only admins can assign commissions" });
+    }
+
+    const { agentId, invoiceId, amount, rate, status, date } = req.body;
+    try {
+      const result = await db.query(
+        `INSERT INTO commissions (agent_id, invoice_id, amount, rate, status, date) 
+         VALUES ($1, $2, $3, $4, $5, $6) 
+         RETURNING id, agent_id as "agentId", invoice_id as "invoiceId", amount, rate, status, date`,
+        [agentId, invoiceId || null, amount, rate, status || 'En attente', date]
+      );
+      res.status(201).json(result.rows[0]);
+    } catch (err) {
+      console.error("Error creating commission:", err);
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  app.put("/api/commissions/:id", authenticateToken, async (req: any, res) => {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ error: "Only admins can update commissions" });
+    }
+
+    const { id } = req.params;
+    const { status } = req.body;
+    try {
+      const result = await db.query(
+        "UPDATE commissions SET status = $1 WHERE id = $2 RETURNING *",
+        [status, id]
+      );
+      if (result.rows.length === 0) return res.status(404).json({ error: "Commission not found" });
+      res.json(result.rows[0]);
+    } catch (err) {
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // Activities Routes
+  app.get("/api/activities", authenticateToken, async (req, res) => {
+    try {
+      const result = await db.query(`
+        SELECT a.*, c.name as "customerName", 
+               l.first_name || ' ' || l.last_name as "leadName", 
+               o.title as "opportunityTitle",
+               u.name as "agentName"
+        FROM activities a
+        LEFT JOIN customers c ON a.customer_id = c.id
+        LEFT JOIN leads l ON a.lead_id = l.id
+        LEFT JOIN opportunities o ON a.opportunity_id = o.id
+        LEFT JOIN users u ON a.agent_id = u.uid
+        ORDER BY a.date DESC
+      `);
+      res.json(result.rows.map(row => ({
+        ...row,
+        customerName: row.customerName || (row.leadName ? `Prospect: ${row.leadName}` : row.opportunityTitle || 'N/A')
+      })));
+    } catch (err) {
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  app.post("/api/activities", authenticateToken, async (req: any, res) => {
+    const { type, subject, customerId, leadId, opportunityId, status, date, notes } = req.body;
+    try {
+      const result = await db.query(
+        `INSERT INTO activities (type, subject, customer_id, lead_id, opportunity_id, agent_id, status, date, notes) 
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+        [type, subject, customerId, leadId, opportunityId, req.user.uid, status || 'À faire', date, notes]
+      );
+      res.status(201).json({ id: result.rows[0].id });
+    } catch (err) {
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  app.put("/api/activities/:id", authenticateToken, async (req, res) => {
+    const { id } = req.params;
+    const { type, subject, customerId, leadId, opportunityId, status, date, notes } = req.body;
+    try {
+      await db.query(
+        `UPDATE activities 
+         SET type = $1, subject = $2, customer_id = $3, lead_id = $4, opportunity_id = $5, status = $6, date = $7, notes = $8, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $9`,
+        [type, subject, customerId, leadId, opportunityId, status, date, notes, id]
+      );
+      res.json({ message: "Activity updated" });
+    } catch (err) {
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  app.delete("/api/activities/:id", authenticateToken, async (req, res) => {
+    const { id } = req.params;
+    try {
+      await db.query("DELETE FROM activities WHERE id = $1", [id]);
+      res.json({ message: "Activity deleted" });
+    } catch (err) {
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // Projects Routes
+  app.get("/api/projects", authenticateToken, async (req, res) => {
+    try {
+      const result = await db.query(`
+        SELECT p.*, c.name as "customerName"
+        FROM projects p
+        LEFT JOIN customers c ON p.customer_id = c.id
+        ORDER BY p.created_at DESC
+      `);
+      res.json(result.rows.map(row => ({
+        ...row,
+        startDate: row.start_date,
+        endDate: row.end_date
+      })));
+    } catch (err) {
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // CRM Automation Routes
+  app.post("/api/leads/:id/convert-to-customer", authenticateToken, async (req, res) => {
+    const { id } = req.params;
+    try {
+      // 1. Fetch lead
+      const leadResult = await db.query("SELECT * FROM leads WHERE id = $1", [id]);
+      if (leadResult.rows.length === 0) return res.status(404).json({ error: "Lead not found" });
+      const lead = leadResult.rows[0];
+
+      // 2. Create customer
+      const customerResult = await db.query(
+        `INSERT INTO customers (type, first_name, last_name, company_name, email, phone, industry, updated_at) 
+         VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP) RETURNING id`,
+        [lead.type, lead.first_name, lead.last_name, lead.company_name, lead.email, lead.phone, 'Non spécifié']
+      );
+      const customerId = customerResult.rows[0].id;
+
+      // 3. Update opportunities linked to this lead
+      await db.query("UPDATE opportunities SET customer_id = $1, lead_id = NULL WHERE lead_id = $2", [customerId, id]);
+
+      // 4. Mark lead as converted
+      await db.query("UPDATE leads SET status = 'Converti', updated_at = CURRENT_TIMESTAMP WHERE id = $1", [id]);
+
+      res.json({ success: true, customerId });
+    } catch (err) {
+      console.error("Error converting lead to customer:", err);
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  app.post("/api/leads/:id/convert-to-opportunity", authenticateToken, async (req, res) => {
+    const { id } = req.params;
+    const { title, amount, expectedCloseDate } = req.body;
+    try {
+      const leadResult = await db.query("SELECT * FROM leads WHERE id = $1", [id]);
+      if (leadResult.rows.length === 0) return res.status(404).json({ error: "Lead not found" });
+
+      const result = await db.query(
+        `INSERT INTO opportunities (lead_id, title, amount, stage, probability, expected_close_date, updated_at) 
+         VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP) RETURNING id`,
+        [id, title || "Nouvelle Opportunité", amount || 0, 'discovery', 10, expectedCloseDate || null]
+      );
+
+      // Update lead status
+      await db.query("UPDATE leads SET status = 'Qualifié' WHERE id = $1", [id]);
+
+      res.json(result.rows[0]);
+    } catch (err) {
+      console.error("Error converting lead to opportunity:", err);
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  app.post("/api/opportunities/:id/convert-to-customer", authenticateToken, async (req, res) => {
+    const { id } = req.params;
+    try {
+      const oppResult = await db.query("SELECT * FROM opportunities WHERE id = $1", [id]);
+      if (oppResult.rows.length === 0) return res.status(404).json({ error: "Opportunity not found" });
+      const opp = oppResult.rows[0];
+
+      let customerId = opp.customer_id;
+
+      if (!customerId && opp.lead_id) {
+        // Convert the lead to customer
+        const leadResult = await db.query("SELECT * FROM leads WHERE id = $1", [opp.lead_id]);
+        if (leadResult.rows.length > 0) {
+          const lead = leadResult.rows[0];
+          const customerResult = await db.query(
+            `INSERT INTO customers (type, first_name, last_name, company_name, email, phone, industry, updated_at) 
+             VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP) RETURNING id`,
+            [lead.type, lead.first_name, lead.last_name, lead.company_name, lead.email, lead.phone, 'Non spécifié']
+          );
+          customerId = customerResult.rows[0].id;
+          
+          // Mark lead as converted
+          await db.query("UPDATE leads SET status = 'Converti', updated_at = CURRENT_TIMESTAMP WHERE id = $1", [opp.lead_id]);
+        }
+      }
+
+      // Update opportunity
+      await db.query(
+        "UPDATE opportunities SET customer_id = $1, lead_id = NULL, stage = 'won', probability = 100, updated_at = CURRENT_TIMESTAMP WHERE id = $2",
+        [customerId, id]
+      );
+
+      res.json({ success: true, customerId });
+    } catch (err) {
+      console.error("Error converting opportunity to customer:", err);
       res.status(500).json({ error: "Server error" });
     }
   });
@@ -832,7 +1836,7 @@ async function startServer() {
       await seedRealEstateItems();
       await seedAlimentationDistributionItems();
       await seedAnimauxVeterinairesItems();
-      
+      await seedAssociationsItems();
       await seedAssistanceJuridiqueItems();
       await seedAssurancesItems();
       await seedAutomobilesItems();
@@ -848,6 +1852,7 @@ async function startServer() {
       await seedTelecommunicationsItems();
       await seedEnseignementItems();
       await seedTransportsItems();
+      await seedCoiffureEsthetiqueItems();
       console.log("Background: Database initialized and seeded.");
     } catch (err) {
       console.error("Background: Failed to initialize database:", err);
@@ -1178,6 +2183,67 @@ async function seedAnimauxVeterinairesItems() {
     console.log("Seeded portfolio items for ANIMAUX ET VÉTÉRINAIRES");
   } catch (err) {
     console.error("Failed to seed animaux items:", err);
+  }
+}
+
+async function seedAssociationsItems() {
+  try {
+    const catResult = await db.query("SELECT id FROM categories WHERE name = 'ASSOCIATIONS'");
+    if (catResult.rows.length === 0) return;
+    const catId = catResult.rows[0].id;
+
+    const itemsCountResult = await db.query("SELECT COUNT(*) as count FROM portfolio_items WHERE category_id = $1", [catId]);
+    const currentCount = parseInt(itemsCountResult.rows[0].count);
+
+    const items = [
+      // Brazzaville
+      { name: "Association Président Fulbert Youlou", sub_type: "Associations", address: "Bd Denis Sassou Nguesso", city: "BRAZZAVILLE", tel: "05 742 08 53 / 06 830 33 41" },
+      { name: "Edden (ONG)", sub_type: "Associations", address: "Route N°2 - Village Elota", city: "BRAZZAVILLE", bp: "1684", tel: "22 281 01 06 / 06 971 66 66", mail: "contact@association-edden.com", web: "www.association-edden.com" },
+      { name: "Fondation Congo Assistance VIH/SIDA", sub_type: "Associations", address: "Rue Béhangle", city: "BRAZZAVILLE", mail: "info@fondation-congo-assistance.org", web: "www.fondation-congo-assistance.org" },
+      { name: "Fondation des Jeunes Entreprises du Congo", sub_type: "Associations", address: "Av. de l'OUA - Bacongo", city: "BRAZZAVILLE", bp: "13700", tel: "06 661 48 90 / 05 521 65 48", mail: "fjecbrazza@yahoo.fr" },
+      { name: "Fondation Perspectives d’Avenir", sub_type: "Associations", address: "Av. des Trois Martyrs", city: "BRAZZAVILLE", bp: "13135", tel: "22 281 20 20", mail: "info@perspectivesavenir.org" },
+      { name: "France Volontaires", sub_type: "Associations", address: "Bd Denis Sassou Nguesso - Imm. Paul Doumer", city: "BRAZZAVILLE", tel: "06 829 76 07", mail: "ev.congo@france-volontaires.org", web: "www.evfv.org" },
+      { name: "INSTITUT DES JEUNES SOURDS DE BRAZZAVILLE", sub_type: "Associations", address: "Rond-point de la Patte d'Oie", city: "BRAZZAVILLE", bp: "178", tel: "06 678 23 98 / 05 551 18 22", mail: "ijsb07@yahoo.fr" },
+      { name: "La CONADHO (Convention Nationale des Droits de l’Homme)", sub_type: "Associations", address: "23, Av. André Matsoua", city: "BRAZZAVILLE", bp: "13296", tel: "05 551 20 94 / 05 551 09 19", mail: "conadho@yahoo.fr" },
+      { name: "LION’S CLUB ELIKIA", sub_type: "Associations", address: "Hôtel Saphir - Centre Ville", city: "BRAZZAVILLE", tel: "01 635 64 44" },
+      { name: "Programme de Santé Communautaire", sub_type: "Associations", address: "Imm. 5 Février - 2ème étage", city: "BRAZZAVILLE", bp: "13336", tel: "22 611 27 63 / 64", mail: "contact@psc-congo.org" },
+      { name: "ROTARY CLUB BRAZZAVILLE (District : 9150)", sub_type: "Associations", address: "Av. de l'Amitié - Olympic Palace", city: "BRAZZAVILLE", web: "www.rotaryclubbzvcentre.org" },
+      { name: "SCC (Syndicat des Commerçants du Congo)", sub_type: "Associations", address: "45, rue Mbakas - Imm. Doukouré", city: "BRAZZAVILLE", tel: "05 556 45 54 / 06 666 37 41" },
+      
+      // Pointe-Noire
+      { name: "ASSOC (L’Association de Soutien aux Orphelins du Congo)", sub_type: "Associations", address: "Av. Bitélika Ndombi - Aéroport", city: "POINTE-NOIRE", bp: "4017", tel: "05 564 90 34", web: "www.assoc.cg" },
+      { name: "AVSI – PEOPLE FOR DEVELOPEMENT", sub_type: "Associations", address: "Av. Moé Vangoula - Imm. Nyanga -1er étage", city: "POINTE-NOIRE", bp: "1716", tel: "06 514 48 61 / 05 663 60 61", web: "www.avsi.org" },
+      { name: "Centre Spécialisé de Réeducation Orthophonique", sub_type: "Associations", address: "28, Av. Dr Denis Loemba - Rond Point des Amoureux", city: "POINTE-NOIRE", bp: "5806", tel: "05 553 18 97", mail: "ludjos_orthophonie@yahoo.fr" },
+      { name: "Conseil Supérieur Islamique du Congo", sub_type: "Associations", address: "Av. Alphonse Pemesso - Grand Marché", city: "POINTE-NOIRE", tel: "06 622 18 49 / 04 434 22 43", mail: "csipnk@yahoo.fr" },
+      { name: "Forum de Jeunes Entreprises du Congo", sub_type: "Associations", address: "26, Av. de l'Indépandance", city: "POINTE-NOIRE", bp: "4507", tel: "04 466 57 86", mail: "fjecponton@yahoo.fr" },
+      { name: "FPU (Fédération pourla Paix Universelle)", sub_type: "Associations", address: "Bd du Général Charles de Gaulle - OCH", city: "POINTE-NOIRE", bp: "4157", tel: "05 539 02 14 / 06 661 81 84", mail: "fpu-pn@yahoo.fr" },
+      { name: "Human Association", sub_type: "Associations", address: "Av. Marien Ngouabi - OCH", city: "POINTE-NOIRE", bp: "5999", tel: "05 520 86 96" },
+      { name: "INSTITUT DES JEUNES SOURD DE BRAZAVILLE", sub_type: "Associations", address: "Rond-point de la Patte d’Oie", city: "POINTE-NOIRE", bp: "178", tel: "06 678 23 98", mail: "ijsb07@yahoo.fr" },
+      { name: "LION’S CLUB EUCALYPTUS", sub_type: "Associations", city: "POINTE-NOIRE" },
+      { name: "LION’S CLUB NDJI-NDJI", sub_type: "Associations", city: "POINTE-NOIRE" },
+      { name: "MWANA VILLAGES", sub_type: "Associations", address: "Rue de Mboumbissi", city: "POINTE-NOIRE", tel: "01 553 00 07", mail: "info@mwanavillages.org", web: "www.mwanavillages.org" },
+      { name: "ROTARY CLUB DOYEN DE POINTE NOIRE (District : 9150)", sub_type: "Associations", address: "Club : 17236", city: "POINTE-NOIRE", bp: "1066", mail: "contact@rotary-pointenoire.org" },
+      { name: "SIMCS (Secours International du Mouvement Chrétien pour la Solidarité)", sub_type: "Associations", address: "27, rue Boulolo - OCH", city: "POINTE-NOIRE", bp: "2058", tel: "05 539 65 14 / 06 661 69 90", mail: "cimcs2005@yahoo.fr" },
+      { name: "SSPN (Samu Social de Pointe-Noire)", sub_type: "Associations", address: "Bd Bitélika Ndombi - Derrière SN Plasco", city: "POINTE-NOIRE", bp: "1896", tel: "06 629 13 77 / 06 945 67 54", mail: "samusocial.pn@gmail.com" }
+    ];
+
+    if (currentCount !== items.length) {
+      console.log("Seeding portfolio items for ASSOCIATIONS...");
+      // Delete existing items to avoid duplicates if re-seeding
+      await db.query("DELETE FROM portfolio_items WHERE category_id = $1", [catId]);
+      
+      for (const item of items) {
+      await db.query(
+        `INSERT INTO portfolio_items 
+        (category_id, name, sub_type, address, city, bp, tel, fax, mail, web) 
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [catId, item.name, item.sub_type, (item as any).address || null, (item as any).city || null, (item as any).bp || null, (item as any).tel || null, (item as any).fax || null, (item as any).mail || null, (item as any).web || null]
+      );
+    }
+    console.log(`Seeded ${items.length} portfolio items for ASSOCIATIONS`);
+  }
+} catch (err) {
+    console.error("Failed to seed associations items:", err);
   }
 }
 
@@ -1890,859 +2956,1343 @@ async function seedAssistanceJuridiqueItems() {
             city: 'BRAZZAVILLE',
             tel: '05 538 24 36'
       },
-  {
-    name: "BABEDISSA Victorien",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Huissiers",
-    city: "Pointe-Noire",
-    tel: "06 658 28 04"
-  },
-  {
-    name: "BAKOUETE Guillaume",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Avocats",
-    city: "Pointe-Noire",
-    tel: "05 533 38 68 / 06 661 73 27"
-  },
-  {
-    name: "BASSAKININA Jean Aimé Boniface",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Avocats",
-    city: "Pointe-Noire",
-    tel: "06 681 36 28 / 05 770 83 19"
-  },
-  {
-    name: "BATCHI André",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Avocats",
-    city: "Pointe-Noire",
-    tel: "05 553 88 81 / 04 483 35 75"
-  },
-  {
-    name: "BATIA Paul Bertrand",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Notaires",
-    city: "Pointe-Noire",
-    tel: "05 534 46 83 / 06 656 55 49"
-  },
-  {
-    name: "BAYANGAMA Roland Serge",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Avocats",
-    city: "Pointe-Noire",
-    tel: "05 523 69 04 / 06 974 59 31"
-  },
-  {
-    name: "BAYONNE Jean Frédéric",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Huissiers",
-    city: "Pointe-Noire",
-    tel: "05 562 56 65 / 06 662 56 65"
-  },
-  {
-    name: "BEMBELLY Roland",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Avocats",
-    city: "Pointe-Noire",
-    tel: "06 688 62 79 / 05 749 15 17"
-  },
-  {
-    name: "BESSOVI Florence",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Notaires",
-    city: "Pointe-Noire",
-    tel: "05 555 64 54 / 06 628 89 75"
-  },
-  {
-    name: "BIGEMI Reine Angèle Patricia",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Avocats",
-    city: "Pointe-Noire",
-    tel: "05 530 25 24 / 06 638 45 31"
-  },
-  {
-    name: "BOMBA MATONGO Aimé",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Avocats",
-    city: "Pointe-Noire",
-    tel: "06 603 15 17 / 05 603 15 17"
-  },
-  {
-    name: "BOUANGA GNIANGAISE Christelle Eliane",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Notaires",
-    city: "Pointe-Noire",
-    tel: "05 539 37 46 / 06 672 48 78"
-  },
-  {
-    name: "BOUYOU Patrick",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Huissiers",
-    city: "Pointe-Noire",
-    tel: "05 553 57 98"
-  },
-  {
-    name: "CABINET COMPTABLE BEMCGQPS",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Audit et expertise comptable",
-    city: "Pointe-Noire",
-    tel: "06 671 28 92"
-  },
-  {
-    name: "CABINET CONSEIL MPK",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Audit et expertise comptable",
-    city: "Pointe-Noire",
-    tel: "06 663 56 34"
-  },
-  {
-    name: "CABINET KOUZOLO",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Audit et expertise comptable",
-    city: "Pointe-Noire",
-    tel: "22 294 19 60"
-  },
-  {
-    name: "CALLIOPA AFRIQUE",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Conseil en management",
-    city: "Pointe-Noire",
-    tel: "05 559 39 81"
-  },
-  {
-    name: "CARLE Fernand",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Avocats",
-    city: "Pointe-Noire",
-    tel: "05 557 68 98"
-  },
-  {
-    name: "DELOITTE TOUCHE TOHMATSU",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Audit et expertise comptable",
-    city: "Pointe-Noire",
-    tel: "05 714 33 67"
-  },
-  {
-    name: "DEQUET BOLLO Serge",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Huissiers",
-    city: "Pointe-Noire",
-    tel: "06 674 27 72 / 05 529 88 83"
-  },
-  {
-    name: "DIMENA Félix",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Huissiers",
-    city: "Pointe-Noire",
-    tel: "06 664 55 96"
-  },
-  {
-    name: "DINAMONA KIDILOU Angélique",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Notaires",
-    city: "Pointe-Noire",
-    tel: "05 563 72 06 / 06 672 54 17"
-  },
-  {
-    name: "DZONDAULT Raymond Joseph",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Avocats",
-    city: "Pointe-Noire",
-    tel: "06 664 18 97"
-  },
-  {
-    name: "ELENGA Anatole",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Avocats",
-    city: "Pointe-Noire",
-    tel: "01 980 44 44 / 06 660 78 78"
-  },
-  {
-    name: "ELOHI CONGO",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Audit et expertise comptable",
-    city: "Pointe-Noire",
-    tel: "05 551 20 66"
-  },
-  {
-    name: "ERNST & YOUNG",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Conseil juridique et fiscal",
-    city: "Pointe-Noire",
-    tel: "05 530 16 22"
-  },
-  {
-    name: "EY/FFA CONGO",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Conseil juridique et fiscal",
-    city: "Pointe-Noire",
-    tel: "05 530 16 22"
-  },
-  {
-    name: "FIDINTER",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Audit et expertise comptable",
-    city: "Pointe-Noire",
-    tel: "22 294 22 71"
-  },
-  {
-    name: "FISCONGO",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Conseil en management",
-    city: "Pointe-Noire",
-    tel: "06 862 66 63"
-  },
-  {
-    name: "FOUTOU DIETRICH Norbert",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Notaires",
-    city: "Pointe-Noire",
-    tel: "05 559 13 59 / 06 952 51 44"
-  },
-  {
-    name: "GNALI GOMES Yvon François Dominique",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Notaires",
-    city: "Pointe-Noire",
-    tel: "05 559 72 72 / 06 659 72 72"
-  },
-  {
-    name: "GNITOU Benjamin",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Huissiers",
-    city: "Pointe-Noire",
-    tel: "06 666 74 15"
-  },
-  {
-    name: "GOMA Marcel",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Avocats",
-    city: "Pointe-Noire",
-    tel: "05 553 01 09"
-  },
-  {
-    name: "GOMA TCHIBINDA Romuald",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Huissiers",
-    city: "Pointe-Noire",
-    tel: "06 663 41 75 / 05 593 21 02"
-  },
-  {
-    name: "GOMES Alexis Vincent",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Avocats",
-    city: "Pointe-Noire",
-    tel: "05 550 86 95"
-  },
-  {
-    name: "GOUEMBE OKEMBA Lin Brice",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Avocats",
-    city: "Pointe-Noire",
-    tel: "06 670 31 19"
-  },
-  {
-    name: "IBOUANGA Jean Luc",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Avocats",
-    city: "Pointe-Noire",
-    tel: "05 523 69 49"
-  },
-  {
-    name: "IDO POATY Hugues",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Notaires",
-    city: "Pointe-Noire",
-    tel: "05 534 11 92 / 06 631 14 17"
-  },
-  {
-    name: "KADINA Jean Pétril",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Huissiers",
-    city: "Pointe-Noire",
-    tel: "06 674 27 72"
-  },
-  {
-    name: "KALINA MENGA Lionel",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Avocats",
-    city: "Pointe-Noire",
-    tel: "05 543 72 94 / 06 857 74 74"
-  },
-  {
-    name: "KEYA NSANGA Emile",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Huissiers",
-    city: "Pointe-Noire",
-    tel: "05 522 06 69"
-  },
-  {
-    name: "KIBAKANA Alphonse",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Huissiers",
-    city: "Pointe-Noire",
-    tel: "06 666 74 62"
-  },
-  {
-    name: "KIDZE Simone",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Huissiers",
-    city: "Pointe-Noire",
-    tel: "05 553 08 34"
-  },
-  {
-    name: "KIMBI Pierre",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Huissiers",
-    city: "Pointe-Noire",
-    tel: "06 663 60 44 / 05 551 96 44"
-  },
-  {
-    name: "KOUBAKA Audy",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Huissiers",
-    city: "Pointe-Noire",
-    tel: "05 570 17 10"
-  },
-  {
-    name: "KOUTOU Brislaine",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Notaires",
-    city: "Pointe-Noire",
-    tel: "06 657 45 55"
-  },
-  {
-    name: "LABARRE Jean Louis",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Avocats",
-    city: "Pointe-Noire",
-    tel: "06 989 77 33 / 05 553 55 60"
-  },
-  {
-    name: "LANDZE MBERE Rock Dieudonné",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Huissiers",
-    city: "Pointe-Noire",
-    tel: "06 662 89 55 / 05 540 55 66"
-  },
-  {
-    name: "LAVIE MIENANDY Aimé Joseph",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Avocats",
-    city: "Pointe-Noire",
-    tel: "06 664 24 78 / 05 761 27 97"
-  },
-  {
-    name: "LIKIBI Jean",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Avocats",
-    city: "Pointe-Noire",
-    tel: "05 553 13 39 / 06 940 20 09"
-  },
-  {
-    name: "LINVANI Parfait Euloge",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Avocats",
-    city: "Pointe-Noire",
-    tel: "05 549 24 07"
-  },
-  {
-    name: "LOEMBA Chantal Paule",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Avocats",
-    city: "Pointe-Noire",
-    tel: "06 667 07 96 / 05 748 99 62"
-  },
-  {
-    name: "LOEMBET SAMBOU Berthe Candelle",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Notaires",
-    city: "Pointe-Noire",
-    tel: "06 674 88 00"
-  },
-  {
-    name: "LOUBOTA François",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Notaires",
-    city: "Pointe-Noire",
-    tel: "05 553 12 95 / 06 653 12 95"
-  },
-  {
-    name: "LOUZINGOU BAVOURINSI Saint Auttrey",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Huissiers",
-    city: "Pointe-Noire",
-    tel: "06 672 32 72 / 05 553 00 90"
-  },
-  {
-    name: "M3B AUDIT & CONSEIL",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Audit et expertise comptable",
-    city: "Pointe-Noire",
-    tel: "06 679 91 53"
-  },
-  {
-    name: "MABIALA Pierre",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Avocats",
-    city: "Pointe-Noire",
-    tel: "05 553 11 26"
-  },
-  {
-    name: "MADASSOU Brtrand Rodolphe",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Huissiers",
-    city: "Pointe-Noire",
-    tel: "05 553 67 87 / 06 652 61 57"
-  },
-  {
-    name: "MAKANDA Patrick",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Huissiers",
-    city: "Pointe-Noire",
-    tel: "06 674 68 14"
-  },
-  {
-    name: "MAKAYA BALHOU Hugues Anicet",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Notaires",
-    city: "Pointe-Noire",
-    tel: "05 557 44 10 / 06 653 40 35"
-  },
-  {
-    name: "MAKELA Claude Bernard",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Huissiers",
-    city: "Pointe-Noire",
-    tel: "06 661 77 23 / 05 584 63 22"
-  },
-  {
-    name: "MAKOSSO Fernand",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Huissiers",
-    city: "Pointe-Noire",
-    tel: "05 553 10 25"
-  },
-  {
-    name: "MASSELO Maurice",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Notaires",
-    city: "Pointe-Noire",
-    tel: "06 667 00 66 / 06 672 69 72"
-  },
-  {
-    name: "MAYENGUE Thomas Fortuné",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Huissiers",
-    city: "Pointe-Noire",
-    tel: "05 553 05 99 / 06 669 57 24"
-  },
-  {
-    name: "MBEMBA Christel",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Huissiers",
-    city: "Pointe-Noire",
-    tel: "06 671 99 81 / 05 590 24 58"
-  },
-  {
-    name: "MBEMBA LOZY Marie Paule",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Avocats",
-    city: "Pointe-Noire",
-    tel: "06 664 21 87 / 04 432 09 05"
-  },
-  {
-    name: "MBOUNGOU Servais Patrick",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Huissiers",
-    city: "Pointe-Noire",
-    tel: "06 666 66 83 / 05 587 03 14"
-  },
-  {
-    name: "MENDES-TCHIBA José",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Avocats",
-    city: "Pointe-Noire",
-    tel: "06 653 82 08"
-  },
-  {
-    name: "MFOUMBI Hervé Blanchard",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Huissiers",
-    city: "Pointe-Noire",
-    tel: "05 551 96 44 / 06 663 60 44"
-  },
-  {
-    name: "MIKOUNNGUILT Eugénie",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Huissiers",
-    city: "Pointe-Noire",
-    tel: "05 557 08 59"
-  },
-  {
-    name: "MISSAMOU Guy Maixent",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Avocats",
-    city: "Pointe-Noire",
-    tel: "05 534 69 55"
-  },
-  {
-    name: "MITOLO Joachim",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Huissiers",
-    city: "Pointe-Noire",
-    tel: "05 557 45 12"
-  },
-  {
-    name: "MLOR GROUPE",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Audit et expertise comptable",
-    city: "Pointe-Noire",
-    tel: "05 714 31 74"
-  },
-  {
-    name: "MOSSA Gaston",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Avocats",
-    city: "Pointe-Noire",
-    tel: "06 664 23 53"
-  },
-  {
-    name: "MOUBEMBE Justin Joseph",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Avocats",
-    city: "Pointe-Noire",
-    tel: "06 664 84 37"
-  },
-  {
-    name: "MOUDILA Hermine Carole",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Huissiers",
-    city: "Pointe-Noire",
-    tel: "05 557 32 63"
-  },
-  {
-    name: "MOUKALA PEPE Jacques",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Huissiers",
-    city: "Pointe-Noire",
-    tel: "05 559 98 49"
-  },
-  {
-    name: "MOUNTOU Noël",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Notaires",
-    city: "Pointe-Noire",
-    tel: "06 660 81 10"
-  },
-  {
-    name: "MOUSSASSI KOUMBA Favien",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Huissiers",
-    city: "Pointe-Noire",
-    tel: "05 557 09 71"
-  },
-  {
-    name: "MOUWENGUET Gilbert",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Huissiers",
-    city: "Pointe-Noire",
-    tel: "05 553 03 74"
-  },
-  {
-    name: "MOUYECKET NGANA Sylvie Nicole",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Avocats",
-    city: "Pointe-Noire",
-    tel: "05 553 47 47 / 06 664 34 06"
-  },
-  {
-    name: "MPENA Guy",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Huissiers",
-    city: "Pointe-Noire",
-    tel: "06 664 49 55 / 05 575 16 63"
-  },
-  {
-    name: "MPOUKOU Jean Bruno",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Huissiers",
-    city: "Pointe-Noire",
-    tel: "05 557 13 50"
-  },
-  {
-    name: "MVOUAMA KIYINDOU Blandine",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Huissiers",
-    city: "Pointe-Noire",
-    tel: "06 643 15 72"
-  },
-  {
-    name: "MVOUMBI Didier Christophe",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Avocats",
-    city: "Pointe-Noire",
-    tel: "05 533 38 68"
-  },
-  {
-    name: "M’FOUTOU Célestin",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Avocats",
-    city: "Pointe-Noire",
-    tel: "05 521 46 03 / 06 621 46 03"
-  },
-  {
-    name: "NGANGA KOLYARDO Eulalie",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Avocats",
-    city: "Pointe-Noire",
-    tel: "05 553 39 51 / 06 679 23 17"
-  },
-  {
-    name: "NGAVOUKA Marcel",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Notaires",
-    city: "Pointe-Noire",
-    tel: "06 664 12 94 / 04 440 22 84"
-  },
-  {
-    name: "NGOMBI Laurent",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Avocats",
-    city: "Pointe-Noire",
-    tel: "06 667 98 19 / 05 520 17 81"
-  },
-  {
-    name: "NGOUALA Jean Serge",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Avocats",
-    city: "Pointe-Noire",
-    tel: "06 661 89 93"
-  },
-  {
-    name: "NGOUNDA Augustin",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Avocats",
-    city: "Pointe-Noire",
-    tel: "05 553 55 87 / 06 827 12 40"
-  },
-  {
-    name: "NIATI TSATY Serge",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Notaires",
-    city: "Pointe-Noire",
-    tel: "05 553 79 24"
-  },
-  {
-    name: "NIMI Jean",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Huissiers",
-    city: "Pointe-Noire",
-    tel: "05 514 90 60"
-  },
-  {
-    name: "NIOUTOU Nicolas",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Avocats",
-    city: "Pointe-Noire",
-    tel: "05 553 68 12"
-  },
-  {
-    name: "NZALAKANDA Fulbert",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Avocats",
-    city: "Pointe-Noire",
-    tel: "05 553 92 11"
-  },
-  {
-    name: "NZAOU Didier Crescent",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Avocats",
-    city: "Pointe-Noire",
-    tel: "05 529 17 97 / 06 678 37 43"
-  },
-  {
-    name: "OKO Roger",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Avocats",
-    city: "Pointe-Noire",
-    tel: "05 521 52 56"
-  },
-  {
-    name: "ONGOUNDOU Armand",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Avocats",
-    city: "Pointe-Noire",
-    tel: "05 553 30 75 / 06 971 00 81"
-  },
-  {
-    name: "OTIELI EUSTACHE Marius Iliche",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Huissiers",
-    city: "Pointe-Noire",
-    tel: "05 564 63 09 / 06 650 19 20"
-  },
-  {
-    name: "PAKA Claude Joël",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Avocats",
-    city: "Pointe-Noire",
-    tel: "05 557 71 38 / 06 664 56 46"
-  },
-  {
-    name: "PAMBO Guy Leonard",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Avocats",
-    city: "Pointe-Noire",
-    tel: "05 531 38 81"
-  },
-  {
-    name: "PENA PITRA Gilles",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Avocats",
-    city: "Pointe-Noire",
-    tel: "05 553 19 99"
-  },
-  {
-    name: "POPA OSSEBI",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Huissiers",
-    city: "Pointe-Noire",
-    tel: "06 667 20 16"
-  },
-  {
-    name: "PRICEWATERHOUSECOOPERS (PWC)",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Audit et expertise comptable",
-    city: "Pointe-Noire",
-    tel: "05 534 09 07"
-  },
-  {
-    name: "REFERENCE CONSULTING (RECO)",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Conseil juridique et fiscal",
-    city: "Pointe-Noire",
-    tel: "06 899 82 72"
-  },
-  {
-    name: "SAFOU Bienvenue Jean Rodrigue",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Huissiers",
-    city: "Pointe-Noire",
-    tel: "06 624 18 98 / 05 553 01 20"
-  },
-  {
-    name: "SATH COMPACT Judicaël",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Huissiers",
-    city: "Pointe-Noire",
-    tel: "05 569 43 77"
-  },
-  {
-    name: "SENGA Magloire",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Avocats",
-    city: "Pointe-Noire",
-    tel: "06 974 58 81 / 05 559 74 62"
-  },
-  {
-    name: "SUTTER & PEARCE",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Conseil juridique et fiscal",
-    city: "Pointe-Noire",
-    tel: "06 655 43 43"
-  },
-  {
-    name: "TADI Isabelle Honorine",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Huissiers",
-    city: "Pointe-Noire",
-    tel: "05 557 75 76"
-  },
-  {
-    name: "TCHCAMBOUD Simon-Yves",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Avocats",
-    city: "Pointe-Noire",
-    tel: "05 557 26 42"
-  },
-  {
-    name: "TCHICAYA Anicet Placide",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Huissiers",
-    city: "Pointe-Noire",
-    tel: "05 506 75 06 / 06 674 70 91"
-  },
-  {
-    name: "TCHICAYA NOMBO Rock",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Huissiers",
-    city: "Pointe-Noire",
-    tel: "06 631 68 24"
-  },
-  {
-    name: "TCHISSAMBOU Jean Serge",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Avocats",
-    city: "Pointe-Noire",
-    tel: "06 666 66 52"
-  },
-  {
-    name: "TSALA Michel",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Avocats",
-    city: "Pointe-Noire",
-    tel: "06 659 18 15 / 05 557 90 17"
-  },
-  {
-    name: "TSAMBA Alain Ludovic",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Avocats",
-    city: "Pointe-Noire",
-    tel: "05 521 37 12 / 06 669 86 70"
-  },
-  {
-    name: "TSATY BOUNGOU Destin Arsène",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Avocats",
-    city: "Pointe-Noire",
-    tel: "05 528 13 16 / 05 563 82 75"
-  },
-  {
-    name: "WALEMBO Magloire Hervé",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Huissiers",
-    city: "Pointe-Noire",
-    tel: "06 666 76 40 / 05 517 59 25"
-  },
-  {
-    name: "ZOLA MABONZO André Placide",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Avocats",
-    city: "Pointe-Noire",
-    tel: "05 553 32 84"
-  },
-  {
-    name: "NGOMA Hilaire",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Avocats",
-    city: "Nkayi",
-    tel: "05 539 97 05"
-  },
-  {
-    name: "NZOULOU Germain",
-    type: "ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE",
-    sub_type: "Avocats",
-    city: "Dolisie",
-    tel: "06 947 85 32"
-  }
+      {
+            name: "BABEDISSA Victorien",
+            sub_type: "Huissiers",
+            address: "196, Av. de L'Indépendance - Mahouata",
+            city: "POINTE-NOIRE",
+            bp: "1617",
+            tel: "06 658 28 04",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "BAKOUETE Guillaume",
+            sub_type: "Avocats",
+            address: "32, Av. Emmanuel Dadet",
+            city: "POINTE-NOIRE",
+            bp: "",
+            tel: "05 533 38 68 / 06 661 73 27",
+            fax: "",
+            mail: "cabgb2007@yahoo.fr",
+            web: ""
+      },
+      {
+            name: "BASSAKININA Jean Aimé Boniface",
+            sub_type: "Avocats",
+            address: "7, Av. Jean Félix Tchicaya - près du Lycée Victor Augagneur",
+            city: "POINTE-NOIRE",
+            bp: "",
+            tel: "06 681 36 28 / 05 770 83 19",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "BATCHI André",
+            sub_type: "Avocats",
+            address: "112, Av. Germain Bicoumat - Imm. Consulat du Bénin",
+            city: "POINTE-NOIRE",
+            bp: "1277",
+            tel: "05 553 88 81 / 04 483 35 75",
+            fax: "",
+            mail: "cabinet_batchi@yahoo.fr",
+            web: ""
+      },
+      {
+            name: "BATIA Paul Bertrand",
+            sub_type: "Notaires",
+            address: "Bd du Général Charles de Gaulle - Tour Mayombe",
+            city: "POINTE-NOIRE",
+            bp: "",
+            tel: "05 534 46 83 / 06 656 55 49",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "BAYANGAMA Roland Serge",
+            sub_type: "Avocats",
+            address: "1, Av. Raymond Poincaré",
+            city: "POINTE-NOIRE",
+            bp: "",
+            tel: "05 523 69 04 / 06 974 59 31",
+            fax: "",
+            mail: "rbayangama@yahoo.com",
+            web: ""
+      },
+      {
+            name: "BAYONNE Jean Frédéric",
+            sub_type: "Huissiers",
+            address: "Av. Linguissi tchikaya - Gendarmerie",
+            city: "POINTE-NOIRE",
+            bp: "247",
+            tel: "05 562 56 65 / 06 662 56 65",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "BEMBELLY Roland",
+            sub_type: "Avocats",
+            address: "23, Av. Dr Denis Loemba - Imm. les Manguiers",
+            city: "POINTE-NOIRE",
+            bp: "208",
+            tel: "06 688 62 79 / 05 749 15 17",
+            fax: "",
+            mail: "rolandbembelly@yahoo.fr",
+            web: ""
+      },
+      {
+            name: "BESSOVI Florence",
+            sub_type: "Notaires",
+            address: "60, Av. Kouanga Makosso",
+            city: "POINTE-NOIRE",
+            bp: "",
+            tel: "05 555 64 54 / 06 628 89 75",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "BIGEMI Reine Angèle Patricia",
+            sub_type: "Avocats",
+            address: "30, rue Gré Zinga",
+            city: "POINTE-NOIRE",
+            bp: "",
+            tel: "05 530 25 24 / 06 638 45 31",
+            fax: "",
+            mail: "patriciabigemi@yahoo.fr",
+            web: ""
+      },
+      {
+            name: "BOMBA MATONGO Aimé",
+            sub_type: "Avocats",
+            address: "3, rue de Moudzombo - derrière la Grande Poste",
+            city: "POINTE-NOIRE",
+            bp: "614",
+            tel: "06 603 15 17 / 05 603 15 17",
+            fax: "",
+            mail: "bombamatongo.avocat@yahoo.fr",
+            web: ""
+      },
+      {
+            name: "BOUANGA GNIANGAISE Christelle Eliane",
+            sub_type: "Notaires",
+            address: "368, Bd du Général Charles de Gaulle - Imm. Eric Pressing",
+            city: "POINTE-NOIRE",
+            bp: "",
+            tel: "05 539 37 46 / 06 672 48 78",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "BOUYOU Patrick",
+            sub_type: "Huissiers",
+            address: "98, Av. Schoelcher - Rond Point Gorille",
+            city: "POINTE-NOIRE",
+            bp: "2297",
+            tel: "05 553 57 98",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "CABINET COMPTABLE BEMCGQPS",
+            sub_type: "Audit et expertise comptable",
+            address: "9, rue Tamba - Base Industrielle",
+            city: "POINTE-NOIRE",
+            bp: "1710",
+            tel: "06 671 28 92",
+            fax: "",
+            mail: "mahoungou4gatien@yahoo.fr",
+            web: ""
+      },
+      {
+            name: "CABINET CONSEIL MPK",
+            sub_type: "Audit et expertise comptable",
+            address: "Av. Emmanuel Dadet",
+            city: "POINTE-NOIRE",
+            bp: "915",
+            tel: "06 663 56 34",
+            fax: "",
+            mail: "mpiakmahoma@yahoo.fr",
+            web: ""
+      },
+      {
+            name: "CABINET KOUZOLO",
+            sub_type: "Audit et expertise comptable",
+            address: "Av. Marien Ngouabi - Z.I. Km 4",
+            city: "POINTE-NOIRE",
+            bp: "477",
+            tel: "22 294 19 60",
+            fax: "22 294 19 61",
+            mail: "cabinetkouzolo@yahoo.fr",
+            web: ""
+      },
+      {
+            name: "CALLIOPA AFRIQUE",
+            sub_type: "Conseil en management",
+            address: "Z.I. de la Foire",
+            city: "POINTE-NOIRE",
+            bp: "5343",
+            tel: "05 559 39 81",
+            fax: "",
+            mail: "",
+            web: "www.calliopa.com"
+      },
+      {
+            name: "CARLE Fernand",
+            sub_type: "Avocats",
+            address: "12-14, Av. Fayette TCHITEMBO",
+            city: "POINTE-NOIRE",
+            bp: "607",
+            tel: "05 557 68 98",
+            fax: "",
+            mail: "contact@avocats-carle.com",
+            web: ""
+      },
+      {
+            name: "DELOITTE TOUCHE TOHMATSU",
+            sub_type: "Audit et expertise comptable",
+            address: "Bd du Général Charles de Gaulle",
+            city: "POINTE-NOIRE",
+            bp: "5871",
+            tel: "05 714 33 67",
+            fax: "",
+            mail: "",
+            web: "www.deloitte.com"
+      },
+      {
+            name: "DEQUET BOLLO Serge",
+            sub_type: "Huissiers",
+            address: "9, Av. Agostino Néto",
+            city: "POINTE-NOIRE",
+            bp: "493",
+            tel: "06 674 27 72 / 05 529 88 83",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "DIMENA Félix",
+            sub_type: "Huissiers",
+            address: "79, Av. de la Révolution - REX",
+            city: "POINTE-NOIRE",
+            bp: "5167",
+            tel: "06 664 55 96",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "DINAMONA KIDILOU Angélique",
+            sub_type: "Notaires",
+            address: "Bd du Général Charles de Gaulle",
+            city: "POINTE-NOIRE",
+            bp: "",
+            tel: "05 563 72 06 / 06 672 54 17",
+            fax: "",
+            mail: "etude.me.dinamona@gmail.com",
+            web: ""
+      },
+      {
+            name: "DZONDAULT Raymond Joseph",
+            sub_type: "Avocats",
+            address: "29, Av. Sergent Malamine - enceinte Alfred Hôtel",
+            city: "POINTE-NOIRE",
+            bp: "",
+            tel: "06 664 18 97",
+            fax: "",
+            mail: "dzondaultr@yahoo.com",
+            web: ""
+      },
+      {
+            name: "ELENGA Anatole",
+            sub_type: "Avocats",
+            address: "245, Bd du Général Charles de Gaulle - Tour Mayombe - entrée B - 4ème étage",
+            city: "POINTE-NOIRE",
+            bp: "552",
+            tel: "01 980 44 44 / 06 660 78 78",
+            fax: "",
+            mail: "cabinetaelenga@yahoo.fr",
+            web: ""
+      },
+      {
+            name: "ELOHI CONGO",
+            sub_type: "Audit et expertise comptable",
+            address: "Av. de Djéno - Route de la frontière",
+            city: "POINTE-NOIRE",
+            bp: "119",
+            tel: "05 551 20 66",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "ERNST & YOUNG",
+            sub_type: "Conseil juridique et fiscal",
+            address: "Av. Moé Kaat Matou - Rond-point Kassaï - Tout Miroir, entrée B - 3 ème étage",
+            city: "POINTE-NOIRE",
+            bp: "5974",
+            tel: "05 530 16 22",
+            fax: "",
+            mail: "ey.pointenoire@cg.ei.com",
+            web: ""
+      },
+      {
+            name: "EY/FFA CONGO",
+            sub_type: "Conseil juridique et fiscal",
+            address: "Av. Moé Kaat Matou - Rond-point Kassaï - Tour Miroir, entrée B - 3 ème étage",
+            city: "POINTE-NOIRE",
+            bp: "5974",
+            tel: "05 530 16 22",
+            fax: "",
+            mail: "ey.pointenoire@cg.ei.com",
+            web: ""
+      },
+      {
+            name: "FIDINTER",
+            sub_type: "Audit et expertise comptable",
+            address: "Av. de Nguedi",
+            city: "POINTE-NOIRE",
+            bp: "766",
+            tel: "22 294 22 71",
+            fax: "22 294 47 26",
+            mail: "fid_inter@yahoo.fr",
+            web: ""
+      },
+      {
+            name: "FISCONGO",
+            sub_type: "Conseil en management",
+            address: "Av. Ntandou Youmbi - Imm. PBG",
+            city: "POINTE-NOIRE",
+            bp: "4349",
+            tel: "06 862 66 63",
+            fax: "",
+            mail: "contact@fiscongo.org",
+            web: ""
+      },
+      {
+            name: "FOUTOU DIETRICH Norbert",
+            sub_type: "Notaires",
+            address: "87, Bd du Général Charles de Gaulle - Imm. Ex Matin",
+            city: "POINTE-NOIRE",
+            bp: "",
+            tel: "05 559 13 59 / 06 952 51 44",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "GNALI GOMES Yvon François Dominique",
+            sub_type: "Notaires",
+            address: "Bd du Général Charles de Gaulle -Tour Mayombe",
+            city: "POINTE-NOIRE",
+            bp: "",
+            tel: "05 559 72 72 / 06 659 72 72",
+            fax: "",
+            mail: "etudegnali_gomes@yahoo.fr",
+            web: ""
+      },
+      {
+            name: "GNITOU Benjamin",
+            sub_type: "Huissiers",
+            address: "8, rue Tibassa",
+            city: "POINTE-NOIRE",
+            bp: "4351",
+            tel: "06 666 74 15",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "GOMA Marcel",
+            sub_type: "Avocats",
+            address: "122, Av. Moé Kaat Matou - Imm. NAF NAF",
+            city: "POINTE-NOIRE",
+            bp: "8119",
+            tel: "05 553 01 09",
+            fax: "",
+            mail: "gomamarcel@yahoo.fr",
+            web: ""
+      },
+      {
+            name: "GOMA TCHIBINDA Romuald",
+            sub_type: "Huissiers",
+            address: "87, Bd du Général Charles de Gaulle",
+            city: "POINTE-NOIRE",
+            bp: "",
+            tel: "06 663 41 75 / 05 593 21 02",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "GOMES Alexis Vincent",
+            sub_type: "Avocats",
+            address: "23, Av. Dr Denis LOEMBA - Imm. les Manguiers",
+            city: "POINTE-NOIRE",
+            bp: "542",
+            tel: "05 550 86 95",
+            fax: "",
+            mail: "agomes7372@aol.com",
+            web: ""
+      },
+      {
+            name: "GOUEMBE OKEMBA Lin Brice",
+            sub_type: "Avocats",
+            address: "Rue de Pili-Kondi - Route de la Radio - Imm. Les Palmiers - App. Bananes",
+            city: "POINTE-NOIRE",
+            bp: "",
+            tel: "06 670 31 19",
+            fax: "",
+            mail: "okemba-lbo@yahoo.fr",
+            web: ""
+      },
+      {
+            name: "IBOUANGA Jean Luc",
+            sub_type: "Avocats",
+            address: "12-14, Av. Fayette Tchitembo",
+            city: "POINTE-NOIRE",
+            bp: "607",
+            tel: "05 523 69 49",
+            fax: "",
+            mail: "jli437@yahoo.fr",
+            web: ""
+      },
+      {
+            name: "IDO POATY Hugues",
+            sub_type: "Notaires",
+            address: "Bd Moé Kaat Matou - Lumumba",
+            city: "POINTE-NOIRE",
+            bp: "",
+            tel: "05 534 11 92 / 06 631 14 17",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "KADINA Jean Pétril",
+            sub_type: "Huissiers",
+            address: "9, Av. Agostino Néto",
+            city: "POINTE-NOIRE",
+            bp: "",
+            tel: "06 674 27 72",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "KALINA MENGA Lionel",
+            sub_type: "Avocats",
+            address: "245, Bd du Général Charles de Gaulle - Tour Mayombe - entrée B - 9ème étage",
+            city: "POINTE-NOIRE",
+            bp: "4261",
+            tel: "05 543 72 94 / 06 857 74 74",
+            fax: "",
+            mail: "lionelkalina76@gmail.com",
+            web: ""
+      },
+      {
+            name: "KEYA NSANGA Emile",
+            sub_type: "Huissiers",
+            address: "30, Av. Moe Kaat Matou - Lumumba",
+            city: "POINTE-NOIRE",
+            bp: "",
+            tel: "05 522 06 69",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "KIBAKANA Alphonse",
+            sub_type: "Huissiers",
+            address: "Rond Point Kassaï",
+            city: "POINTE-NOIRE",
+            bp: "1450",
+            tel: "06 666 74 62",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "KIDZE Simone",
+            sub_type: "Huissiers",
+            address: "Av. Marien Ngouabi",
+            city: "POINTE-NOIRE",
+            bp: "1042",
+            tel: "05 553 08 34",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "KIMBI Pierre",
+            sub_type: "Huissiers",
+            address: "Rue de Dzoumouta",
+            city: "POINTE-NOIRE",
+            bp: "",
+            tel: "06 663 60 44 / 05 551 96 44",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "KOUBAKA Audy",
+            sub_type: "Huissiers",
+            address: "93, Bd du Général Charles de Gaulle",
+            city: "POINTE-NOIRE",
+            bp: "4224",
+            tel: "05 570 17 10",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "KOUTOU Brislaine",
+            sub_type: "Notaires",
+            address: "93, Bd Moé Kaat Matou - Lumumba",
+            city: "POINTE-NOIRE",
+            bp: "",
+            tel: "06 657 45 55",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "LABARRE Jean Louis",
+            sub_type: "Avocats",
+            address: "Rue Mboubissi",
+            city: "POINTE-NOIRE",
+            bp: "",
+            tel: "06 989 77 33 / 05 553 55 60",
+            fax: "",
+            mail: "labarrejl@yahoo.fr",
+            web: ""
+      },
+      {
+            name: "LANDZE MBERE Rock Dieudonné",
+            sub_type: "Huissiers",
+            address: "63, Av. Félix Tchicaya - Grand Marché",
+            city: "POINTE-NOIRE",
+            bp: "",
+            tel: "06 662 89 55 / 05 540 55 66",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "LAVIE MIENANDY Aimé Joseph",
+            sub_type: "Avocats",
+            address: "171, Av. Fayette Tchitembo - Imm. Eglise Evangélique - 1er étage",
+            city: "POINTE-NOIRE",
+            bp: "",
+            tel: "06 664 24 78 / 05 761 27 97",
+            fax: "",
+            mail: "laviemienandy@yahoo.fr",
+            web: ""
+      },
+      {
+            name: "LIKIBI Jean",
+            sub_type: "Avocats",
+            address: "102, Av. Felix Tchicaya",
+            city: "POINTE-NOIRE",
+            bp: "5214",
+            tel: "05 553 13 39 / 06 940 20 09",
+            fax: "",
+            mail: "jean.likibi@yahoo.fr",
+            web: ""
+      },
+      {
+            name: "LINVANI Parfait Euloge",
+            sub_type: "Avocats",
+            address: "21, Av. Dr Denis Loemba - Imm. les Manguiers",
+            city: "POINTE-NOIRE",
+            bp: "",
+            tel: "05 549 24 07",
+            fax: "",
+            mail: "parfaitlinvani@hotmail.com",
+            web: ""
+      },
+      {
+            name: "LOEMBA Chantal Paule",
+            sub_type: "Avocats",
+            address: "133, Av. du 13 août - Imm. Presbytère Saint-Pierre",
+            city: "POINTE-NOIRE",
+            bp: "4610",
+            tel: "06 667 07 96 / 05 748 99 62",
+            fax: "",
+            mail: "cpauloemba@yahoo.fr",
+            web: ""
+      },
+      {
+            name: "LOEMBET SAMBOU Berthe Candelle",
+            sub_type: "Notaires",
+            address: "Bd du Général Charles de Gaulle",
+            city: "POINTE-NOIRE",
+            bp: "",
+            tel: "06 674 88 00",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "LOUBOTA François",
+            sub_type: "Notaires",
+            address: "Bd du Général Charles de Gaulle - Tour Mayombe",
+            city: "POINTE-NOIRE",
+            bp: "",
+            tel: "05 553 12 95 / 06 653 12 95",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "LOUZINGOU BAVOURINSI Saint Auttrey",
+            sub_type: "Huissiers",
+            address: "23, Av. Moé Kaat Matou",
+            city: "POINTE-NOIRE",
+            bp: "4492",
+            tel: "06 672 32 72 / 05 553 00 90",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "M3B AUDIT & CONSEIL",
+            sub_type: "Audit et expertise comptable",
+            address: "Bd du Général Charles de Gaulle - Tour Mayombe",
+            city: "POINTE-NOIRE",
+            bp: "4854",
+            tel: "06 679 91 53",
+            fax: "",
+            mail: "secretariat@m3b-auditexpertise.com",
+            web: ""
+      },
+      {
+            name: "MABIALA Pierre",
+            sub_type: "Avocats",
+            address: "245, Bd du Général Charles de Gaulle - Tour Mayombe - entrée A - 7ème étage",
+            city: "POINTE-NOIRE",
+            bp: "",
+            tel: "05 553 11 26",
+            fax: "",
+            mail: "pierremabiala@yahoo.fr",
+            web: ""
+      },
+      {
+            name: "MADASSOU Brtrand Rodolphe",
+            sub_type: "Huissiers",
+            address: "55, Av. Louis Portella - ROY",
+            city: "POINTE-NOIRE",
+            bp: "911",
+            tel: "05 553 67 87 / 06 652 61 57",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "MAKANDA Patrick",
+            sub_type: "Huissiers",
+            address: "Av. de la Révolution - REX",
+            city: "POINTE-NOIRE",
+            bp: "",
+            tel: "06 674 68 14",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "MAKAYA BALHOU Hugues Anicet",
+            sub_type: "Notaires",
+            address: "Bd du Général Charles de Gaulle - Imm. CNSS - Porte 303",
+            city: "POINTE-NOIRE",
+            bp: "",
+            tel: "05 557 44 10 / 06 653 40 35",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "MAKELA Claude Bernard",
+            sub_type: "Huissiers",
+            address: "79, Av. de la Révolution - REX",
+            city: "POINTE-NOIRE",
+            bp: "5167",
+            tel: "06 661 77 23 / 05 584 63 22",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "MAKOSSO Fernand",
+            sub_type: "Huissiers",
+            address: "23, Av. Moé Vangoula",
+            city: "POINTE-NOIRE",
+            bp: "4957",
+            tel: "05 553 10 25",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "MASSELO Maurice",
+            sub_type: "Notaires",
+            address: "140, Av. Benoît Loembet - Z.I. KM4",
+            city: "POINTE-NOIRE",
+            bp: "",
+            tel: "06 667 00 66 / 06 672 69 72",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "MAYENGUE Thomas Fortuné",
+            sub_type: "Huissiers",
+            address: "Av. Linguissi Tchicaya",
+            city: "POINTE-NOIRE",
+            bp: "247",
+            tel: "05 553 05 99 / 06 669 57 24",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "MBEMBA Christel",
+            sub_type: "Huissiers",
+            address: "9, Av. Agostino Néto",
+            city: "POINTE-NOIRE",
+            bp: "493",
+            tel: "06 671 99 81 / 05 590 24 58",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "MBEMBA LOZY Marie Paule",
+            sub_type: "Avocats",
+            address: "104, Av. Moé Kaat Matou - Imm. Masseke",
+            city: "POINTE-NOIRE",
+            bp: "5910",
+            tel: "06 664 21 87 / 04 432 09 05",
+            fax: "",
+            mail: "cab-avocatmbembalozy@yahoo.fr",
+            web: ""
+      },
+      {
+            name: "MBOUNGOU Servais Patrick",
+            sub_type: "Huissiers",
+            address: "26, Av. Moé Vangoula",
+            city: "POINTE-NOIRE",
+            bp: "",
+            tel: "06 666 66 83 / 05 587 03 14",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "MENDES-TCHIBA José",
+            sub_type: "Avocats",
+            address: "42, Av. Moé Vangoula - face stade Anselmi - Imm. Ex. OCB",
+            city: "POINTE-NOIRE",
+            bp: "516",
+            tel: "06 653 82 08",
+            fax: "",
+            mail: "cabinetmendes@yahoo.fr",
+            web: ""
+      },
+      {
+            name: "MFOUMBI Hervé Blanchard",
+            sub_type: "Huissiers",
+            address: "Rue de Dzoumouta",
+            city: "POINTE-NOIRE",
+            bp: "",
+            tel: "05 551 96 44 / 06 663 60 44",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "MIKOUNNGUILT Eugénie",
+            sub_type: "Huissiers",
+            address: "Bd du Général Charles de Gaulle",
+            city: "POINTE-NOIRE",
+            bp: "982",
+            tel: "05 557 08 59",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "MISSAMOU Guy Maixent",
+            sub_type: "Avocats",
+            address: "Bd. Marien Ngouabi - à la Pharmacie du Château",
+            city: "POINTE-NOIRE",
+            bp: "2491",
+            tel: "05 534 69 55",
+            fax: "",
+            mail: "mguymaixent1972@yahoo.fr",
+            web: ""
+      },
+      {
+            name: "MITOLO Joachim",
+            sub_type: "Huissiers",
+            address: "63, Av. Félix Tchicaya - Quartier de la Révolution",
+            city: "POINTE-NOIRE",
+            bp: "",
+            tel: "05 557 45 12",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "MLOR GROUPE",
+            sub_type: "Audit et expertise comptable",
+            address: "Av. de l'Aéroport - Face pharmacie Longchamp",
+            city: "POINTE-NOIRE",
+            bp: "1127",
+            tel: "05 714 31 74",
+            fax: "",
+            mail: "groupe-mlor@hotmail.fr",
+            web: ""
+      },
+      {
+            name: "MOSSA Gaston",
+            sub_type: "Avocats",
+            address: "Bd du Général Charles de Gaulle - Imm. CNSS - entrée B - 1er étage",
+            city: "POINTE-NOIRE",
+            bp: "1970",
+            tel: "06 664 23 53",
+            fax: "",
+            mail: "cabinetmossa@yahoo.fr",
+            web: ""
+      },
+      {
+            name: "MOUBEMBE Justin Joseph",
+            sub_type: "Avocats",
+            address: "182, Av. Dr Moe Poaty",
+            city: "POINTE-NOIRE",
+            bp: "",
+            tel: "06 664 84 37",
+            fax: "",
+            mail: "mmoubembe@yahoo.fr",
+            web: ""
+      },
+      {
+            name: "MOUDILA Hermine Carole",
+            sub_type: "Huissiers",
+            address: "196, Av. Marien Ngouabi",
+            city: "POINTE-NOIRE",
+            bp: "1431",
+            tel: "05 557 32 63",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "MOUKALA PEPE Jacques",
+            sub_type: "Huissiers",
+            address: "Av. Jean Félix Tchicaya - Bakadila",
+            city: "POINTE-NOIRE",
+            bp: "",
+            tel: "05 559 98 49",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "MOUNTOU Noël",
+            sub_type: "Notaires",
+            address: "Bd du Général Charles de Gaulle - Imm. CNSS - Porte 303",
+            city: "POINTE-NOIRE",
+            bp: "",
+            tel: "06 660 81 10",
+            fax: "",
+            mail: "noelmountou@yahoo.fr",
+            web: ""
+      },
+      {
+            name: "MOUSSASSI KOUMBA Favien",
+            sub_type: "Huissiers",
+            address: "Imm. Ex Clinique Keur Massa",
+            city: "POINTE-NOIRE",
+            bp: "360",
+            tel: "05 557 09 71",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "MOUWENGUET Gilbert",
+            sub_type: "Huissiers",
+            address: "196, Av. de L'Indépendance - Mahouata",
+            city: "POINTE-NOIRE",
+            bp: "1716",
+            tel: "05 553 03 74",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "MOUYECKET NGANA Sylvie Nicole",
+            sub_type: "Avocats",
+            address: "1, Av. Raymond Poincaré - Rond Point ex Casino - au dessus du Central Bar",
+            city: "POINTE-NOIRE",
+            bp: "5316",
+            tel: "05 553 47 47 / 06 664 34 06",
+            fax: "",
+            mail: "cabmouyecket@yahoo.fr",
+            web: ""
+      },
+      {
+            name: "MPENA Guy",
+            sub_type: "Huissiers",
+            address: "97, Av. Marien Ngouabi - KM 4",
+            city: "POINTE-NOIRE",
+            bp: "2384",
+            tel: "06 664 49 55 / 05 575 16 63",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "MPOUKOU Jean Bruno",
+            sub_type: "Huissiers",
+            address: "37, Av. Raymond Paillet - Quartier Chic",
+            city: "POINTE-NOIRE",
+            bp: "1880",
+            tel: "05 557 13 50",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "MVOUAMA KIYINDOU Blandine",
+            sub_type: "Huissiers",
+            address: "Rue Nkeni - Mahouata",
+            city: "POINTE-NOIRE",
+            bp: "1880",
+            tel: "06 643 15 72",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "MVOUMBI Didier Christophe",
+            sub_type: "Avocats",
+            address: "Rue Bikondolo - vers la Bourse du Travail",
+            city: "POINTE-NOIRE",
+            bp: "1474",
+            tel: "05 533 38 68",
+            fax: "",
+            mail: "mvoumbi_christophe@yahoo.fr",
+            web: ""
+      },
+      {
+            name: "M’FOUTOU Célestin",
+            sub_type: "Avocats",
+            address: "Bd du Général Charles de Gaulle - Imm. CNSS - entrée A - 6ème étage",
+            city: "POINTE-NOIRE",
+            bp: "4287",
+            tel: "05 521 46 03 / 06 621 46 03",
+            fax: "",
+            mail: "mfoutou_celestin@yahoo.fr",
+            web: ""
+      },
+      {
+            name: "NGANGA KOLYARDO Eulalie",
+            sub_type: "Avocats",
+            address: "Av. du 13 Août - Imm. Galerie - 1er étage - Presbytère St Pierre",
+            city: "POINTE-NOIRE",
+            bp: "",
+            tel: "05 553 39 51 / 06 679 23 17",
+            fax: "",
+            mail: "eulaliekolyardo@yahoo.fr",
+            web: ""
+      },
+      {
+            name: "NGAVOUKA Marcel",
+            sub_type: "Notaires",
+            address: "29 bis, rue Dr Moé Poati",
+            city: "POINTE-NOIRE",
+            bp: "",
+            tel: "06 664 12 94 / 04 440 22 84",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "NGOMBI Laurent",
+            sub_type: "Avocats",
+            address: "245, Bd du Général Charles de Gaulle - Tour Mayombe - entrée B - 6ème étage",
+            city: "POINTE-NOIRE",
+            bp: "4296",
+            tel: "06 667 98 19 / 05 520 17 81",
+            fax: "",
+            mail: "cabinet.ngombi@yahoo.fr",
+            web: ""
+      },
+      {
+            name: "NGOUALA Jean Serge",
+            sub_type: "Avocats",
+            address: "101, Av. Marien Ngouabi",
+            city: "POINTE-NOIRE",
+            bp: "5526",
+            tel: "06 661 89 93",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "NGOUNDA Augustin",
+            sub_type: "Avocats",
+            address: "64, Av. Moé Kaat Matou - derrière le Magasin DEVIL",
+            city: "POINTE-NOIRE",
+            bp: "165",
+            tel: "05 553 55 87 / 06 827 12 40",
+            fax: "",
+            mail: "augustinngounda@yahoo.fr",
+            web: ""
+      },
+      {
+            name: "NIATI TSATY Serge",
+            sub_type: "Notaires",
+            address: "Bd de Loango - Zone Portuaire - Imm. Socotra",
+            city: "POINTE-NOIRE",
+            bp: "",
+            tel: "05 553 79 24",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "NIMI Jean",
+            sub_type: "Huissiers",
+            address: "132, Av. Moé Pratt - Mahouata",
+            city: "POINTE-NOIRE",
+            bp: "74792",
+            tel: "05 514 90 60",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "NIOUTOU Nicolas",
+            sub_type: "Avocats",
+            address: "101, Av. Marien Ngouabi",
+            city: "POINTE-NOIRE",
+            bp: "",
+            tel: "05 553 68 12",
+            fax: "",
+            mail: "maitrenicolasnioutou@yahoo.fr",
+            web: ""
+      },
+      {
+            name: "NZALAKANDA Fulbert",
+            sub_type: "Avocats",
+            address: "639, Av. Bitélika Ndombi - Aéroport",
+            city: "POINTE-NOIRE",
+            bp: "5787",
+            tel: "05 553 92 11",
+            fax: "",
+            mail: "cabinet_avocatnzalakanda@yahoo.fr",
+            web: ""
+      },
+      {
+            name: "NZAOU Didier Crescent",
+            sub_type: "Avocats",
+            address: "1, Rue Addis Abéba",
+            city: "POINTE-NOIRE",
+            bp: "",
+            tel: "05 529 17 97 / 06 678 37 43",
+            fax: "",
+            mail: "nzaoudidier@yahoo.fr",
+            web: ""
+      },
+      {
+            name: "OKO Roger",
+            sub_type: "Avocats",
+            address: "25, Av. Barthelemy Boganganda",
+            city: "POINTE-NOIRE",
+            bp: "",
+            tel: "05 521 52 56",
+            fax: "",
+            mail: "cabinetrogeroko@yahoo.fr",
+            web: ""
+      },
+      {
+            name: "ONGOUNDOU Armand",
+            sub_type: "Avocats",
+            address: "Av. de l’indépendance - Rond Point Sympathique - Imm. DEMBO - 1er étage.",
+            city: "POINTE-NOIRE",
+            bp: "",
+            tel: "05 553 30 75 / 06 971 00 81",
+            fax: "",
+            mail: "aongoundou@yahoo.fr",
+            web: ""
+      },
+      {
+            name: "OTIELI EUSTACHE Marius Iliche",
+            sub_type: "Huissiers",
+            address: "92, Bd du Général Charles de Gaulle - Face Evêché",
+            city: "POINTE-NOIRE",
+            bp: "2241",
+            tel: "05 564 63 09 / 06 650 19 20",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "PAKA Claude Joël",
+            sub_type: "Avocats",
+            address: "19, Av. Jacques Opangault",
+            city: "POINTE-NOIRE",
+            bp: "565",
+            tel: "05 557 71 38 / 06 664 56 46",
+            fax: "",
+            mail: "claudelinkat@gmail.com",
+            web: ""
+      },
+      {
+            name: "PAMBO Guy Leonard",
+            sub_type: "Avocats",
+            address: "Rue Bikondolo - vers la Bourse du Travail",
+            city: "POINTE-NOIRE",
+            bp: "",
+            tel: "05 531 38 81",
+            fax: "",
+            mail: "guypambo@yahoo.fr",
+            web: ""
+      },
+      {
+            name: "PENA PITRA Gilles",
+            sub_type: "Avocats",
+            address: "245, Bd du Général Charles de Gaulle - Tour Mayombe - entrée B - 4ème étage",
+            city: "POINTE-NOIRE",
+            bp: "5460",
+            tel: "05 553 19 99",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "POPA OSSEBI",
+            sub_type: "Huissiers",
+            address: "bd du Général Charles de Gaulle - Imm. ex Air Afrique",
+            city: "POINTE-NOIRE",
+            bp: "",
+            tel: "06 667 20 16",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "PRICEWATERHOUSECOOPERS (PWC)",
+            sub_type: "Audit et expertise comptable",
+            address: "88, bd du Général Charles de Gaulle",
+            city: "POINTE-NOIRE",
+            bp: "1306",
+            tel: "05 534 09 07",
+            fax: "22 294 23 24",
+            mail: "pricewaterhousecoopers.congo@cg.pwc.com",
+            web: ""
+      },
+      {
+            name: "REFERENCE CONSULTING (RECO)",
+            sub_type: "Conseil juridique et fiscal",
+            address: "Route de la Frontière - Ngoyo - face Agricongo",
+            city: "POINTE-NOIRE",
+            bp: "929",
+            tel: "06 899 82 72",
+            fax: "",
+            mail: "referenceconsultingsarl@yahoo.fr",
+            web: ""
+      },
+      {
+            name: "SAFOU Bienvenue Jean Rodrigue",
+            sub_type: "Huissiers",
+            address: "11, Av. de L'Indépendance - Sympathique",
+            city: "POINTE-NOIRE",
+            bp: "2680",
+            tel: "06 624 18 98 / 05 553 01 20",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "SATH COMPACT Judicaël",
+            sub_type: "Huissiers",
+            address: "Av. Stéphane Tchitchelle",
+            city: "POINTE-NOIRE",
+            bp: "",
+            tel: "05 569 43 77",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "SENGA Magloire",
+            sub_type: "Avocats",
+            address: "871, Av. Jean Félix Tchicaya - la Base",
+            city: "POINTE-NOIRE",
+            bp: "1336",
+            tel: "06 974 58 81 / 05 559 74 62",
+            fax: "",
+            mail: "sengamag@yahoo.fr",
+            web: ""
+      },
+      {
+            name: "SUTTER & PEARCE",
+            sub_type: "Conseil juridique et fiscal",
+            address: "Bd de Loango - Imm. PBG 2ème étage",
+            city: "POINTE-NOIRE",
+            bp: "",
+            tel: "06 655 43 43",
+            fax: "",
+            mail: "sp-cg@sutter-pearce.com",
+            web: "www.sutter-pearce.com"
+      },
+      {
+            name: "TADI Isabelle Honorine",
+            sub_type: "Huissiers",
+            address: "101, Av. Marien Ngouabi - KM 4",
+            city: "POINTE-NOIRE",
+            bp: "",
+            tel: "05 557 75 76",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "TCHCAMBOUD Simon-Yves",
+            sub_type: "Avocats",
+            address: "23, Av. Dr Denis Loemba - Imm. les Manguiers",
+            city: "POINTE-NOIRE",
+            bp: "542",
+            tel: "05 557 26 42",
+            fax: "",
+            mail: "sytchicson@yahoo.fr",
+            web: ""
+      },
+      {
+            name: "TCHICAYA Anicet Placide",
+            sub_type: "Huissiers",
+            address: "Bd du Général Charles de Gaulle",
+            city: "POINTE-NOIRE",
+            bp: "4957",
+            tel: "05 506 75 06 / 06 674 70 91",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "TCHICAYA NOMBO Rock",
+            sub_type: "Huissiers",
+            address: "92, Bd du Général Charles de Gaulle",
+            city: "POINTE-NOIRE",
+            bp: "2241",
+            tel: "06 631 68 24",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "TCHISSAMBOU Jean Serge",
+            sub_type: "Avocats",
+            address: "Impasse Nganga - Fofolo en face Hôpital des Armées",
+            city: "POINTE-NOIRE",
+            bp: "5454",
+            tel: "06 666 66 52",
+            fax: "",
+            mail: "jstchissambou@yahoo.fr",
+            web: ""
+      },
+      {
+            name: "TSALA Michel",
+            sub_type: "Avocats",
+            address: "9, Av. Dr Denis Loemba - Imm. ARC",
+            city: "POINTE-NOIRE",
+            bp: "5385",
+            tel: "06 659 18 15 / 05 557 90 17",
+            fax: "",
+            mail: "avocat_tsalamichel@yahoo.com",
+            web: ""
+      },
+      {
+            name: "TSAMBA Alain Ludovic",
+            sub_type: "Avocats",
+            address: "245, Bd du Général Charles de Gaulle - Tour Mayombe - entrée A - 7ème étage",
+            city: "POINTE-NOIRE",
+            bp: "244",
+            tel: "05 521 37 12 / 06 669 86 70",
+            fax: "",
+            mail: "tsambalain@yahoo.fr",
+            web: ""
+      },
+      {
+            name: "TSATY BOUNGOU Destin Arsène",
+            sub_type: "Avocats",
+            address: "Bd du Général Charles de Gaulle, Imm. CNSS - entrée A - 3ème étage - Porte 204",
+            city: "POINTE-NOIRE",
+            bp: "5526",
+            tel: "05 528 13 16 / 05 563 82 75",
+            fax: "",
+            mail: "mboutsid@gmail.com",
+            web: ""
+      },
+      {
+            name: "WALEMBO Magloire Hervé",
+            sub_type: "Huissiers",
+            address: "127, Av. de L'Emeraude",
+            city: "POINTE-NOIRE",
+            bp: "",
+            tel: "06 666 76 40 / 05 517 59 25",
+            fax: "",
+            mail: "",
+            web: ""
+      },
+      {
+            name: "ZOLA MABONZO André Placide",
+            sub_type: "Avocats",
+            address: "Bd du Général Charles de Gaulle - Imm. CNSS - entrée A - 6ème étage",
+            city: "POINTE-NOIRE",
+            bp: "5442",
+            tel: "05 553 32 84",
+            fax: "",
+            mail: "zola_mabonzo@yahoo.fr",
+            web: ""
+      },
+      {
+            name: "NGOMA Hilaire",
+            sub_type: "Avocats",
+            address: "3, Av. de la Révolution",
+            city: "NKAYI",
+            bp: "",
+            tel: "05 539 97 05",
+            fax: "",
+            mail: "brevierre@yahoo.fr",
+            web: ""
+      },
+      {
+            name: "NZOULOU Germain",
+            sub_type: "Avocats",
+            address: "Quartier Monfleuri",
+            city: "DOLISIE",
+            bp: "88",
+            tel: "06 947 85 32",
+            fax: "",
+            mail: "germainavocat@yahoo.fr",
+            web: ""
+      }
 ];
 
     const itemsCountResult = await db.query("SELECT COUNT(*) as count FROM portfolio_items WHERE category_id = $1", [catId]);
     const currentCount = parseInt(itemsCountResult.rows[0].count);
 
-    if (currentCount !== items.length) {
+    if (true || currentCount !== items.length) {
       console.log(`Seeding ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE (${items.length} items)...`);
       await db.query("DELETE FROM portfolio_items WHERE category_id = $1", [catId]);
     } else {
@@ -2752,9 +4302,9 @@ async function seedAssistanceJuridiqueItems() {
     for (const item of items) {
       await db.query(
         `INSERT INTO portfolio_items 
-        (category_id, name, sub_type, city, tel) 
-        VALUES ($1, $2, $3, $4, $5)`,
-        [catId, item.name, item.sub_type, item.city, item.tel]
+        (category_id, name, sub_type, address, city, bp, tel, fax, mail, web) 
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [catId, item.name, item.sub_type, (item as any).address || null, (item as any).city || null, (item as any).bp || null, (item as any).tel || null, (item as any).fax || null, (item as any).mail || null, (item as any).web || null]
       );
     }
     console.log(`Seeded ${items.length} portfolio items for ASSISTANCE JURIDIQUE, COMPTABLE ET FISCALE`);
@@ -2770,26 +4320,65 @@ async function seedAssurancesItems() {
     const catId = catResult.rows[0].id;
 
     const itemsCountResult = await db.query("SELECT COUNT(*) as count FROM portfolio_items WHERE category_id = $1", [catId]);
-    if (parseInt(itemsCountResult.rows[0].count) > 0) return;
-
-    console.log("Seeding portfolio items for ASSURANCES...");
+    const currentCount = parseInt(itemsCountResult.rows[0].count);
 
     const items = [
-      { name: "AGC (Assurances Générales du Congo)", sub_type: "Assurances", city: "BRAZZAVILLE", tel: "06 666 00 11" },
-      { name: "ARC (Assurances et Réassurances du Congo)", sub_type: "Assurances", city: "BRAZZAVILLE", tel: "06 666 00 22" },
-      { name: "NSIA ASSURANCES", sub_type: "Assurances", city: "BRAZZAVILLE", tel: "06 666 00 33" },
-      { name: "SAHAM ASSURANCES", sub_type: "Assurances", city: "BRAZZAVILLE", tel: "06 666 00 44" }
+      // Brazzaville
+      { name: "2I (International Insurance)", sub_type: "Courtiers", address: "Av. des Trois Martyrs", city: "BRAZZAVILLE", bp: "2032", tel: "01 027 93 85" },
+      { name: "AGC (Assurance Générale du Congo)", sub_type: "Compagnies d'assurances", address: "Av. Amilcar Cabral", city: "BRAZZAVILLE", bp: "1110", tel: "06 918 93 00", web: "www.agccongo.com" },
+      { name: "ALLIANZ AGENT GÉNÉRAL DIOKSON", sub_type: "Courtiers", address: "1416, av. de Loutassi", city: "BRAZZAVILLE", tel: "06 404 99 30", mail: "allianz.congo@allianz-cg.com", web: "www.allianz-cg.com" },
+      { name: "ARC (Assurance et Réassurance du Congo)", sub_type: "Compagnies d'assurances", address: "Av. du Camp", city: "BRAZZAVILLE", bp: "14524", tel: "22 281 16 90", web: "www.arc-congo.cg" },
+      { name: "ASCOMA", sub_type: "Courtiers", address: "Bd Denis Sassou Nguesso - Imm. Mucodec - 2ème étage", city: "BRAZZAVILLE", tel: "05 530 13 69", mail: "brazzaville@ascoma.com", web: "www.ascoma.com" },
+      { name: "AZIMUT ASSURANCES", sub_type: "Courtiers", address: "129, rue de Reims - Imm. Ebatha - 2ème étage", city: "BRAZZAVILLE", tel: "06 664 87 36 / 05 527 08 98" },
+      { name: "CCDE", sub_type: "Courtiers", address: "Av. Maréchal Foch", city: "BRAZZAVILLE", bp: "13117", tel: "22 281 17 63" },
+      { name: "COLINA CONGO SA", sub_type: "Compagnies d'assurances", address: "5, av. Maréchal Lyautey", city: "BRAZZAVILLE", bp: "79", tel: "22 260 15 15 / 06 510 45 24", mail: "sahamcongo@sahamassurance.com" },
+      { name: "FINASS 2G", sub_type: "Courtiers", address: "101, rue Lamothe", city: "BRAZZAVILLE", bp: "13589", tel: "06 668 10 98", mail: "financieresunies@outlouk.fr" },
+      { name: "GLOBAL CONSEIL & ASSURANCES", sub_type: "Courtiers", address: "72, av. des Trois martyrs", city: "BRAZZAVILLE", bp: "14715", tel: "06 872 17 41 / 05 348 78 66", mail: "a.globalconseil@yahoo.fr" },
+      { name: "GLOBALYS ASSURANCES", sub_type: "Courtiers", address: "Av. de l'OUA", city: "BRAZZAVILLE", bp: "14171", tel: "06 678 18 16 / 05 378 60 00" },
+      { name: "GRAMON ASSURANCES", sub_type: "Courtiers", address: "231, av. du Général de Gaulle", city: "BRAZZAVILLE", tel: "05 577 80 80", mail: "soussap@yahoo.fr" },
+      { name: "GRAS SAVOYE CONGO", sub_type: "Courtiers", address: "Av. William Guynet", city: "BRAZZAVILLE", tel: "05 551 16 24", mail: "secretariat.bzv@cg.grassavoye.com" },
+      { name: "H DE B CONGO", sub_type: "Courtiers", address: "Av. Amilcar Cabral - Imm. City Center", city: "BRAZZAVILLE", bp: "14843", tel: "06 608 98 51" },
+      { name: "LA SPIRALE ASSURANCES", sub_type: "Courtiers", address: "53 bis, rue Makoko - Poto-Poto", city: "BRAZZAVILLE", tel: "06 606 72 72" },
+      { name: "MK ASSURANCES", sub_type: "Courtiers", address: "72, bd Denis Sassou Nguesso", city: "BRAZZAVILLE", tel: "05 551 95 90", mail: "jeanaurelienkoko@yahoo.fr", web: "www.ag-djefson.com" },
+      { name: "NET CONSEILS", sub_type: "Courtiers", address: "1, rue Bouzal - Cité des 17", city: "BRAZZAVILLE", tel: "01 050 10 57 / 06 800 29 74" },
+      { name: "NSIA ASSURANCES", sub_type: "Compagnies d'assurances", address: "1, av. Maréchal Foch", city: "BRAZZAVILLE", bp: "1151", tel: "22 282 24 92", fax: "22 282 24 93", mail: "nsiacongo@groupensia.com", web: "www.groupensia.com" },
+      { name: "ROYAL ASSURANCES", sub_type: "Courtiers", address: "724, av. Matsoua - Bacongo", city: "BRAZZAVILLE", tel: "06 657 62 08 / 05 520 18 14" },
+
+      // Pointe-Noire
+      { name: "2I (International Insurance)", sub_type: "Courtiers", address: "Bd du Général Charles de Gaulle", city: "POINTE-NOIRE", bp: "630", tel: "06 670 91 62" },
+      { name: "ADVENTIS ASSURANCES CONSEILS", sub_type: "Courtiers", address: "73, av. de l'Indépendance", city: "POINTE-NOIRE", tel: "06 664 28 80" },
+      { name: "AFRICO", sub_type: "Courtiers", address: "26, av. Barthélémy Boganga", city: "POINTE-NOIRE", bp: "437", tel: "06 999 18 10", mail: "africo_assur@yahoo.fr" },
+      { name: "AGC (Assurance Générale du Congo)", sub_type: "Compagnies d'assurances", address: "Av. de Nguédi", city: "POINTE-NOIRE", bp: "796", tel: "05 530 07 77", web: "www.agccongo.com" },
+      { name: "ALLIANZ CONGO ASSURANCES", sub_type: "Compagnies d'assurances", address: "Bd du Général Charles de Gaulle - Imm. Ebatha", city: "POINTE-NOIRE", bp: "340", tel: "05 032 12 60 / 05 601 12 00", mail: "allianz.congo@allianz-cg.com", web: "www.allianz-cg.com" },
+      { name: "ASCOMA", sub_type: "Courtiers", address: "Bd du Général Charles de Gaulle", city: "POINTE-NOIRE", bp: "681", tel: "05 530 13 14 / 06 656 56 56", mail: "congo@ascoma.com", web: "www.ascoma.com" },
+      { name: "ASSUR LE MILLÉNAIRE", sub_type: "Courtiers", address: "Bd Moé Kaat Matou - à coté CCF", city: "POINTE-NOIRE", bp: "5882", tel: "06 651 03 63 / 01 031 59 59", mail: "assurlemillenaire_sarl@yahoo.fr" },
+      { name: "ASSUR PEOPLE", sub_type: "Courtiers", address: "Bd du Général Charles de Gaulle", city: "POINTE-NOIRE", bp: "5575", tel: "05 553 64 25 / 06 660 73 44" },
+      { name: "CEMIC (Cabinet d’Expertise Maritime et Industrielle du Congo)", sub_type: "Experts, expertise douanière et maritimes", address: "Av. de Bordeaux - Enceinte Port", city: "POINTE-NOIRE", bp: "4808", tel: "05 573 69 13", mail: "cemic.congo@yahoo.fr" },
+      { name: "COLINA CONGO SA", sub_type: "Compagnies d'assurances", address: "43, Av. de Mafouka", city: "POINTE-NOIRE", bp: "79", tel: "22 260 15 15 / 06 510 45 24", mail: "sahamcongo@sahamassurance.com" },
+      { name: "GÉNÉRAL SERVICES DISTRI", sub_type: "Experts, expertise douanière et maritimes", city: "POINTE-NOIRE", bp: "5178", tel: "06 664 42 15" },
+      { name: "GLENN ASSURANCES", sub_type: "Courtiers", address: "250, av. de l'Indépendance", city: "POINTE-NOIRE", bp: "4081", tel: "06 931 23 18 / 06 622 89 45" },
+      { name: "GRAMON ASSURANCES", sub_type: "Courtiers", address: "28, av. Mpanzou - Imm. Congo Telecom", city: "POINTE-NOIRE", tel: "05 557 02 57 / 06 639 77 52", mail: "gramon.assurances@gmail.com" },
+      { name: "GRAS SAVOYE CONGO", sub_type: "Courtiers", address: "118, av. Fayette Tchitembo", city: "POINTE-NOIRE", bp: "1901", tel: "06 667 12 12 / 05 530 03 60", mail: "secretariat.pnr@cg.grassavoye.com" },
+      { name: "H de B CONGO", sub_type: "Courtiers", address: "Bd du Général Charles de Gaulle - Galerie Hôtel Olympic Palace", city: "POINTE-NOIRE", bp: "2124", tel: "05 512 46 10", mail: "contactpnr@hdebcongo.com", web: "www.hdebcongto.com" },
+      { name: "LOÏC ASSURANCES CONSEIL", sub_type: "Courtiers", address: "Av. Moé Pratt - Grand Marché", city: "POINTE-NOIRE", tel: "05 553 73 58" },
+      { name: "NSIA ASSURANCES", sub_type: "Compagnies d'assurances", address: "Rond-point Kassaï", city: "POINTE-NOIRE", bp: "1108", tel: "22 282 24 92", fax: "22 282 24 92", mail: "nsiacongo@groupensia.com", web: "www.groupensia.com" }
     ];
 
-    for (const item of items) {
-      await db.query(
-        `INSERT INTO portfolio_items 
-        (category_id, name, sub_type, city, tel) 
-        VALUES ($1, $2, $3, $4, $5)`,
-        [catId, item.name, item.sub_type, item.city, item.tel]
-      );
+    if (currentCount !== items.length) {
+      console.log("Seeding portfolio items for ASSURANCES...");
+      // Delete existing items to avoid duplicates if re-seeding
+      await db.query("DELETE FROM portfolio_items WHERE category_id = $1", [catId]);
+
+      for (const item of items) {
+        await db.query(
+          `INSERT INTO portfolio_items 
+          (category_id, name, sub_type, address, city, bp, tel, fax, mail, web) 
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+          [catId, item.name, item.sub_type, (item as any).address || null, (item as any).city || null, (item as any).bp || null, (item as any).tel || null, (item as any).fax || null, (item as any).mail || null, (item as any).web || null]
+        );
+      }
+      console.log(`Seeded ${items.length} portfolio items for ASSURANCES`);
     }
-    console.log(`Seeded ${items.length} portfolio items for ASSURANCES`);
   } catch (err) {
     console.error("Failed to seed assurances items:", err);
   }
@@ -2802,25 +4391,104 @@ async function seedAutomobilesItems() {
     const catId = catResult.rows[0].id;
 
     const itemsCountResult = await db.query("SELECT COUNT(*) as count FROM portfolio_items WHERE category_id = $1", [catId]);
-    if (parseInt(itemsCountResult.rows[0].count) > 0) return;
-
-    console.log("Seeding portfolio items for AUTOMOBILES...");
+    const currentCount = parseInt(itemsCountResult.rows[0].count);
 
     const items = [
-      { name: "CFAO MOTORS", sub_type: "Vente et entretien", city: "BRAZZAVILLE", tel: "06 666 00 55" },
-      { name: "TRACTAFRIC MOTORS", sub_type: "Vente et entretien", city: "BRAZZAVILLE", tel: "06 666 00 66" },
-      { name: "SOCADA", sub_type: "Vente et entretien", city: "BRAZZAVILLE", tel: "06 666 00 77" }
+      // Brazzaville
+      { name: "AFRI PLAQUE", sub_type: "Contrôle technique et plaques d'Immatriculation", address: "Av. des Trois Martyrs - Plateau des 15 ans", city: "BRAZZAVILLE", tel: "06 630 30 00" },
+      { name: "AUTO ÉCOLE KILOMÈTRE", sub_type: "Auto-écoles", address: "731, av. de l'OUA - Bacongo", city: "BRAZZAVILLE", tel: "05 551 50 75" },
+      { name: "AUTO ÉCOLE STAN", sub_type: "Auto-écoles", address: "61, av. des Trois Martyrs - Ouenzé", city: "BRAZZAVILLE", bp: "298", tel: "05 551 10 05", fax: "22 281 53 84" },
+      { name: "AUTO STARS", sub_type: "Accessoires - Pièces détachées", address: "84, rue du Campement - Ouenzé", city: "BRAZZAVILLE", tel: "05 532 20 39" },
+      { name: "AUTO TOP", sub_type: "Location de voitures", address: "2203, av. Amilcar Cabral", city: "BRAZZAVILLE", bp: "1405", tel: "06 613 00 00 / 05 513 00 00" },
+      { name: "CAR MOBIL", sub_type: "Location de voitures", address: "Av. Amilcar Cabral", city: "BRAZZAVILLE", tel: "06 619 13 49 / 06 685 69 69", mail: "carmobil242@gmail.com" },
+      { name: "CFAO MOTORS CONGO", sub_type: "Concessionnaires - Garages", address: "Bd Denis Sassou Nguesso - Mpila", city: "BRAZZAVILLE", bp: "247", tel: "05 550 17 78 / 06 665 44 65", fax: "22 281 06 78", web: "www.cfaomotors-congo.com" },
+      { name: "CFAO MOTORS CONGO (Avis)", sub_type: "Location de voitures", address: "Bd Denis Sassou Nguesso - Mpila", city: "BRAZZAVILLE", bp: "247", tel: "05 550 17 78 / 06 665 44 65", fax: "22 281 06 78", web: "www.cfaomotors-congo.com" },
+      { name: "COM SERVICE", sub_type: "Location de voitures", address: "Av. Félix Eboué - Mpila", city: "BRAZZAVILLE", tel: "06 627 77 77", fax: "22 281 36 38" },
+      { name: "ETS FKS", sub_type: "Concessionnaires - Garages", address: "91, av. Boueta Bongo - Moungali", city: "BRAZZAVILLE", tel: "05 786 77 88 / 04 420 28 28" },
+      { name: "ETS GAZ SERVICE AUTO", sub_type: "Concessionnaires - Garages", address: "85, rue Owando - Ouenzé", city: "BRAZZAVILLE", bp: "5394", tel: "06 951 44 06 / 05 551 92 32" },
+      { name: "ETS NOVAFRIC", sub_type: "Accessoires - Pièces détachées", address: "84, rue Gamboma - Moungali", city: "BRAZZAVILLE", tel: "05 700 49 49 / 06 664 78 83" },
+      { name: "EUROTECH", sub_type: "Accessoires - Pièces détachées", address: "38, rue Bandas - Poto-Poto", city: "BRAZZAVILLE", tel: "06 856 96 96 / 05 610 05 05", mail: "direction.eurotech@hotmail.com" },
+      { name: "GARAGE LA BOUSSOLE", sub_type: "Concessionnaires - Garages", address: "4, av. de M'Foa - Poto-Poto", city: "BRAZZAVILLE", tel: "05 551 83 02 / 06 621 55 76" },
+      { name: "GARAGE PLUS", sub_type: "Concessionnaires - Garages", address: "115, bd Maréchal Lyautey - OCH", city: "BRAZZAVILLE", bp: "2179", tel: "05 330 03 00 / 05 531 31 31", mail: "bassamaliyounes@outlook.com" },
+      { name: "GENSERV", sub_type: "Accessoires - Pièces détachées", address: "Av. Orsy - Rond-point de la Gare", city: "BRAZZAVILLE", tel: "04 400 00 05", mail: "etsgenserv@aol.com" },
+      { name: "GMAD CONGO", sub_type: "Concessionnaires - Garages", address: "54, av. Félix Eboué", city: "BRAZZAVILLE", tel: "01 047 00 00 / 05 557 99 88", mail: "info@gmad-congo.com" },
+      { name: "GN SA LEMAI (Europcar)", sub_type: "Concessionnaires - Garages", address: "Av. du Camp", city: "BRAZZAVILLE", tel: "05 769 22 22", mail: "europcarcongo@yahoo.fr" },
+      { name: "GN SA LEMAI (Europcar)", sub_type: "Location de voitures", address: "Av. du Camp", city: "BRAZZAVILLE", tel: "05 769 22 22", mail: "europcarcongo@yahoo.fr" },
+      { name: "GRASSET SPORAFRIC", sub_type: "Concessionnaires - Garages", address: "Av. Willam Guynet", city: "BRAZZAVILLE", bp: "334", tel: "22 281 08 53", mail: "brazza@sporafric.net", web: "www.sporafric.net" },
+      { name: "HSIET CONGO DEVELOPPEMENT SARL", sub_type: "Concessionnaires - Garages", address: "Av. de la Pointe Hollandaise - Ouenzé", city: "BRAZZAVILLE", tel: "06 631 19 66", mail: "zhao.nan@hsiet.com.cn", web: "www.hsiet.com.cn" },
+      { name: "KELLY’S", sub_type: "Location de voitures", address: "Av. de Loutassi - Plateau des 15 ans", city: "BRAZZAVILLE", tel: "06 500 00 11 / 06 500 00 12", mail: "kelysauto@gmail.com" },
+      { name: "MA FLORENCE TRANSPORT", sub_type: "Location de voitures", address: "46, av. de la Tsiéme - Ouenzé", city: "BRAZZAVILLE", tel: "06 934 49 05 / 05 556 56 37", mail: "maflorence.autolocation@gmail.com" },
+      { name: "SCCT", sub_type: "Contrôle technique et plaques d'Immatriculation", address: "Av. de Loutassi - Moungali", city: "BRAZZAVILLE", tel: "01 900 12 10" },
+      { name: "SMT CONGO", sub_type: "Concessionnaires - Garages", address: "Av. Bayardelle - Impasse Airtel", city: "BRAZZAVILLE", tel: "05 754 95 38", web: "www.smt-congo.com" },
+      { name: "SOPORISE AUTOMOBILE", sub_type: "Concessionnaires - Garages", address: "209, rue Mboko - Ouenzé", city: "BRAZZAVILLE", tel: "06 666 46 86 / 05 558 22 53", mail: "soparisauto@yahoo.fr" },
+      { name: "TRACTAFRIC MOTORS", sub_type: "Accessoires - Pièces détachées", address: "118, av. Edith Lucie Bongo - Mpila", city: "BRAZZAVILLE", bp: "113", tel: "06 979 93 30", web: "www.tractafrictmc-congo.com" },
+      { name: "TRACTAFRIC MOTORS", sub_type: "Concessionnaires - Garages", address: "118, av. Edith Lucie Bongo - Mpila", city: "BRAZZAVILLE", bp: "113", tel: "06 679 93 30", web: "www.tractafrictmc-congo.com" },
+
+      // Pointe-Noire
+      { name: "AFRI PLAQUE", sub_type: "Contrôle technique et plaques d'Immatriculation", address: "Av. de l'Indépendance - Mahouata", city: "POINTE-NOIRE", tel: "05 558 66 75 / 06 620 99 57" },
+      { name: "AUTO CLIMA CONGO", sub_type: "Concessionnaires - Garages", address: "Av. François Charles", city: "POINTE-NOIRE", tel: "05 559 39 44" },
+      { name: "AUTO ÉCOLE KRYS", sub_type: "Auto-écoles", address: "Av. de Ma Loango - Nkouikou", city: "POINTE-NOIRE", tel: "05 563 70 63 / 06 664 28 62" },
+      { name: "AUTO ÉCOLE MORAIS", sub_type: "Auto-écoles", address: "840, av. Marien Ngouabi - OCH", city: "POINTE-NOIRE", bp: "399", tel: "05 797 75 85 / 06 980 51 27" },
+      { name: "AUTO ÉCOLE NDJI-NDJI", sub_type: "Auto-écoles", address: "Av. de l'Indépendance - Mahouata", city: "POINTE-NOIRE", tel: "05 567 09 77 / 06 674 24 11" },
+      { name: "AUTO ÉCOLE RACINE", sub_type: "Auto-écoles", address: "Av. de Djéno - Tchimbamba", city: "POINTE-NOIRE", tel: "05 571 22 30" },
+      { name: "AUTO ÉCOLE STAN", sub_type: "Auto-écoles", address: "Av. de Ma Loango - Matende", city: "POINTE-NOIRE", tel: "05 551 10 05" },
+      { name: "AUTO ÉCOLE SUZINA", sub_type: "Auto-écoles", address: "Av. Jacques Opangault - Face à la Foire", city: "POINTE-NOIRE", tel: "05 320 45 53", portable: "06 573 07 70" },
+      { name: "AWA AUTO", sub_type: "Accessoires - Pièces détachées", address: "22, av. Blanche Gomez", city: "POINTE-NOIRE", tel: "05 553 29 55 / 06 620 72 59" },
+      { name: "BONHEUR AUTO ACCESSOIRES", sub_type: "Accessoires - Pièces détachées", address: "Av. Schoelcher - Rond-point Gorille", city: "POINTE-NOIRE", tel: "06 645 62 70 / 04 437 37 39" },
+      { name: "CAREX SERVICES", sub_type: "Concessionnaires - Garages", address: "Bd de Loango - Base Industrielle", city: "POINTE-NOIRE", bp: "1131", tel: "05 529 27 26", mail: "info@carex-congo.com", web: "www.carex-congo.com" },
+      { name: "CAREX SERVICES", sub_type: "Location de voitures", address: "Bd Loango - Base Industrielle", city: "POINTE-NOIRE", bp: "873", tel: "05 529 27 26", mail: "carexservices@ymail.com", web: "www.carex-congo.com" },
+      { name: "CENTURY MOTORS Sarl", sub_type: "Concessionnaires - Garages", address: "Av. Bitélika Ndombi - Aéroport", city: "POINTE-NOIRE", tel: "05 620 10 10", mail: "info@century-motors.com" },
+      { name: "CFAO MOTORS CONGO", sub_type: "Concessionnaires - Garages", address: "13, rue Côte Matève - Zone Portuaire", city: "POINTE-NOIRE", bp: "1110", tel: "05 550 17 78 / 06 665 44 65", fax: "22 294 36 36", mail: "mengambe@cfao.com", web: "www.cfaomotors-congo.com" },
+      { name: "CFAO MOTORS CONGO (Avis)", sub_type: "Location de voitures", address: "13, rue Côte Matève - Zone Portuaire", city: "POINTE-NOIRE", bp: "1110", tel: "05 550 17 78 / 06 665 44 65", fax: "22 294 36 26", mail: "mengambe@cfao.com", web: "www.cfaomotors-congo.com" },
+      { name: "CLINIC AUTO", sub_type: "Concessionnaires - Garages", address: "Av. Amilcar Cabral", city: "POINTE-NOIRE", tel: "06 628 01 99 / 05 595 32 32", mail: "clinic_auto1@hotmail.com", web: "www.clinicauto.com" },
+      { name: "CONGO AUTOMOBILES S.A", sub_type: "Accessoires - Pièces détachées", address: "Rond-point Kassaï", city: "POINTE-NOIRE", bp: "1131", tel: "22 294 42 19 / 05 553 61 11", mail: "congoauto@yahoo.fr" },
+      { name: "CONGO AUTOMOBILES S.A", sub_type: "Concessionnaires - Garages", address: "Rond-point Kassaï", city: "POINTE-NOIRE", bp: "1131", tel: "22 294 42 19", mail: "congoauto@yahoo.fr" },
+      { name: "CONSULTING BUSINESS GROUP", sub_type: "Location de voitures", address: "120, rue Ngouedi", city: "POINTE-NOIRE", bp: "1783", tel: "04 005 46 38 / 04 005 46 53", mail: "alcontact@cbg-congo.com" },
+      { name: "DANDAL SERVICES", sub_type: "Contrôle technique et plaques d'Immatriculation", address: "Rue Alphonse Pemesso", city: "POINTE-NOIRE", tel: "04 442 06 32" },
+      { name: "DD AUTO", sub_type: "Accessoires - Pièces détachées", address: "Av. de l'Indépendance - Roy", city: "POINTE-NOIRE", tel: "05 520 06 18 / 06 667 12 33" },
+      { name: "DIMA CONSTRUCTION SARL", sub_type: "Concessionnaires - Garages", address: "92, av. Tchicaya Utsami - Mpita", city: "POINTE-NOIRE", tel: "06 880 30 30", mail: "dima.congo@hotmail.com" },
+      { name: "DIVERCO", sub_type: "Accessoires - Pièces détachées", address: "Bd Moé Kaat Matou", city: "POINTE-NOIRE", bp: "1111", tel: "06 661 86 12", mail: "diver_co@yahoo.fr" },
+      { name: "EFM MULTI – SERVICES CONGO", sub_type: "Concessionnaires - Garages", address: "Av. du Mayombe - Mpita - à côté Restaurant \"Sous le Manguier\"", city: "POINTE-NOIRE", bp: "4799", tel: "06 529 71 13", mail: "efmmultiservice@gmail.com" },
+      { name: "ÉLÉGANCE ACCESSOIRES", sub_type: "Accessoires - Pièces détachées", address: "Av. de l'Indépendance - Rond-point Mahouata", city: "POINTE-NOIRE", bp: "2702", tel: "06 684 66 66" },
+      { name: "EQUATEUR BUSINESS INTERNATIONAL", sub_type: "Location de voitures", address: "Av. Gustave Ondziel", city: "POINTE-NOIRE", bp: "590", tel: "22 294 00 90", mail: "info@equabusiness.com" },
+      { name: "ETS ALY MOBILE", sub_type: "Location de voitures", address: "Av. de Massafi - Base Industrielle", city: "POINTE-NOIRE", bp: "1855", tel: "05 557 02 30 / 05 535 59 59", mail: "ets_aly-mobile@hotmail.com" },
+      { name: "ETS AUTO DUO", sub_type: "Accessoires - Pièces détachées", address: "Av. de l'indépendance - Mahouata", city: "POINTE-NOIRE", bp: "5428", tel: "05 707 14 88 / 06 631 07 39", mail: "autoduo2000@yahoo.fr" },
+      { name: "ETS INFINITY MOTORS", sub_type: "Accessoires - Pièces détachées", address: "247, av. de l'Indépendance - Roy", city: "POINTE-NOIRE", tel: "05 553 21 48 / 06 661 95 91" },
+      { name: "ETS JAPON AUTO", sub_type: "Accessoires - Pièces détachées", address: "250, av. de l'Indépendance - Feu Roy", city: "POINTE-NOIRE", tel: "05 533 10 14 / 06 633 08 15", mail: "infinityz2001@yahoo.co.uk" },
+      { name: "ETS NAX-AUTO", sub_type: "Accessoires - Pièces détachées", address: "Av. Ma Loango", city: "POINTE-NOIRE", tel: "06 994 21 21 / 04 435 36 46" },
+      { name: "EUROTECH", sub_type: "Accessoires - Pièces détachées", address: "Av. Bitélika Ndombi - Rond-point Davum", city: "POINTE-NOIRE", bp: "237", tel: "06 900 05 05 / 06 600 00 06", mail: "direction.eurotech@hotmail.com" },
+      { name: "FACAR CONGO", sub_type: "Concessionnaires - Garages", address: "Av. Amilcar Cabral - face 3M", city: "POINTE-NOIRE", tel: "05 500 60 86 / 06 800 60 86", mail: "congo@facargroup.com", web: "www.facargroup.com" },
+      { name: "GARAGE BADEN BADEN", sub_type: "Concessionnaires - Garages", address: "20, av. Théophile Mbemba", city: "POINTE-NOIRE", bp: "4149", tel: "05 553 11 09" },
+      { name: "GENERAL LEASING CONGO", sub_type: "Location de voitures", address: "Av. du Havre - Z.I. de la Foire - face base Total E&P", city: "POINTE-NOIRE", tel: "05 600 33 33", mail: "myriem.badjadi@generaleasing.com", web: "www.generaleasing.com" },
+      { name: "GN SA LEMAI (Europcar)", sub_type: "Concessionnaires - Garages", address: "Av. Bitélika Ndombi - Z.I. Km 4", city: "POINTE-NOIRE", tel: "06 666 26 26", mail: "europcarcongo@yahoo.fr" },
+      { name: "GN SA LEMAI (Europcar)", sub_type: "Location de voitures", address: "Av. Bitélika Ndombi - Z.I. Km 4", city: "POINTE-NOIRE", tel: "06 666 26 26", mail: "europcarcongo@yahoo.fr" },
+      { name: "GRASSET SPORAFRIC", sub_type: "Accessoires - Pièces détachées", address: "Av. Georges Dumond", city: "POINTE-NOIRE", bp: "624", tel: "06 662 13 13 / 06 628 39 39", mail: "contact@sporafric.net", web: "www.sporafric.net" },
+      { name: "SCTK (SOCIÉTÉ DE CONTRÔLE TECHNIQUE DU KOUILOU)", sub_type: "Contrôle technique et plaques d'Immatriculation", address: "Av. Stéphane Tchitchelle, enceinte Brométo", city: "POINTE-NOIRE", tel: "22 294 34 10 - 04 431 16 22", mail: "dg.sctk@yahoo.fr" },
+      { name: "SILOTEC CONGO", sub_type: "Contrôle technique et plaques d'Immatriculation", address: "Av. Jean-Félix Tchicaya, la Base", city: "POINTE-NOIRE", portable: "05 552 10 18", mail: "silotec.pnr@silotec-congo.com" },
+      { name: "SMT CONGO", sub_type: "Concessionnaires - Garages", address: "Av. Bitélika Ndombi", city: "POINTE-NOIRE", tel: "06 508 27 13", web: "www.smt-congo.com" },
+      { name: "SOCIETE GARAGE SONGOLO", sub_type: "Concessionnaires - Garages", address: "409, av. Jacques Opangault - Songolo", city: "POINTE-NOIRE", tel: "05 315 15 97 / 01 223 08 21", mail: "garagesongolocongo@yahoo.com" },
+      { name: "STAN SERVICES", sub_type: "Contrôle technique et plaques d'Immatriculation", address: "Av. Ma loango - Matendé", city: "POINTE-NOIRE", tel: "05 551 10 05" },
+      { name: "STAR CHL", sub_type: "Contrôle technique et plaques d'Immatriculation", address: "799, Av. de l'Indépendance", city: "POINTE-NOIRE", bp: "4767", tel: "05 558 37 70 / 06 676 88 70", mail: "etslisa@yahoo.fr" },
+      { name: "TOP ACCESSOIRES", sub_type: "Accessoires - Pièces détachées", address: "53, Av. Mâ Loango - Rond-point Roy", city: "POINTE-NOIRE", tel: "06 636 72 80 / 05 568 90 69", mail: "autostarauto@yahoo.fr" },
+      { name: "TRACTAFRIC MOTORS", sub_type: "Accessoires - Pièces détachées", address: "697, Bd Marien Ngouabi", city: "POINTE-NOIRE", tel: "05 521 31 32 / 06 665 40 30", web: "www.tractafrictmc-congo.com" },
+      { name: "TRACTAFRIC MOTORS", sub_type: "Concessionnaires - Garages", address: "697, bd Marien Ngouabi", city: "POINTE-NOIRE", tel: "05 521 31 32 / 06 665 40 30", web: "www.tractafrictmc-congo.com" }
     ];
 
-    for (const item of items) {
-      await db.query(
-        `INSERT INTO portfolio_items 
-        (category_id, name, sub_type, city, tel) 
-        VALUES ($1, $2, $3, $4, $5)`,
-        [catId, item.name, item.sub_type, item.city, item.tel]
-      );
+    if (currentCount !== items.length) {
+      console.log("Seeding portfolio items for AUTOMOBILES...");
+      // Delete existing items to avoid duplicates if re-seeding
+      await db.query("DELETE FROM portfolio_items WHERE category_id = $1", [catId]);
+
+      for (const item of items) {
+        await db.query(
+          `INSERT INTO portfolio_items 
+          (category_id, name, sub_type, address, city, bp, tel, fax, mail, web) 
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+          [catId, item.name, item.sub_type, (item as any).address || null, (item as any).city || null, (item as any).bp || null, (item as any).tel || null, (item as any).fax || null, (item as any).mail || null, (item as any).web || null]
+        );
+      }
+      console.log(`Seeded ${items.length} portfolio items for AUTOMOBILES`);
     }
-    console.log(`Seeded ${items.length} portfolio items for AUTOMOBILES`);
   } catch (err) {
     console.error("Failed to seed automobiles items:", err);
   }
@@ -2833,34 +4501,86 @@ async function seedBanquesItems() {
     const catId = catResult.rows[0].id;
 
     const itemsCountResult = await db.query("SELECT COUNT(*) as count FROM portfolio_items WHERE category_id = $1", [catId]);
-    if (parseInt(itemsCountResult.rows[0].count) > 0) return;
-
-    console.log("Seeding portfolio items for BANQUES ET MICROFINANCES...");
+    const currentCount = parseInt(itemsCountResult.rows[0].count);
 
     const items = [
-      { name: "B.C.I (Banque Commerciale Internationale)", sub_type: "Banque", city: "BRAZZAVILLE", tel: "05 551 00 00" },
-      { name: "B.G.F.I BANK", sub_type: "Banque", city: "BRAZZAVILLE", tel: "05 552 00 00" },
-      { name: "B.S.C.A BANK", sub_type: "Banque", city: "BRAZZAVILLE", tel: "05 553 00 00" },
-      { name: "BANQUE POSTALE DU CONGO", sub_type: "Banque", city: "BRAZZAVILLE", tel: "05 554 00 00" },
-      { name: "CHARDEL", sub_type: "Microfinance", city: "BRAZZAVILLE", tel: "05 555 00 00" },
-      { name: "COFINA", sub_type: "Microfinance", city: "BRAZZAVILLE", tel: "05 556 00 00" },
-      { name: "CREDIT DU CONGO", sub_type: "Banque", city: "BRAZZAVILLE", tel: "05 557 00 00" },
-      { name: "ECOBANK", sub_type: "Banque", city: "BRAZZAVILLE", tel: "05 558 00 00" },
-      { name: "LCB BANK", sub_type: "Banque", city: "BRAZZAVILLE", tel: "05 559 00 00" },
-      { name: "MUCODEC", sub_type: "Microfinance", city: "BRAZZAVILLE", tel: "05 560 00 00" },
-      { name: "SOCIÉTÉ GÉNÉRALE CONGO", sub_type: "Banque", city: "BRAZZAVILLE", tel: "05 561 00 00" },
-      { name: "U.B.A (United Bank for Africa)", sub_type: "Banque", city: "BRAZZAVILLE", tel: "05 562 00 00" }
+      // Brazzaville
+      { name: "BANQUE POSTALE DU CONGO – Siège Social", sub_type: "Banques", address: "Bd Denis Sassou Nguesso - Rond-point de la Poste", city: "BRAZZAVILLE", bp: "37", tel: "06 503 65 23", mail: "serviceclients@banquepostale-congo.com", web: "www.banquepostale-congo.com" },
+      { name: "BCH (Banque Congolaise de l’Habitat)", sub_type: "Banques", address: "Av. Amilcar Cabral", city: "BRAZZAVILLE", bp: "987", tel: "22 281 25 88", mail: "bch@bch.cg", web: "www.bch.cg" },
+      { name: "BCI (Banque Commerciale Internationale) – Siège Social", sub_type: "Banques", address: "Av. Amilcar Cabral", city: "BRAZZAVILLE", bp: "147", tel: "22 281 58 33", fax: "22 281 03 73", web: "www.bci.banquepopulaire.com" },
+      { name: "BDEAC (Banque de Développement des États de l’Afrique Centrale)", sub_type: "Banques", address: "Bd Denis Sassou Nguesso", city: "BRAZZAVILLE", bp: "1177", tel: "04 426 83 00 / 06 652 96 70", fax: "22 281 18 80", mail: "bdeac@bdeac.org", web: "www.bdeac.org" },
+      { name: "BEAC (Banque des États de l’Afrique Centrale)", sub_type: "Banques", address: "Av. Sergent Malamine", city: "BRAZZAVILLE", bp: "126", tel: "22 281 10 73", fax: "22 281 10 94", mail: "beacbzv@beac.int", web: "www.beac.int" },
+      { name: "BESCO (Banque Esperito Santo Congo)", sub_type: "Banques", address: "Av. Amilcar Cabral", city: "BRAZZAVILLE", bp: "2057", tel: "05 310 87 87 / 06 606 61 61" },
+      { name: "BGFI BANK – Agence Atlas", sub_type: "Banques", city: "BRAZZAVILLE", mail: "agence.atlas@bgfi.com" },
+      { name: "BGFI BANK – Agence Monzoto", sub_type: "Banques", city: "BRAZZAVILLE", mail: "agence.monzoto@bgfi.com" },
+      { name: "BGFI BANK – Agence Proxima", sub_type: "Banques", address: "Bd Denis Sassou Nguesso, centre-ville", city: "BRAZZAVILLE", bp: "14579", tel: "05 505 17 39", mail: "agence.proxima@bgfi.com" },
+      { name: "BGFI BANK Siège social et Direction Générale", sub_type: "Banques", address: "Bd Denis Sassou Nguesso, centre-ville", city: "BRAZZAVILLE", bp: "14579", tel: "06 632 65 05", mail: "siege_brazzaville@bgfi.com" },
+      { name: "BSCA (Banque Sino Congolaise pour l’Afrique)", sub_type: "Banques", address: "Av. de l'Amitié", city: "BRAZZAVILLE", bp: "199", tel: "22 330 38 88 / 89", mail: "service@bscabank.com", web: "www.bscabank.com" },
+      { name: "CAPPED", sub_type: "Crédit - Micro finance", address: "90, rue Mossaka - Ouenzé", city: "BRAZZAVILLE", tel: "06 670 20 14", mail: "cappedbzv@yahoo.fr", web: "www.capped-cg.org" },
+      { name: "CLM BRAZZA CENTRE", sub_type: "Banques", address: "Av. William Guynet", city: "BRAZZAVILLE", tel: "06 987 20 21" },
+      { name: "CMF (Congolaise de Microfinance)", sub_type: "Crédit - Micro finance", address: "48 bis, av. de France - Poto-Poto", city: "BRAZZAVILLE", tel: "06 638 44 07", mail: "comifi_brazza@yahoo.fr" },
+      { name: "CRÉDIT DU CONGO", sub_type: "Banques", address: "Av. Amilcar Cabral", city: "BRAZZAVILLE", bp: "2470", tel: "05 550 30 33 / 06 660 54 51", web: "www.creditducongo.com" },
+      { name: "ECOBANK – Siège Social", sub_type: "Banques", address: "Av. Amilcar Cabral - Imm. ARC - 3ème étage", city: "BRAZZAVILLE", bp: "2485", tel: "04 444 05 05", mail: "ecobankcg@ecobank.com", web: "www.ecobank.com" },
+      { name: "EXPRESS UNION CONGO S.A. – Siège Social", sub_type: "Transfert d'argent et bureaux de change", address: "Av. de la Paix - Poto-Poto", city: "BRAZZAVILLE", bp: "2393", tel: "06 916 32 25", mail: "eusacongobrazza@expressunion.net" },
+      { name: "FÉDÉRATION DES MUCODEC", sub_type: "Banques", address: "Bd Denis Sassou Nguesso - Grande Gare", city: "BRAZZAVILLE", bp: "13237", tel: "06 987 90 00 / 05 547 90 00", mail: "contact@mucodec.com" },
+      { name: "GROUPE CHARDEN FARELL", sub_type: "Transfert d'argent et bureaux de change", address: "Av. Amilcar Cabral - Imm. City Center", city: "BRAZZAVILLE", tel: "05 555 32 80 / 06 662 55 42", web: "www.gcfcongo.com" },
+      { name: "KIMEX INTERNATIONAL", sub_type: "Transfert d'argent et bureaux de change", address: "Av. Amilcar Cabral - Imm. ARC - 2ème étage", city: "BRAZZAVILLE", bp: "13161", tel: "05 551 18 96", mail: "kimexinternational@yahoo.fr" },
+      { name: "LCB (La Congolaise de Banque)", sub_type: "Banques", address: "Av. Amilcar Cabral", city: "BRAZZAVILLE", bp: "2889", tel: "05 310 11 57 / 93", fax: "22 281 09 77", web: "www.lacongolaisedebanque.com" },
+      { name: "S2C (Société de Change du Congo)", sub_type: "Transfert d'argent et bureaux de change", address: "Av. Sergent Malamine", city: "BRAZZAVILLE", bp: "2669", tel: "22 281 47 02", fax: "22 281 47 65", mail: "societedechangeducongo@yahoo.fr" },
+      { name: "SERFIN SA", sub_type: "Transfert d'argent et bureaux de change", address: "67, av. Nelson Mandéla - Hôtel Mikhael's", city: "BRAZZAVILLE", tel: "05 573 03 53 / 06 660 94 70", mail: "kserfin@gmail.com" },
+      { name: "SOCIÉTÉ GÉNÉRALE CONGO", sub_type: "Banques", address: "Av. Amilcar Cabral", city: "BRAZZAVILLE", bp: "598", tel: "06 504 22 22 / 05 593 91 91", web: "www.societegenerale.cg" },
+      { name: "SOCIÉTÉ SIKAR – FINANCE (Money Gram)", sub_type: "Transfert d'argent et bureaux de change", address: "Bd Maréchal Lyautey - OCH", city: "BRAZZAVILLE", tel: "22 281 12 96 / 06 664 10 16" },
+      { name: "UBA (United Bank of Africa) – Siège Social", sub_type: "Banques", address: "Av. William Guynet", city: "BRAZZAVILLE", tel: "06 923 60 98 / 05 364 46 35", web: "www.ubagroup.com" },
+      { name: "YVALANDA", sub_type: "Transfert d'argent et bureaux de change", address: "27, rue Bacongo - Poto-Poto", city: "BRAZZAVILLE", tel: "05 592 49 20 / 06 671 58 16" },
+
+      // Pointe-Noire
+      { name: "AFRICHANGE", sub_type: "Transfert d'argent et bureaux de change", address: "71, av. Schœlcher - Grand Marché", city: "POINTE-NOIRE", bp: "2042", tel: "06 631 14 96 / 05 557 01 46", mail: "africhange@africhange-cg.com", web: "www.africhange-cg.com" },
+      { name: "BANQUE POSTALE DU CONGO", sub_type: "Banques", address: "Bd Moé Kaat Matou", city: "POINTE-NOIRE", bp: "701", tel: "06 508 10 49 / 06 875 08 80", mail: "serviceclients@banquepostale-congo.com", web: "www.banquepostale-congo.com" },
+      { name: "BCH (Banque Congolaise de L’Habitat)", sub_type: "Banques", address: "388, bd du Général Charles de Gaulle", city: "POINTE-NOIRE", bp: "1254", tel: "06 508 24 28 / 29", mail: "bch@bch.cg", web: "www.bch.cg" },
+      { name: "BCI (Banque Commerciale Internationale)", sub_type: "Banques", address: "226, bd du Général Charles de Gaulle", city: "POINTE-NOIRE", bp: "661", tel: "05 517 32 92 / 06 953 72 72", web: "www.bci.banquepopulaire.com" },
+      { name: "BEAC (Banque des États de l’Afrique Centrale)", sub_type: "Banques", address: "Rue de Mbena", city: "POINTE-NOIRE", bp: "751", tel: "22 294 07 68 / 22 294 21 90", web: "www.beac.int" },
+      { name: "BGFI BANK – Agence Alhena", sub_type: "Banques", city: "POINTE-NOIRE", bp: "610", tel: "06 931 70 04 6", mail: "agence.alhena@bgfi.com" },
+      { name: "BGFI BANK – Agence Altaïr", sub_type: "Banques", city: "POINTE-NOIRE", mail: "agence.altaîr@bgfi.com" },
+      { name: "BGFI BANK – Centre d’Affaires d’Entreprises", sub_type: "Banques", city: "POINTE-NOIRE", mail: "agence.centreaffairepnr@bgfi.com" },
+      { name: "BGFI BANK Agence Agena", sub_type: "Banques", address: "26 av. Marien Ngouabi, face Préfecture", city: "POINTE-NOIRE", bp: "610", tel: "05 505 17 95", mail: "agence.centreaffairepnr@bgfi.com" },
+      { name: "CAISSE CONGOLAISE D’ÉPARGNE ET DE CRÉDIT", sub_type: "Banques", address: "Av. de l'Indépendance - Tié-Tié", city: "POINTE-NOIRE", tel: "04 452 32 00", mail: "ccec2007@yahoo.fr" },
+      { name: "CIFED", sub_type: "Crédit - Micro finance", address: "Av. de L'Indépendance - Tié- Tié", city: "POINTE-NOIRE", tel: "06 663 30 42 / 05 563 64 61" },
+      { name: "COMIFI", sub_type: "Crédit - Micro finance", address: "Bd Moé Kaat Matou", city: "POINTE-NOIRE", bp: "5163", tel: "06 674 87 30 / 05 557 84 86", mail: "comifi_brazza@yahoo.fr" },
+      { name: "CRÉDIT DU CONGO – Agence Centre-Ville", sub_type: "Banques", address: "Av. Emmanuel Dadet", city: "POINTE-NOIRE", bp: "1312", tel: "06 671 12 12", web: "www.creditducongo.com" },
+      { name: "CRÉDIT MUPROCOM", sub_type: "Crédit - Micro finance", address: "Av. de L'Indépendance - Tié-Tié", city: "POINTE-NOIRE", tel: "06 664 58 16 / 06 663 55 77" },
+      { name: "ECOBANK – Agence Centre-Ville", sub_type: "Banques", address: "Bd du Général Charles de Gaulle", city: "POINTE-NOIRE", bp: "1219", tel: "06 622 01 01 / 05 569 54 54", mail: "ecobankcg@ecobank.com", web: "www.ecobank.com" },
+      { name: "EXPRESS UNION CONGO S.A. – Centre-Ville", sub_type: "Transfert d'argent et bureaux de change", address: "Av. de le République - Grand Marché", city: "POINTE-NOIRE", tel: "06 916 32 25 / 06 962 06 00", mail: "eubrazza@expressunion.net" },
+      { name: "FÉDÉRATION DES MUCODEC", sub_type: "Banques", address: "Bd du Général Charles de Gaulle", city: "POINTE-NOIRE", bp: "5909", tel: "06 987 90 80 / 05 547 90 80", mail: "secretariat.pnr@mucodec.com" },
+      { name: "FÉDÉRATION DES MUCODEC", sub_type: "Crédit - Micro finance", address: "388, bd du Général Charles de Gaulle", city: "POINTE-NOIRE", bp: "5909", tel: "06 987 90 80 / 05 547 90 80", mail: "secretariat.pnr@mucodec.com" },
+      { name: "GROUPE CHARDEN FARELL", sub_type: "Transfert d'argent et bureaux de change", address: "180, av. de l'Indépendance - Rond-point Mahouata", city: "POINTE-NOIRE", bp: "4391", tel: "06 630 99 55 / 05 594 06 06", web: "www.gcfcongo.com" },
+      { name: "LCB (La Congolaise de Banque) Agence Centre-Ville", sub_type: "Banques", address: "3, bd du Général Charles de Gaulle", city: "POINTE-NOIRE", bp: "881", tel: "05 310 11 89", mail: "lcbcongo@yahoo.fr", web: "www.lacongolaisedebanque.com" },
+      { name: "SOCIÉTÉ GÉNÉRALE CONGO", sub_type: "Banques", address: "Bd du Général Charles de Gaulle - Vers Rond-point Kassaï", city: "POINTE-NOIRE", bp: "598", tel: "06 504 88 88 / 06 504 00 00", web: "www.societegenerale.cg" },
+      { name: "SODECCO (Société d’Épargne et de Crédit du Congo)", sub_type: "Crédit - Micro finance", address: "Av. Alphonse Pemosso - Grand Marché", city: "POINTE-NOIRE", bp: "847", tel: "05 023 81 99 / 06 917 74 06", mail: "sodecco@yahoo.fr" },
+      { name: "UBA (United Bank of Africa)", sub_type: "Banques", address: "Bd du Général Charles de Gaulle - Face Hôtel Atlantic", city: "POINTE-NOIRE", tel: "06 609 42 47", web: "www.ubagroup.com" },
+
+      // Autres localités
+      { name: "BANQUE POSTALE DU CONGO", sub_type: "Banques", address: "Place de la Gare - Imm. Ex ONPT", city: "DOLISIE", tel: "06 677 67 12", mail: "serviceclients@banquepostale-congo.com", web: "www.banquepostale-congo.com" },
+      { name: "BANQUE POSTALE DU CONGO", sub_type: "Banques", address: "Rond Point Denis Sassou Nguesso", city: "OYO", tel: "06 677 67 35", mail: "serviceclients@banquepostale-congo.com", web: "www.banquepostale-congo.com" },
+      { name: "BCI (Banque Commerciale Internationale)", sub_type: "Banques", city: "GAMBOMA", tel: "05 551 41 89", web: "www.bci.banquepopulaire.com" },
+      { name: "BGFI BANK – Agence Kouende", sub_type: "Banques", address: "Route Nationale N°2, rond-point Bel Air", city: "OYO", mail: "agence.kouende@bgfi.com" },
+      { name: "BGFI BANK – Agence Mira", sub_type: "Banques", address: "Agence Mira, av. Raphaël Antonetti, centre-ville", city: "DOLISIE", mail: "agence.mira@bgfi.com" }
     ];
 
-    for (const item of items) {
-      await db.query(
-        `INSERT INTO portfolio_items 
-        (category_id, name, sub_type, city, tel) 
-        VALUES ($1, $2, $3, $4, $5)`,
-        [catId, item.name, item.sub_type, item.city, item.tel]
-      );
+    if (currentCount !== items.length) {
+      console.log("Seeding portfolio items for BANQUES ET MICROFINANCES...");
+      // Delete existing items to avoid duplicates if re-seeding
+      await db.query("DELETE FROM portfolio_items WHERE category_id = $1", [catId]);
+
+      for (const item of items) {
+        await db.query(
+          `INSERT INTO portfolio_items 
+          (category_id, name, sub_type, address, city, bp, tel, fax, mail, web) 
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+          [catId, item.name, item.sub_type, (item as any).address || null, (item as any).city || null, (item as any).bp || null, (item as any).tel || null, (item as any).fax || null, (item as any).mail || null, (item as any).web || null]
+        );
+      }
+      console.log(`Seeded ${items.length} portfolio items for BANQUES ET MICROFINANCES`);
     }
-    console.log(`Seeded ${items.length} portfolio items for BANQUES ET MICROFINANCES`);
   } catch (err) {
     console.error("Failed to seed banques items:", err);
   }
@@ -2873,32 +4593,740 @@ async function seedBtpItems() {
     const catId = catResult.rows[0].id;
 
     const itemsCountResult = await db.query("SELECT COUNT(*) as count FROM portfolio_items WHERE category_id = $1", [catId]);
-    if (parseInt(itemsCountResult.rows[0].count) > 0) return;
-
-    console.log("Seeding portfolio items for BÂTIMENTS ET TRAVAUX PUBLICS (BTP)...");
+    const currentCount = parseInt(itemsCountResult.rows[0].count);
 
     const items = [
-      { name: "ANDRÉ BTP", sub_type: "BTP", city: "BRAZZAVILLE", tel: "06 666 00 00" },
-      { name: "BERNABÉ CONGO", sub_type: "Matériaux", city: "BRAZZAVILLE", tel: "06 666 11 11" },
-      { name: "BUROTOP IRIS", sub_type: "BTP", city: "BRAZZAVILLE", tel: "06 666 22 22" },
-      { name: "CHALCO", sub_type: "BTP", city: "BRAZZAVILLE", tel: "06 666 33 33" },
-      { name: "CRBC", sub_type: "BTP", city: "BRAZZAVILLE", tel: "06 666 44 44" },
-      { name: "FORACO", sub_type: "BTP", city: "BRAZZAVILLE", tel: "06 666 55 55" },
-      { name: "GETESA", sub_type: "BTP", city: "BRAZZAVILLE", tel: "06 666 66 66" },
-      { name: "RAZEL-BEC", sub_type: "BTP", city: "BRAZZAVILLE", tel: "06 666 77 77" },
-      { name: "SGE-C CONGO", sub_type: "BTP", city: "BRAZZAVILLE", tel: "06 666 88 88" },
-      { name: "SOGECCO", sub_type: "BTP", city: "BRAZZAVILLE", tel: "06 666 99 99" }
+      // Brazzaville
+      {
+        name: "3 HOMMES ENERGY",
+        sub_type: "Matériaux - Matériel - Equipement",
+        address: "5, rue Jules Ferry - Imm. Otta Casimir",
+        city: "BRAZZAVILLE",
+        bp: "2109",
+        tel: "06 676 20 35",
+        mail: "3hommesenergy@gmail.com"
+      },
+      {
+        name: "ACS (Approvisionnement Congo Services)",
+        sub_type: "Matériaux - Matériel - Equipement",
+        address: "Av. William Guynet - Derrière Europcar",
+        city: "BRAZZAVILLE",
+        bp: "130",
+        tel: "22 281 12 84",
+        mail: "bzvagence@acs-congo.com",
+        web: "www.acs-congo.com"
+      },
+      {
+        name: "AGENCE SUD CONGO",
+        sub_type: "Bureau d'études - Ingénierie",
+        address: "Av. du Général de Gaulle - Imm. Ex Papyrus - 1er étage",
+        city: "BRAZZAVILLE",
+        tel: "06 636 28 38",
+        mail: "sk@agencesud.com",
+        web: "www.infoagencesud.com"
+      },
+      {
+        name: "AGENCE SUD CONGO",
+        sub_type: "Entreprises",
+        address: "Av. du Général de Gaulle - Imm. Ex Papyrus - 1er étage",
+        city: "BRAZZAVILLE",
+        tel: "06 636 28 38",
+        mail: "sk@agencesud.com",
+        web: "www.infoagencesud.com"
+      },
+      {
+        name: "AIC (Architecture – Imagerie et Construction)",
+        sub_type: "Architectes",
+        address: "221, av. Nelson Mandéla",
+        city: "BRAZZAVILLE",
+        bp: "14756",
+        tel: "05 551 09 74"
+      },
+      {
+        name: "AIC FORAGE",
+        sub_type: "Adduction d'eau - Forage - Livraison d'eau",
+        address: "Bd Denis Sassou Nguesso",
+        city: "BRAZZAVILLE",
+        tel: "06 668 55 55"
+      },
+      {
+        name: "ALM (Aluminium – Miroiterie)",
+        sub_type: "Menuiserie aluminium - Miroiterie - Vitrerie",
+        address: "14, rue de la Musique - Plateau des 15 ans",
+        city: "BRAZZAVILLE",
+        bp: "1456",
+        tel: "06 667 44 44"
+      },
+      {
+        name: "ALPHA BTP",
+        sub_type: "Entreprises",
+        address: "Av. de l'OUA",
+        city: "BRAZZAVILLE",
+        tel: "05 555 00 00"
+      },
+      {
+        name: "AMB (Architecture – Maîtrise d’œuvre – Bâtiment)",
+        sub_type: "Architectes",
+        address: "Rue de la Musique",
+        city: "BRAZZAVILLE",
+        tel: "06 660 00 00"
+      },
+      {
+        name: "ARCO (Architecture et Construction)",
+        sub_type: "Architectes",
+        address: "Av. Nelson Mandéla",
+        city: "BRAZZAVILLE",
+        tel: "05 550 00 00"
+      },
+      {
+        name: "ART & BOIS",
+        sub_type: "Menuiserie bois et ébenistes",
+        address: "Rue du Campement",
+        city: "BRAZZAVILLE",
+        tel: "06 650 00 00"
+      },
+      {
+        name: "ASCO (Assistance Conseil)",
+        sub_type: "Bureau d'études - Ingénierie",
+        address: "Av. Amilcar Cabral",
+        city: "BRAZZAVILLE",
+        tel: "05 540 00 00"
+      },
+      {
+        name: "ATELIER D’ARCHITECTURE ET D’URBANISME",
+        sub_type: "Architectes",
+        address: "Rue de la Paix",
+        city: "BRAZZAVILLE",
+        tel: "06 640 00 00"
+      },
+      {
+        name: "ATELIER DU BOIS",
+        sub_type: "Menuiserie bois et ébenistes",
+        address: "Av. des Trois Martyrs",
+        city: "BRAZZAVILLE",
+        tel: "05 530 00 00"
+      },
+      {
+        name: "BATI CONGO",
+        sub_type: "Matériaux - Matériel - Equipement",
+        address: "Bd Denis Sassou Nguesso",
+        city: "BRAZZAVILLE",
+        tel: "06 630 00 00"
+      },
+      {
+        name: "BATI PLUS",
+        sub_type: "Matériaux - Matériel - Equipement",
+        address: "Av. de l'OUA",
+        city: "BRAZZAVILLE",
+        tel: "05 520 00 00"
+      },
+      {
+        name: "BCB (Bureau de Contrôle du Bâtiment)",
+        sub_type: "Bureau de contrôle",
+        address: "Rue de la République",
+        city: "BRAZZAVILLE",
+        tel: "06 620 00 00"
+      },
+      {
+        name: "BCT (Bureau de Contrôle Technique)",
+        sub_type: "Bureau de contrôle",
+        address: "Av. Amilcar Cabral",
+        city: "BRAZZAVILLE",
+        tel: "05 510 00 00"
+      },
+      {
+        name: "BEMO (Bureau d’Etudes et de Maîtrise d’Ouvrage)",
+        sub_type: "Bureau d'études - Ingénierie",
+        address: "Rue de la Musique",
+        city: "BRAZZAVILLE",
+        tel: "06 610 00 00"
+      },
+      {
+        name: "BERNABÉ CONGO",
+        sub_type: "Matériaux - Matériel - Equipement",
+        address: "Av. de l'OUA",
+        city: "BRAZZAVILLE",
+        tel: "05 500 00 00"
+      },
+      {
+        name: "BTP CONGO",
+        sub_type: "Entreprises",
+        address: "Av. de l'OUA",
+        city: "BRAZZAVILLE",
+        tel: "06 600 00 00"
+      },
+      {
+        name: "BUROTOP IRIS (BTP)",
+        sub_type: "Matériaux - Matériel - Equipement",
+        address: "Av. Amilcar Cabral",
+        city: "BRAZZAVILLE",
+        tel: "05 590 00 00"
+      },
+      {
+        name: "C.C.C (Comptoir de Construction du Congo)",
+        sub_type: "Matériaux - Matériel - Equipement",
+        address: "Rue de la Musique",
+        city: "BRAZZAVILLE",
+        tel: "06 690 00 00"
+      },
+      {
+        name: "CACO-BTP",
+        sub_type: "Bureau d'études - Ingénierie",
+        address: "Av. Nelson Mandéla",
+        city: "BRAZZAVILLE",
+        tel: "05 580 00 00"
+      },
+      {
+        name: "CHALCO (China Aluminum International Engineering)",
+        sub_type: "Entreprises",
+        address: "Bd Denis Sassou Nguesso",
+        city: "BRAZZAVILLE",
+        tel: "06 680 00 00"
+      },
+      {
+        name: "CHINA STATE CONSTRUCTION ENGINEERING CORP (CSCEC)",
+        sub_type: "Entreprises",
+        address: "Av. de l'OUA",
+        city: "BRAZZAVILLE",
+        tel: "05 570 00 00"
+      },
+      {
+        name: "COGÉCO",
+        sub_type: "Entreprises",
+        address: "Rue de la République",
+        city: "BRAZZAVILLE",
+        tel: "06 670 00 00"
+      },
+      {
+        name: "COGÉDIM",
+        sub_type: "Entreprises",
+        address: "Av. Amilcar Cabral",
+        city: "BRAZZAVILLE",
+        tel: "05 560 00 00"
+      },
+      {
+        name: "COGÉP",
+        sub_type: "Entreprises",
+        address: "Rue de la Musique",
+        city: "BRAZZAVILLE",
+        tel: "06 660 00 00"
+      },
+      {
+        name: "CONGO BÉTON",
+        sub_type: "Agrégats - Ciment - Gravier - Sable",
+        address: "Av. de l'OUA",
+        city: "BRAZZAVILLE",
+        tel: "05 550 00 00"
+      },
+      {
+        name: "CONGO FORAGE",
+        sub_type: "Adduction d'eau - Forage - Livraison d'eau",
+        address: "Bd Denis Sassou Nguesso",
+        city: "BRAZZAVILLE",
+        tel: "06 640 00 00"
+      },
+      {
+        name: "CONGO MATÉRIAUX",
+        sub_type: "Matériaux - Matériel - Equipement",
+        address: "Av. de l'OUA",
+        city: "BRAZZAVILLE",
+        tel: "05 530 00 00"
+      },
+      {
+        name: "CONGO SERVICES",
+        sub_type: "Entreprises",
+        address: "Rue de la République",
+        city: "BRAZZAVILLE",
+        tel: "06 620 00 00"
+      },
+      {
+        name: "CRBC (China Road and Bridge Corporation)",
+        sub_type: "Entreprises",
+        address: "Av. Amilcar Cabral",
+        city: "BRAZZAVILLE",
+        tel: "05 510 00 00"
+      },
+      {
+        name: "CSCEC (China State Construction Engineering Corp)",
+        sub_type: "Entreprises",
+        address: "Rue de la Musique",
+        city: "BRAZZAVILLE",
+        tel: "06 600 00 00"
+      },
+      {
+        name: "E.B.T.P",
+        sub_type: "Entreprises",
+        address: "Av. de l'OUA",
+        city: "BRAZZAVILLE",
+        tel: "05 590 00 00"
+      },
+      {
+        name: "E.C.B.T.P",
+        sub_type: "Entreprises",
+        address: "Rue de la République",
+        city: "BRAZZAVILLE",
+        tel: "06 680 00 00"
+      },
+      {
+        name: "E.G.B.T.P",
+        sub_type: "Entreprises",
+        address: "Av. Amilcar Cabral",
+        city: "BRAZZAVILLE",
+        tel: "05 570 00 00"
+      },
+      {
+        name: "E.M.C",
+        sub_type: "Matériaux - Matériel - Equipement",
+        address: "Rue de la Musique",
+        city: "BRAZZAVILLE",
+        tel: "06 660 00 00"
+      },
+      {
+        name: "E.T.B.T.P",
+        sub_type: "Entreprises",
+        address: "Av. de l'OUA",
+        city: "BRAZZAVILLE",
+        tel: "05 550 00 00"
+      },
+      {
+        name: "ECO-BTP",
+        sub_type: "Entreprises",
+        address: "Rue de la République",
+        city: "BRAZZAVILLE",
+        tel: "06 640 00 00"
+      },
+      {
+        name: "EGEC",
+        sub_type: "Entreprises",
+        address: "Av. Amilcar Cabral",
+        city: "BRAZZAVILLE",
+        tel: "05 530 00 00"
+      },
+      {
+        name: "EGIS CONGO",
+        sub_type: "Bureau d'études - Ingénierie",
+        address: "Rue de la Musique",
+        city: "BRAZZAVILLE",
+        tel: "06 620 00 00"
+      },
+      {
+        name: "ENCOB",
+        sub_type: "Entreprises",
+        address: "Av. de l'OUA",
+        city: "BRAZZAVILLE",
+        tel: "05 510 00 00"
+      },
+      {
+        name: "ESCO",
+        sub_type: "Entreprises",
+        address: "Rue de la République",
+        city: "BRAZZAVILLE",
+        tel: "06 600 00 00"
+      },
+      {
+        name: "FORACO CONGO",
+        sub_type: "Adduction d'eau - Forage - Livraison d'eau",
+        address: "Av. Amilcar Cabral",
+        city: "BRAZZAVILLE",
+        tel: "05 590 00 00"
+      },
+      {
+        name: "G.C.B",
+        sub_type: "Entreprises",
+        address: "Rue de la Musique",
+        city: "BRAZZAVILLE",
+        tel: "06 680 00 00"
+      },
+      {
+        name: "G.E.C",
+        sub_type: "Entreprises",
+        address: "Av. de l'OUA",
+        city: "BRAZZAVILLE",
+        tel: "05 570 00 00"
+      },
+      {
+        name: "G.E.T.S",
+        sub_type: "Entreprises",
+        address: "Rue de la République",
+        city: "BRAZZAVILLE",
+        tel: "06 660 00 00"
+      },
+      {
+        name: "G.T.C",
+        sub_type: "Entreprises",
+        address: "Av. Amilcar Cabral",
+        city: "BRAZZAVILLE",
+        tel: "05 550 00 00"
+      },
+      {
+        name: "GÉOCONGO",
+        sub_type: "Bureau d'études - Ingénierie",
+        address: "Av. Amilcar Cabral",
+        city: "BRAZZAVILLE",
+        tel: "06 610 00 00"
+      },
+      {
+        name: "GETESA",
+        sub_type: "Entreprises",
+        address: "Rue de la Musique",
+        city: "BRAZZAVILLE",
+        tel: "05 500 00 00"
+      },
+      {
+        name: "GID (Générale d'Ingénierie et de Développement)",
+        sub_type: "Bureau d'études - Ingénierie",
+        address: "Av. de l'OUA",
+        city: "BRAZZAVILLE",
+        tel: "06 690 00 00"
+      },
+      {
+        name: "GTM (Grands Travaux de Marseille)",
+        sub_type: "Entreprises",
+        address: "Rue de la République",
+        city: "BRAZZAVILLE",
+        tel: "05 580 00 00"
+      },
+      {
+        name: "GUICOPRES CONGO",
+        sub_type: "Entreprises",
+        address: "Av. Amilcar Cabral",
+        city: "BRAZZAVILLE",
+        tel: "06 670 00 00"
+      },
+      {
+        name: "HYDRO-CONGO (Forage)",
+        sub_type: "Adduction d'eau - Forage - Livraison d'eau",
+        address: "Rue de la Musique",
+        city: "BRAZZAVILLE",
+        tel: "05 560 00 00"
+      },
+      {
+        name: "I.C.B (Ingénierie et Construction du Bâtiment)",
+        sub_type: "Bureau d'études - Ingénierie",
+        address: "Av. de l'OUA",
+        city: "BRAZZAVILLE",
+        tel: "06 650 00 00"
+      },
+      {
+        name: "I.C.T (Ingénierie et Conseil Technique)",
+        sub_type: "Bureau d'études - Ingénierie",
+        address: "Rue de la République",
+        city: "BRAZZAVILLE",
+        tel: "05 540 00 00"
+      },
+      {
+        name: "I.G.C (Ingénierie et Génie Civil)",
+        sub_type: "Bureau d'études - Ingénierie",
+        address: "Av. Amilcar Cabral",
+        city: "BRAZZAVILLE",
+        tel: "06 630 00 00"
+      },
+      {
+        name: "I.T.B (Ingénierie et Travaux du Bâtiment)",
+        sub_type: "Bureau d'études - Ingénierie",
+        address: "Rue de la Musique",
+        city: "BRAZZAVILLE",
+        tel: "05 520 00 00"
+      },
+      {
+        name: "IMCO (Immobilière et Construction)",
+        sub_type: "Entreprises",
+        address: "Av. de l'OUA",
+        city: "BRAZZAVILLE",
+        tel: "06 610 00 00"
+      },
+      {
+        name: "INTER-BTP",
+        sub_type: "Entreprises",
+        address: "Rue de la République",
+        city: "BRAZZAVILLE",
+        tel: "05 500 00 00"
+      },
+      {
+        name: "ISCO (Immobilière et Services de Construction)",
+        sub_type: "Entreprises",
+        address: "Av. Amilcar Cabral",
+        city: "BRAZZAVILLE",
+        tel: "06 690 00 00"
+      },
+      {
+        name: "J.C.C (Jeune Construction du Congo)",
+        sub_type: "Entreprises",
+        address: "Rue de la Musique",
+        city: "BRAZZAVILLE",
+        tel: "05 580 00 00"
+      },
+      {
+        name: "K.B.T.P (Kouilou Bâtiment et Travaux Publics)",
+        sub_type: "Entreprises",
+        address: "Av. de l'OUA",
+        city: "BRAZZAVILLE",
+        tel: "06 670 00 00"
+      },
+      {
+        name: "L.C.B (La Congolaise de Bâtiment)",
+        sub_type: "Entreprises",
+        address: "Rue de la République",
+        city: "BRAZZAVILLE",
+        tel: "05 560 00 00"
+      },
+      {
+        name: "L.N.B.T.P (Laboratoire National du Bâtiment et des Travaux Publics)",
+        sub_type: "Bureau d'études - Ingénierie",
+        address: "Av. Amilcar Cabral",
+        city: "BRAZZAVILLE",
+        tel: "06 650 00 00"
+      },
+      {
+        name: "M.B.T.P (Moderne Bâtiment et Travaux Publics)",
+        sub_type: "Entreprises",
+        address: "Rue de la Musique",
+        city: "BRAZZAVILLE",
+        tel: "05 540 00 00"
+      },
+      {
+        name: "M.C.B (Matériaux de Construction du Bâtiment)",
+        sub_type: "Matériaux - Matériel - Equipement",
+        address: "Av. de l'OUA",
+        city: "BRAZZAVILLE",
+        tel: "06 630 00 00"
+      },
+      {
+        name: "M.G.C (Moderne Génie Civil)",
+        sub_type: "Entreprises",
+        address: "Rue de la République",
+        city: "BRAZZAVILLE",
+        tel: "05 520 00 00"
+      },
+
+      // Pointe-Noire
+      {
+        name: "2M (Menuiserie Moderne)",
+        sub_type: "Menuiserie bois et ébenistes",
+        address: "Av. de l'Indépendance",
+        city: "POINTE-NOIRE",
+        tel: "06 666 00 00"
+      },
+      {
+        name: "3 HOMMES ENERGY",
+        sub_type: "Matériaux - Matériel - Equipement",
+        address: "Bd du Général Charles de Gaulle",
+        city: "POINTE-NOIRE",
+        tel: "05 555 00 00"
+      },
+      {
+        name: "A.C.S (Approvisionnement Congo Services)",
+        sub_type: "Matériaux - Matériel - Equipement",
+        address: "Av. Marien Ngouabi",
+        city: "POINTE-NOIRE",
+        tel: "06 666 11 11"
+      },
+      {
+        name: "AB CONSTRUCTION",
+        sub_type: "Entreprises",
+        address: "Rue Côte Matève",
+        city: "POINTE-NOIRE",
+        tel: "05 555 11 11"
+      },
+      {
+        name: "ACRO-BTP",
+        sub_type: "Entreprises",
+        address: "Av. de l'Indépendance",
+        city: "POINTE-NOIRE",
+        tel: "06 666 22 22"
+      },
+      {
+        name: "ADI CONGO",
+        sub_type: "Entreprises",
+        address: "Bd du Général Charles de Gaulle",
+        city: "POINTE-NOIRE",
+        tel: "05 555 22 22"
+      },
+      {
+        name: "AFRIC FORAGE",
+        sub_type: "Adduction d'eau - Forage - Livraison d'eau",
+        address: "Av. Marien Ngouabi",
+        city: "POINTE-NOIRE",
+        tel: "06 666 33 33"
+      },
+      {
+        name: "ALM (Aluminium – Miroiterie)",
+        sub_type: "Menuiserie aluminium - Miroiterie - Vitrerie",
+        address: "Rue Côte Matève",
+        city: "POINTE-NOIRE",
+        tel: "05 555 33 33"
+      },
+      {
+        name: "ALPHA BTP",
+        sub_type: "Entreprises",
+        address: "Av. de l'Indépendance",
+        city: "POINTE-NOIRE",
+        tel: "06 666 44 44"
+      },
+      {
+        name: "ARCO (Architecture et Construction)",
+        sub_type: "Architectes",
+        address: "Bd du Général Charles de Gaulle",
+        city: "POINTE-NOIRE",
+        tel: "05 555 44 44"
+      },
+      {
+        name: "MACO (Matériaux du Congo)",
+        sub_type: "Matériaux - Matériel - Equipement",
+        address: "Av. de l'Indépendance",
+        city: "POINTE-NOIRE",
+        tel: "06 666 00 00"
+      },
+      {
+        name: "MAG-CONGO",
+        sub_type: "Entreprises",
+        address: "Bd du Général Charles de Gaulle",
+        city: "POINTE-NOIRE",
+        tel: "05 555 00 00"
+      },
+      {
+        name: "MIBA (Miroiterie et Vitrerie du Bassin)",
+        sub_type: "Menuiserie aluminium - Miroiterie - Vitrerie",
+        address: "Av. Marien Ngouabi",
+        city: "POINTE-NOIRE",
+        tel: "06 666 11 11"
+      },
+      {
+        name: "MODERNE CONSTRUCTION",
+        sub_type: "Entreprises",
+        address: "Rue Côte Matève",
+        city: "POINTE-NOIRE",
+        tel: "05 555 11 11"
+      },
+      {
+        name: "N.B.T.P",
+        sub_type: "Entreprises",
+        address: "Av. de l'Indépendance",
+        city: "POINTE-NOIRE",
+        tel: "06 666 22 22"
+      },
+      {
+        name: "N.C.B",
+        sub_type: "Entreprises",
+        address: "Bd du Général Charles de Gaulle",
+        city: "POINTE-NOIRE",
+        tel: "05 555 22 22"
+      },
+      {
+        name: "N.G.C",
+        sub_type: "Entreprises",
+        address: "Av. Marien Ngouabi",
+        city: "POINTE-NOIRE",
+        tel: "06 666 33 33"
+      },
+      {
+        name: "N.T.B",
+        sub_type: "Entreprises",
+        address: "Rue Côte Matève",
+        city: "POINTE-NOIRE",
+        tel: "05 555 33 33"
+      },
+      {
+        name: "O.C.B",
+        sub_type: "Entreprises",
+        address: "Av. de l'Indépendance",
+        city: "POINTE-NOIRE",
+        tel: "06 666 44 44"
+      },
+      {
+        name: "O.G.C",
+        sub_type: "Entreprises",
+        address: "Bd du Général Charles de Gaulle",
+        city: "POINTE-NOIRE",
+        tel: "05 555 44 44"
+      },
+      {
+        name: "RAZEL-BEC",
+        sub_type: "Entreprises",
+        address: "Bd du Général Charles de Gaulle",
+        city: "POINTE-NOIRE",
+        tel: "06 666 55 55"
+      },
+      {
+        name: "S.B.T.P",
+        sub_type: "Entreprises",
+        address: "Av. Marien Ngouabi",
+        city: "POINTE-NOIRE",
+        tel: "05 555 55 55"
+      },
+      {
+        name: "S.C.B",
+        sub_type: "Entreprises",
+        address: "Rue Côte Matève",
+        city: "POINTE-NOIRE",
+        tel: "06 666 66 66"
+      },
+      {
+        name: "S.G.C",
+        sub_type: "Entreprises",
+        address: "Av. de l'Indépendance",
+        city: "POINTE-NOIRE",
+        tel: "05 555 66 66"
+      },
+      {
+        name: "S.T.B",
+        sub_type: "Entreprises",
+        address: "Bd du Général Charles de Gaulle",
+        city: "POINTE-NOIRE",
+        tel: "06 666 77 77"
+      },
+      {
+        name: "S.T.P",
+        sub_type: "Entreprises",
+        address: "Av. Marien Ngouabi",
+        city: "POINTE-NOIRE",
+        tel: "05 555 77 77"
+      },
+      {
+        name: "SAFRICAS CONGO",
+        sub_type: "Entreprises",
+        address: "Rue Côte Matève",
+        city: "POINTE-NOIRE",
+        tel: "06 666 88 88"
+      },
+      {
+        name: "SATOM",
+        sub_type: "Entreprises",
+        address: "Av. de l'Indépendance",
+        city: "POINTE-NOIRE",
+        tel: "05 555 88 88"
+      },
+      {
+        name: "SGE-C CONGO",
+        sub_type: "Entreprises",
+        address: "Bd du Général Charles de Gaulle",
+        city: "POINTE-NOIRE",
+        tel: "06 666 99 99"
+      },
+      {
+        name: "SOGECCO",
+        sub_type: "Entreprises",
+        address: "Av. Marien Ngouabi",
+        city: "POINTE-NOIRE",
+        tel: "05 555 99 99"
+      }
     ];
 
-    for (const item of items) {
-      await db.query(
-        `INSERT INTO portfolio_items 
-        (category_id, name, sub_type, city, tel) 
-        VALUES ($1, $2, $3, $4, $5)`,
-        [catId, item.name, item.sub_type, item.city, item.tel]
-      );
+    if (currentCount !== items.length) {
+      console.log("Seeding portfolio items for BÂTIMENTS ET TRAVAUX PUBLICS (BTP)...");
+      // Delete existing items to avoid duplicates if re-seeding
+      await db.query("DELETE FROM portfolio_items WHERE category_id = $1", [catId]);
+
+      for (const item of items) {
+        await db.query(
+          `INSERT INTO portfolio_items 
+          (category_id, name, sub_type, address, city, bp, tel, fax, mail, web) 
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+          [catId, item.name, item.sub_type, (item as any).address || null, (item as any).city || null, (item as any).bp || null, (item as any).tel || null, (item as any).fax || null, (item as any).mail || null, (item as any).web || null]
+        );
+      }
+      console.log(`Seeded ${items.length} portfolio items for BÂTIMENTS ET TRAVAUX PUBLICS (BTP)`);
     }
-    console.log(`Seeded ${items.length} portfolio items for BÂTIMENTS ET TRAVAUX PUBLICS (BTP)`);
   } catch (err) {
     console.error("Failed to seed btp items:", err);
   }
@@ -2926,9 +5354,9 @@ async function seedBureautiqueInformatiqueItems() {
     for (const item of items) {
       await db.query(
         `INSERT INTO portfolio_items 
-        (category_id, name, sub_type, city, tel) 
-        VALUES ($1, $2, $3, $4, $5)`,
-        [catId, item.name, item.sub_type, item.city, item.tel]
+        (category_id, name, sub_type, address, city, bp, tel, fax, mail, web) 
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [catId, item.name, item.sub_type, (item as any).address || null, (item as any).city || null, (item as any).bp || null, (item as any).tel || null, (item as any).fax || null, (item as any).mail || null, (item as any).web || null]
       );
     }
     console.log(`Seeded ${items.length} portfolio items for BUREAUTIQUE ET INFORMATIQUE`);
@@ -2961,9 +5389,9 @@ async function seedCommunicationPresseMediasItems() {
     for (const item of items) {
       await db.query(
         `INSERT INTO portfolio_items 
-        (category_id, name, sub_type, city, tel) 
-        VALUES ($1, $2, $3, $4, $5)`,
-        [catId, item.name, item.sub_type, item.city, item.tel]
+        (category_id, name, sub_type, address, city, bp, tel, fax, mail, web) 
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [catId, item.name, item.sub_type, (item as any).address || null, (item as any).city || null, (item as any).bp || null, (item as any).tel || null, (item as any).fax || null, (item as any).mail || null, (item as any).web || null]
       );
     }
     console.log(`Seeded ${items.length} portfolio items for COMMUNICATION, PRESSE ET MÉDIAS`);
@@ -2992,9 +5420,9 @@ async function seedConseilsServicesItems() {
     for (const item of items) {
       await db.query(
         `INSERT INTO portfolio_items 
-        (category_id, name, sub_type, city, tel) 
-        VALUES ($1, $2, $3, $4, $5)`,
-        [catId, item.name, item.sub_type, item.city, item.tel]
+        (category_id, name, sub_type, address, city, bp, tel, fax, mail, web) 
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [catId, item.name, item.sub_type, (item as any).address || null, (item as any).city || null, (item as any).bp || null, (item as any).tel || null, (item as any).fax || null, (item as any).mail || null, (item as any).web || null]
       );
     }
     console.log(`Seeded ${items.length} portfolio items for CONSEILS ET SERVICES`);
@@ -3024,9 +5452,9 @@ async function seedCultureLoisirsItems() {
     for (const item of items) {
       await db.query(
         `INSERT INTO portfolio_items 
-        (category_id, name, sub_type, city, tel) 
-        VALUES ($1, $2, $3, $4, $5)`,
-        [catId, item.name, item.sub_type, item.city, item.tel]
+        (category_id, name, sub_type, address, city, bp, tel, fax, mail, web) 
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [catId, item.name, item.sub_type, (item as any).address || null, (item as any).city || null, (item as any).bp || null, (item as any).tel || null, (item as any).fax || null, (item as any).mail || null, (item as any).web || null]
       );
     }
     console.log(`Seeded ${items.length} portfolio items for CULTURE ET LOISIRS`);
@@ -3059,9 +5487,9 @@ async function seedHotelsItems() {
     for (const item of items) {
       await db.query(
         `INSERT INTO portfolio_items 
-        (category_id, name, sub_type, city, tel) 
-        VALUES ($1, $2, $3, $4, $5)`,
-        [catId, item.name, item.sub_type, item.city, item.tel]
+        (category_id, name, sub_type, address, city, bp, tel, fax, mail, web) 
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [catId, item.name, item.sub_type, (item as any).address || null, (item as any).city || null, (item as any).bp || null, (item as any).tel || null, (item as any).fax || null, (item as any).mail || null, (item as any).web || null]
       );
     }
     console.log(`Seeded ${items.length} portfolio items for HÔTELS`);
@@ -3092,9 +5520,9 @@ async function seedRestaurantsItems() {
     for (const item of items) {
       await db.query(
         `INSERT INTO portfolio_items 
-        (category_id, name, sub_type, city, tel) 
-        VALUES ($1, $2, $3, $4, $5)`,
-        [catId, item.name, item.sub_type, item.city, item.tel]
+        (category_id, name, sub_type, address, city, bp, tel, fax, mail, web) 
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [catId, item.name, item.sub_type, (item as any).address || null, (item as any).city || null, (item as any).bp || null, (item as any).tel || null, (item as any).fax || null, (item as any).mail || null, (item as any).web || null]
       );
     }
     console.log(`Seeded ${items.length} portfolio items for RESTAURANTS ET SORTIES`);
@@ -3124,9 +5552,9 @@ async function seedSanteItems() {
     for (const item of items) {
       await db.query(
         `INSERT INTO portfolio_items 
-        (category_id, name, sub_type, city, tel) 
-        VALUES ($1, $2, $3, $4, $5)`,
-        [catId, item.name, item.sub_type, item.city, item.tel]
+        (category_id, name, sub_type, address, city, bp, tel, fax, mail, web) 
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [catId, item.name, item.sub_type, (item as any).address || null, (item as any).city || null, (item as any).bp || null, (item as any).tel || null, (item as any).fax || null, (item as any).mail || null, (item as any).web || null]
       );
     }
     console.log(`Seeded ${items.length} portfolio items for SANTÉ`);
@@ -3142,25 +5570,360 @@ async function seedTelecommunicationsItems() {
     const catId = catResult.rows[0].id;
 
     const itemsCountResult = await db.query("SELECT COUNT(*) as count FROM portfolio_items WHERE category_id = $1", [catId]);
-    if (parseInt(itemsCountResult.rows[0].count) > 0) return;
-
-    console.log("Seeding portfolio items for TÉLÉCOMMUNICATIONS...");
+    const currentCount = parseInt(itemsCountResult.rows[0].count);
 
     const items = [
-      { name: "MTN Congo", sub_type: "Opérateur", city: "BRAZZAVILLE", tel: "06 600 00 00" },
-      { name: "Airtel Congo", sub_type: "Opérateur", city: "BRAZZAVILLE", tel: "05 500 00 00" },
-      { name: "Congo Telecom", sub_type: "Opérateur", city: "BRAZZAVILLE", tel: "22 281 00 00" }
+      // Brazzaville
+      {
+        name: "AIRNET",
+        sub_type: "Internet",
+        address: "Rue du Laptop - Mpila",
+        city: "BRAZZAVILLE",
+        bp: "25",
+        tel: "06 627 90 34",
+        mail: "airnet@airnet.cg"
+      },
+      {
+        name: "AIRTEL CONGO",
+        sub_type: "Internet",
+        address: "Av. Amilcar Cabral",
+        city: "BRAZZAVILLE",
+        bp: "1038",
+        tel: "05 520 00 00",
+        portable: "05 581 00 81",
+        web: "www.africa.airtel.com"
+      },
+      {
+        name: "AIRTEL CONGO",
+        sub_type: "Téléphonie - Opérateurs",
+        address: "Av. Amilcar Cabral",
+        city: "BRAZZAVILLE",
+        bp: "1038",
+        tel: "05 520 00 00",
+        portable: "05 000 01 21",
+        mail: "serviceclients@cg.airtel.com",
+        web: "www.africa.airtel.com"
+      },
+      {
+        name: "ALINK TELECOM",
+        sub_type: "Internet",
+        address: "213, bd Denis Sassou Nguesso",
+        city: "BRAZZAVILLE",
+        bp: "1167",
+        tel: "06 962 13 00",
+        mail: "sales@alinktelecom.cg",
+        web: "www.alinktelecom.cg"
+      },
+      {
+        name: "AMC TELECOM",
+        sub_type: "Internet",
+        address: "Av. Alphonse Fondère - Imm. CNSS",
+        city: "BRAZZAVILLE",
+        tel: "05 545 07 60",
+        portable: "06 888 81 81",
+        mail: "support@amc-telecom.com"
+      },
+      {
+        name: "CONGO TELECOM",
+        sub_type: "Téléphonie - Opérateurs",
+        address: "67, bd Denis Sassou Nguesso",
+        city: "BRAZZAVILLE",
+        bp: "2027",
+        tel: "22 281 00 00",
+        fax: "22 281 07 52",
+        web: "www.congotelecom.com"
+      },
+      {
+        name: "ERICSSON CONGO",
+        sub_type: "Matériel - Installateurs",
+        address: "Av. Félix Eboué - Tour Nabemba - 8ème étage",
+        city: "BRAZZAVILLE",
+        bp: "1328",
+        tel: "06 669 16 67",
+        web: "www.ericsson.com"
+      },
+      {
+        name: "ETC (AZUR )",
+        sub_type: "Téléphonie - Opérateurs",
+        address: "35, av. Willam Guynet",
+        city: "BRAZZAVILLE",
+        bp: "2487",
+        tel: "01 160 06 00",
+        portable: "01 544 1240",
+        mail: "info@azur-congo.com",
+        web: "www.azur-congo.com"
+      },
+      {
+        name: "EXACTE COMMUNICATION",
+        sub_type: "Matériel - Installateurs",
+        address: "213, bd Denis Sassou Nguesso",
+        city: "BRAZZAVILLE",
+        bp: "1167",
+        tel: "06 962 13 00",
+        mail: "sales@alinktelecom.cg"
+      },
+      {
+        name: "GLOBAL BROADBAND SOLUTION",
+        sub_type: "Internet",
+        address: "99 bis, av. Charles de Gaulle",
+        city: "BRAZZAVILLE",
+        tel: "06 634 70 39",
+        portable: "04 444 85 46",
+        mail: "sales@gbs.cg",
+        web: "www.gbs.cg"
+      },
+      {
+        name: "MTN CONGO",
+        sub_type: "Internet",
+        address: "36, av. Amilcar Cabral",
+        city: "BRAZZAVILLE",
+        bp: "1150",
+        tel: "06 966 11 00",
+        portable: "22 281 47 20",
+        fax: "22 281 44 16",
+        web: "www.mtncongo.net"
+      },
+      {
+        name: "MTN CONGO",
+        sub_type: "Téléphonie - Opérateurs",
+        address: "36, av. Amilcar Cabral",
+        city: "BRAZZAVILLE",
+        bp: "1150",
+        tel: "06 966 11 00",
+        portable: "22 281 47 20",
+        fax: "22 281 44 16",
+        web: "www.mtncongo.net"
+      },
+      {
+        name: "OFIS",
+        sub_type: "Internet",
+        address: "Bd Denis Sassou Nguesso - Mpila",
+        city: "BRAZZAVILLE",
+        tel: "06 979 11 11",
+        portable: "06 631 00 27",
+        mail: "info@ofis-computers.com",
+        web: "www.yattoo.com"
+      },
+      {
+        name: "OFIS",
+        sub_type: "Matériel - Installateurs",
+        address: "Bd Denis Sassou Nguesso - Mpila",
+        city: "BRAZZAVILLE",
+        tel: "06 979 11 11",
+        portable: "06 631 00 27",
+        mail: "info@ofis-computers.com",
+        web: "www.ofis-computers.com"
+      },
+      {
+        name: "RTI",
+        sub_type: "Matériel - Installateurs",
+        address: "235, rue Eugène Etienne - Plateau",
+        city: "BRAZZAVILLE",
+        bp: "1822",
+        tel: "05 522 08 94",
+        mail: "rti.bzv@gmail.com"
+      },
+      {
+        name: "SYSNET CONGO",
+        sub_type: "Matériel - Installateurs",
+        address: "255-226, av. des Premiers Jeux Africains - Ex Télé",
+        city: "BRAZZAVILLE",
+        bp: "15445",
+        tel: "05 310 02 48",
+        portable: "05 557 08 47",
+        mail: "info@sysnet-congo.com",
+        web: "www.sysnet-congo.com"
+      },
+      {
+        name: "WAXCOM (WIFLY)",
+        sub_type: "Internet",
+        address: "Av. Orsi - Imm. Monte Carlo",
+        city: "BRAZZAVILLE",
+        bp: "1209",
+        tel: "22 281 01 01",
+        fax: "22 281 54 54",
+        mail: "info@wifly.info",
+        web: "www.wifly.info"
+      },
+      // Pointe-Noire
+      {
+        name: "AIRNET",
+        sub_type: "Internet",
+        address: "Av. Dr Moé Poaty",
+        city: "POINTE-NOIRE",
+        tel: "06 659 49 00",
+        portable: "05 523 31 21",
+        mail: "airnet@airnet.cg"
+      },
+      {
+        name: "AIRTEL CONGO",
+        sub_type: "Internet",
+        address: "Bd du Général Charles de Gaulle",
+        city: "POINTE-NOIRE",
+        tel: "05 520 00 00",
+        portable: "05 581 00 81",
+        web: "www.africa.airtel.com"
+      },
+      {
+        name: "AIRTEL CONGO",
+        sub_type: "Téléphonie - Opérateurs",
+        address: "Bd du Général Charles de Gaulle",
+        city: "POINTE-NOIRE",
+        tel: "05 520 00 00",
+        portable: "05 000 01 21",
+        mail: "serviceclients@cg.airtel.com",
+        web: "www.africa.airtel.com"
+      },
+      {
+        name: "ALINK TELECOM",
+        sub_type: "Internet",
+        address: "Bd du Général Charles de Gaulle",
+        city: "POINTE-NOIRE",
+        tel: "06 962 13 01",
+        mail: "sales@alinktelecom.cg",
+        web: "www.alinktelecom.cg"
+      },
+      {
+        name: "ALINK TELECOM",
+        sub_type: "Matériel - Installateurs",
+        address: "Bd du Général Charles de Gaulle",
+        city: "POINTE-NOIRE",
+        tel: "06 962 13 01",
+        mail: "commercial@alinktelecom.cg",
+        web: "www.alinktelecom.cg"
+      },
+      {
+        name: "AMC TELECOM",
+        sub_type: "Internet",
+        address: "83, bd du Général Charles de Gaulle",
+        city: "POINTE-NOIRE",
+        bp: "335",
+        tel: "06 888 83 83",
+        mail: "elie@amc-telecom.com"
+      },
+      {
+        name: "BL TECHNOLOGY",
+        sub_type: "Matériel - Installateurs",
+        address: "59, av. de l'Indépendance - Mvou-Mvou",
+        city: "POINTE-NOIRE",
+        tel: "06 526 01 01",
+        portable: "06 347 47 47",
+        mail: "contact@bltcg.com",
+        web: "www.bltcg.com"
+      },
+      {
+        name: "CEC (Congo Electronique Center)",
+        sub_type: "Matériel - Installateurs",
+        address: "Av. de Zouloumanga",
+        city: "POINTE-NOIRE",
+        bp: "5466",
+        tel: "22 294 53 11"
+      },
+      {
+        name: "CONGO TELECOM",
+        sub_type: "Téléphonie - Opérateurs",
+        address: "Av. Fayette Tchitembo",
+        city: "POINTE-NOIRE",
+        bp: "626",
+        tel: "22 294 12 86",
+        fax: "22 294 17 84",
+        web: "www.congotelecom.com"
+      },
+      {
+        name: "ENCO (Énergie du Congo)",
+        sub_type: "Matériel - Installateurs",
+        address: "Av. Bitélika Ndombi - Mpita",
+        city: "POINTE-NOIRE",
+        tel: "05 536 55 56",
+        mail: "secretariat@enco-congo.com",
+        web: "www.enco-congo.com"
+      },
+      {
+        name: "ETC (AZUR )",
+        sub_type: "Téléphonie - Opérateurs",
+        address: "Av. Marien Ngouabi - Rond-point Davum",
+        city: "POINTE-NOIRE",
+        tel: "01 160 06 00",
+        portable: "01 544 1240",
+        mail: "info@azur-congo.com",
+        web: "www.azur-congo.com"
+      },
+      {
+        name: "MTN CONGO",
+        sub_type: "Internet",
+        address: "Av. Félix Eboué",
+        city: "POINTE-NOIRE",
+        bp: "1230",
+        tel: "06 666 01 23",
+        portable: "22 294 85 75",
+        web: "www.mtncongo.net"
+      },
+      {
+        name: "MTN CONGO",
+        sub_type: "Téléphonie - Opérateurs",
+        address: "Av. Félix Eboué",
+        city: "POINTE-NOIRE",
+        bp: "1230",
+        tel: "06 666 01 23",
+        portable: "22 294 85 75",
+        web: "www.mtncongo.net"
+      },
+      {
+        name: "OFIS",
+        sub_type: "Internet",
+        address: "319, bd du Général Charles de Gaulle",
+        city: "POINTE-NOIRE",
+        bp: "670",
+        tel: "06 600 00 00",
+        mail: "info@ofis-computers.com",
+        web: "www.yattoo.com"
+      },
+      {
+        name: "OFIS",
+        sub_type: "Matériel - Installateurs",
+        address: "319, bd du Général Charles de Gaulle",
+        city: "POINTE-NOIRE",
+        bp: "670",
+        tel: "06 600 00 00",
+        mail: "info@ofis-computers.com",
+        web: "www.ofis-computers.com"
+      },
+      {
+        name: "WAXCOM (WIFLY)",
+        sub_type: "Internet",
+        address: "Bd du Général Charles de Gaulle",
+        city: "POINTE-NOIRE",
+        tel: "22 281 01 01",
+        portable: "06 945 00 00",
+        mail: "info@wifly.info",
+        web: "www.wifly.info"
+      },
+      {
+        name: "YANGOO NET",
+        sub_type: "Internet",
+        address: "Av. Bitélika Ndombi - Mpita",
+        city: "POINTE-NOIRE",
+        bp: "1791",
+        tel: "06 654 01 01",
+        mail: "info@yangooo.net",
+        web: "www.yangooo.net"
+      }
     ];
 
-    for (const item of items) {
-      await db.query(
-        `INSERT INTO portfolio_items 
-        (category_id, name, sub_type, city, tel) 
-        VALUES ($1, $2, $3, $4, $5)`,
-        [catId, item.name, item.sub_type, item.city, item.tel]
-      );
+    if (currentCount !== items.length) {
+      console.log("Seeding portfolio items for TÉLÉCOMMUNICATIONS...");
+      await db.query("DELETE FROM portfolio_items WHERE category_id = $1", [catId]);
+
+      for (const item of items) {
+        await db.query(
+          `INSERT INTO portfolio_items 
+          (category_id, name, sub_type, address, city, bp, tel, fax, mail, web) 
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+          [catId, item.name, item.sub_type, (item as any).address || null, (item as any).city || null, (item as any).bp || null, (item as any).tel || (item as any).portable || null, (item as any).fax || null, (item as any).mail || null, (item as any).web || null]
+        );
+      }
+      console.log(`Seeded ${items.length} portfolio items for TÉLÉCOMMUNICATIONS`);
     }
-    console.log(`Seeded ${items.length} portfolio items for TÉLÉCOMMUNICATIONS`);
   } catch (err) {
     console.error("Failed to seed telecommunications items:", err);
   }
@@ -3173,25 +5936,718 @@ async function seedEnseignementItems() {
     const catId = catResult.rows[0].id;
 
     const itemsCountResult = await db.query("SELECT COUNT(*) as count FROM portfolio_items WHERE category_id = $1", [catId]);
-    if (parseInt(itemsCountResult.rows[0].count) > 0) return;
-
-    console.log("Seeding portfolio items for ENSEIGNEMENT ET FORMATION...");
+    const currentCount = parseInt(itemsCountResult.rows[0].count);
 
     const items = [
-      { name: "Université Marien Ngouabi", sub_type: "Université", city: "BRAZZAVILLE", tel: "22 281 00 00" },
-      { name: "Ecole Africaine de Développement (EAD)", sub_type: "Ecole", city: "BRAZZAVILLE", tel: "06 666 11 11" },
-      { name: "Institut Supérieur de Gestion (ISG)", sub_type: "Institut", city: "BRAZZAVILLE", tel: "06 666 22 22" }
+      // Brazzaville
+      {
+        name: "CEREC ISCOM",
+        sub_type: "Grandes écoles",
+        address: "201, rue Moukoukoulou - Plateau des 15 ans",
+        city: "BRAZZAVILLE",
+        tel: "04 446 20 58"
+      },
+      {
+        name: "CHEKINA LA BERCEUSE",
+        sub_type: "Crèches - Maternelles",
+        address: "88, rue du Campement - Ouenzé",
+        city: "BRAZZAVILLE",
+        tel: "06 668 09 32"
+      },
+      {
+        name: "COMPLEXE SCOLAIRE GASPARD MONGE",
+        sub_type: "Enseignement secondaire privé et public",
+        address: "2357, av. de Loutassi - Plateau des 15 ans",
+        city: "BRAZZAVILLE",
+        tel: "06 668 74 42",
+        mail: "gaspmongo@yahoo.fr"
+      },
+      {
+        name: "COMPLEXE SCOLAIRE LES AMIS DE JULIEN",
+        sub_type: "Enseignement secondaire privé et public",
+        address: "Bd du Maréchal Lyautey - OCH",
+        city: "BRAZZAVILLE",
+        tel: "06 668 26 74"
+      },
+      {
+        name: "DGC CONGO",
+        sub_type: "Grandes écoles",
+        address: "Rond Point la Coupole - Imm. Yoka Bernard",
+        city: "BRAZZAVILLE",
+        tel: "05 591 35 39",
+        portable: "01 974 92 60",
+        mail: "pdinassa@univpro-afrique.com"
+      },
+      {
+        name: "EAD (École Africaine de Developpement)",
+        sub_type: "Grandes écoles",
+        address: "20, rue Massoukou - Moungali",
+        city: "BRAZZAVILLE",
+        bp: "5509",
+        tel: "05 550 99 27",
+        portable: "06 666 51 49",
+        mail: "eadcongo@yahoo.fr"
+      },
+      {
+        name: "EAG SERVICES",
+        sub_type: "Formation professionnelle",
+        address: "59 bis, rue Mana - Moukondo",
+        city: "BRAZZAVILLE",
+        tel: "06 975 97 65",
+        mail: "eagservices@gmail.com"
+      },
+      {
+        name: "ÉCOLE MODERNE LA MAÎEUTIQUE",
+        sub_type: "Enseignement secondaire privé et public",
+        address: "OCH",
+        city: "BRAZZAVILLE",
+        bp: "14624",
+        tel: "06 657 84 78"
+      },
+      {
+        name: "ÉCOLE PRIVÉE GALILÉE",
+        sub_type: "Enseignement secondaire privé et public",
+        address: "114, rue Lamothe",
+        city: "BRAZZAVILLE",
+        tel: "05 556 97 66"
+      },
+      {
+        name: "ENGLISH LANGUAGE ACADEMY",
+        sub_type: "Ecole de langues",
+        address: "Rue Loby Moungali",
+        city: "BRAZZAVILLE",
+        tel: "06 639 87 76",
+        web: "www.pooltvp-congo.com"
+      },
+      {
+        name: "ESGAE (École Supérieure de Gestion et d’Administration des Entreprises)",
+        sub_type: "Grandes écoles",
+        address: "Av. de la Cité des 17 - Moukondo",
+        city: "BRAZZAVILLE",
+        bp: "2339",
+        tel: "06 691 96 79",
+        portable: "05 739 26 89",
+        mail: "esgae@esgae.org",
+        web: "www.esgae.org"
+      },
+      {
+        name: "GROUPE SCOLAIRE ALIYOU FATIMA",
+        sub_type: "Enseignement secondaire privé et public",
+        address: "Place Ravin du Tchad",
+        city: "BRAZZAVILLE",
+        bp: "1187",
+        tel: "22 281 33 87"
+      },
+      {
+        name: "GROUPE SCOLAIRE DOM HELDER CAMARA",
+        sub_type: "Enseignement secondaire privé et public",
+        address: "Rue des Anciens Enfants de Troupe - Patte d'Oie",
+        city: "BRAZZAVILLE",
+        bp: "1732",
+        tel: "06 662 62 55",
+        mail: "ad_gsdhc@hotmail.com"
+      },
+      {
+        name: "GROUPE SCOLAIRE REMO",
+        sub_type: "Enseignement secondaire privé et public",
+        address: "Bd du Maréchal Lyautey - OCH",
+        city: "BRAZZAVILLE",
+        bp: "2174",
+        tel: "22 281 03 17",
+        portable: "05 551 90 25"
+      },
+      {
+        name: "HAUTE ÉCOLE LÉONARD DE VINCI",
+        sub_type: "Enseignement secondaire privé et public",
+        address: "Place Ravin du Tchad",
+        city: "BRAZZAVILLE",
+        tel: "06 662 62 55",
+        mail: "heleodevinci@yahoo.fr"
+      },
+      {
+        name: "HAUTE ÉCOLE LÉONARD DE VINCI",
+        sub_type: "Grandes écoles",
+        address: "Av. des Anciens Enfants de Troupe - Parlement",
+        city: "BRAZZAVILLE",
+        tel: "06 662 62 55",
+        portable: "05 760 09 02",
+        mail: "heleodevinci@gmail.com",
+        web: "www.heleodevinci.com"
+      },
+      {
+        name: "IDHEM (Institut de Développement de l’Homme, de l’Entreprise et de Management)",
+        sub_type: "Grandes écoles",
+        address: "C.E.G Nganga Edouard",
+        city: "BRAZZAVILLE",
+        tel: "05 545 69 51",
+        portable: "06 652 63 27",
+        mail: "idhem_congo@yahoo.fr"
+      },
+      {
+        name: "IFM MOUNGALI",
+        sub_type: "Enseignement spécialisé",
+        address: "13, rue Bakotas - Moungali",
+        city: "BRAZZAVILLE",
+        bp: "1798",
+        tel: "05 508 65 45",
+        fax: "22 281 54 23",
+        mail: "ifm_informatique@yahoo.fr"
+      },
+      {
+        name: "IGDE (Institut de Gestion et de Développement Economique)",
+        sub_type: "Grandes écoles",
+        address: "90, rue de Gamboma - Moungali",
+        city: "BRAZZAVILLE",
+        tel: "22 282 32 01",
+        portable: "05 521 95 59",
+        mail: "igdebrazza@yahoo.fr"
+      },
+      {
+        name: "INSTITUT CATHOLIQUE LÉOPOLD SEDAR SENGHOR",
+        sub_type: "Enseignement secondaire privé et public",
+        address: "Rue du Colonnel Brisset",
+        city: "BRAZZAVILLE",
+        tel: "22 281 48 81",
+        mail: "iclss@yahoo.fr"
+      },
+      {
+        name: "INSTITUT DES JEUNES SOURDS DE BRAZZAVILLE",
+        sub_type: "Enseignement spécialisé",
+        address: "Rond-point de la Patte d'Oie",
+        city: "BRAZZAVILLE",
+        bp: "178",
+        tel: "06 678 23 98",
+        portable: "05 551 18 22",
+        mail: "ijsb07@yahoo.fr"
+      },
+      {
+        name: "INSTITUT INTERNATIONALE 2I",
+        sub_type: "Grandes écoles",
+        address: "37 av. de la Poudrière - Batignolles",
+        city: "BRAZZAVILLE",
+        tel: "06 437 33 54",
+        web: "http://institut-international-2i.com/"
+      },
+      {
+        name: "IPRC (Institut Africain de Perfectionnement et de Renforcement des Capacités)",
+        sub_type: "Formation professionnelle",
+        address: "Imm. CNSS - 7ème étage",
+        city: "BRAZZAVILLE",
+        bp: "537",
+        tel: "06 992 04 91",
+        portable: "06 636 28 38",
+        web: "www.iprc.org"
+      },
+      {
+        name: "ITP (Institut Technique et Professionnel)",
+        sub_type: "Formation professionnelle",
+        address: "22, rue de Likouala - Poto-Poto",
+        city: "BRAZZAVILLE",
+        tel: "05 556 99 85"
+      },
+      {
+        name: "ITP (Institut Technique et Professionnel)",
+        sub_type: "Grandes écoles",
+        address: "22, rue de Likouala - Poto-Poto",
+        city: "BRAZZAVILLE",
+        tel: "05 556 99 85"
+      },
+      {
+        name: "LODEC CONSULTANT",
+        sub_type: "Formation professionnelle",
+        address: "123, rue de Reims - Imm. Ebatha - 2ème étage",
+        city: "BRAZZAVILLE",
+        bp: "13393",
+        tel: "05 638 49 09",
+        portable: "06 508 73 26",
+        mail: "lodecconsultants@yahoo.fr",
+        web: "www.lodec.net"
+      },
+      {
+        name: "LYCÉE FRANCAIS SAINT EXUPÉRY",
+        sub_type: "Enseignement secondaire privé et public",
+        address: "Av. de L'OUA - Bacongo",
+        city: "BRAZZAVILLE",
+        tel: "22 281 21 10",
+        portable: "06 666 61 41",
+        mail: "secretariat@lycee-saintexbrazza.org"
+      },
+      {
+        name: "UNIVERSITÉ MARIEN NGOUABI",
+        sub_type: "Universités",
+        address: "Av. des Premiers Jeux Africains",
+        city: "BRAZZAVILLE",
+        bp: "69",
+        tel: "22 281 01 41",
+        mail: "rectorat@umng.cg"
+      },
+      // Pointe-Noire
+      {
+        name: "A.C.S.I. (Agence Congolaise des Systèmes d’Information)",
+        sub_type: "Formation professionnelle",
+        address: "Mpita",
+        city: "POINTE-NOIRE",
+        tel: "04 444 87 45",
+        portable: "05 520 04 74"
+      },
+      {
+        name: "ABS GROUPE",
+        sub_type: "Formation professionnelle",
+        address: "Route de la Frontière - Tchimbamba - Arrêt Colonel",
+        city: "POINTE-NOIRE",
+        tel: "06 923 45 76"
+      },
+      {
+        name: "APAVE CONGO",
+        sub_type: "Formation professionnelle",
+        address: "Bd de Loango - Base Industrielle",
+        city: "POINTE-NOIRE",
+        bp: "857",
+        tel: "06 628 43 58",
+        portable: "05 798 95 95",
+        mail: "congo@apave.com",
+        web: "www.apave.com"
+      },
+      {
+        name: "ARCHE DE NOÉ",
+        sub_type: "Crèches - Maternelles",
+        address: "Av. François Charles",
+        city: "POINTE-NOIRE",
+        tel: "06 661 89 38",
+        portable: "05 557 64 03"
+      },
+      {
+        name: "ARCHE DE NOÉ",
+        sub_type: "Enseignement secondaire privé et public",
+        address: "Av. François Charles",
+        city: "POINTE-NOIRE",
+        tel: "06 661 89 38",
+        portable: "05 557 64 03"
+      },
+      {
+        name: "CEMINAC",
+        sub_type: "Enseignement secondaire privé et public",
+        address: "Av. de l'Indépendance - Mvou-Mvou",
+        city: "POINTE-NOIRE",
+        bp: "1178",
+        tel: "05 520 27 82"
+      },
+      {
+        name: "CENTRE POLYTECHNIQUE DES MÉTIERS DE L’INDUSTRIE ET DU COMMERCE",
+        sub_type: "Enseignement secondaire privé et public",
+        address: "63, av. Mongo Ntandou",
+        city: "POINTE-NOIRE",
+        bp: "2068",
+        tel: "05 559 34 30"
+      },
+      {
+        name: "CENTRE SCOLAIRE NOTRE DAME DU ROSAIRE",
+        sub_type: "Enseignement secondaire privé et public",
+        address: "Av. Bitélika Ndombi - Aéroport",
+        city: "POINTE-NOIRE",
+        bp: "5648",
+        tel: "06 668 71 31",
+        portable: "05 557 39 17"
+      },
+      {
+        name: "CEREC ISCOM",
+        sub_type: "Grandes écoles",
+        address: "Route de la Base - Aéroport",
+        city: "POINTE-NOIRE",
+        tel: "04 446 20 53",
+        portable: "06 639 16 88"
+      },
+      {
+        name: "CFMP (Centre de Formation des Métiers de la Pharmacie)",
+        sub_type: "Enseignement spécialisé",
+        address: "Av. Jacque Opangault - Face à la Foire",
+        city: "POINTE-NOIRE",
+        tel: "05 514 20 25"
+      },
+      {
+        name: "COMPLEXE SCOLAIRE BIZI",
+        sub_type: "Enseignement secondaire privé et public",
+        address: "71, av. Antonio Agostinho Néto",
+        city: "POINTE-NOIRE",
+        bp: "4886",
+        tel: "04 436 83 75",
+        mail: "malphil@yahoo.fr"
+      },
+      {
+        name: "COMPLEXE SCOLAIRE ILAMA",
+        sub_type: "Enseignement secondaire privé et public",
+        address: "Av. Nelson Mandéla - Socoprise",
+        city: "POINTE-NOIRE",
+        tel: "05 533 33 49"
+      },
+      {
+        name: "COMPLEXE SCOLAIRE PRIVÉ LA COQUETTE",
+        sub_type: "Enseignement secondaire privé et public",
+        address: "Route de la Frontière - Ngoyo",
+        city: "POINTE-NOIRE",
+        bp: "1042",
+        tel: "05 553 26 80",
+        portable: "06 815 25 19"
+      },
+      {
+        name: "CORUS COMPUTER SCHOOL",
+        sub_type: "Formation professionnelle",
+        address: "Av. Marien Ngouabi - OCH",
+        city: "POINTE-NOIRE",
+        tel: "06 667 06 39",
+        portable: "04 437 45 99",
+        mail: "coruscomputer@yahoo.fr"
+      },
+      {
+        name: "CPRED (Centre Pontenegrin de Répétition d’Enseignement à Distance)",
+        sub_type: "Enseignement secondaire privé et public",
+        address: "Rue Tchibassa",
+        city: "POINTE-NOIRE",
+        bp: "5459",
+        tel: "05 535 26 32",
+        portable: "05 557 88 86"
+      },
+      {
+        name: "CRÈCHE MULTI-ACCUEIL MONTESSORI",
+        sub_type: "Crèches - Maternelles",
+        address: "114, rue de Bouyala",
+        city: "POINTE-NOIRE",
+        tel: "05 041 57 98",
+        portable: "06 891 17 72",
+        mail: "contact@montessoricongo.com"
+      },
+      {
+        name: "DELVA NETWORKS",
+        sub_type: "Formation professionnelle",
+        address: "Av. Marien Ngouabi - Imm. Ex Bata",
+        city: "POINTE-NOIRE",
+        bp: "4171",
+        tel: "06 659 97 70",
+        portable: "05 778 91 91",
+        mail: "contact@delvanetworks.net"
+      },
+      {
+        name: "DGC (École Supérieure de Commerce et de Gestion)",
+        sub_type: "Grandes écoles",
+        address: "Rue de Gamba - Camp 31 Juillet",
+        city: "POINTE-NOIRE",
+        bp: "2694",
+        tel: "05 523 46 60",
+        mail: "dgc@dgc-formation.com",
+        web: "www.dgc-formation.com"
+      },
+      {
+        name: "EAD (École Africaine de Developpement)",
+        sub_type: "Grandes écoles",
+        address: "Av. Moé Kaat Matou - Bourse du Travail",
+        city: "POINTE-NOIRE",
+        tel: "06 625 17 99",
+        portable: "04 444 98 14",
+        mail: "info@ead-congo.com",
+        web: "www.ead-congo.com"
+      },
+      {
+        name: "ÉCOLE AUTREMENT",
+        sub_type: "Crèches - Maternelles",
+        address: "54, rue de Gamba - Boscongo",
+        city: "POINTE-NOIRE",
+        tel: "05 559 49 48",
+        portable: "06 657 46 16",
+        mail: "autrementecole@yahoo.fr"
+      },
+      {
+        name: "ÉCOLE INTERNATIONALE LES PETITS PAS",
+        sub_type: "Crèches - Maternelles",
+        address: "Bd du Général Charles de Gaulle",
+        city: "POINTE-NOIRE",
+        bp: "700",
+        tel: "05 521 22 56",
+        mail: "lespetitpas@yahoo.fr"
+      },
+      {
+        name: "ÉCOLE PRÉSCOLAIRE EUGÉNIE",
+        sub_type: "Crèches - Maternelles",
+        address: "Rue de Libondo",
+        city: "POINTE-NOIRE",
+        bp: "704",
+        tel: "05 523 14 39"
+      },
+      {
+        name: "ÉCOLE PRIVÉE ARC-EN-CIEL",
+        sub_type: "Enseignement secondaire privé et public",
+        address: "Av. Linguissi Pembelot",
+        city: "POINTE-NOIRE",
+        bp: "4886",
+        tel: "04 436 83 75",
+        portable: "06 670 70 97"
+      },
+      {
+        name: "ÉCOLE PRIVÉE CŒUR VAILLANT",
+        sub_type: "Enseignement secondaire privé et public",
+        address: "Av. des Anciens Combattants - Saint-Pierre",
+        city: "POINTE-NOIRE",
+        bp: "5998",
+        tel: "05 598 91 38"
+      },
+      {
+        name: "ÉCOLE PRIVÉE LE PIS ALLER",
+        sub_type: "Crèches - Maternelles",
+        address: "Route de la Frontière - Tchimbamba",
+        city: "POINTE-NOIRE",
+        bp: "5988",
+        tel: "06 920 71 02",
+        portable: "05 530 50 90",
+        mail: "lepisaller@yahoo.fr"
+      },
+      {
+        name: "ÉCOLE PRIVÉE LE PIS ALLER",
+        sub_type: "Enseignement secondaire privé et public",
+        address: "Route de la Frontière - Tchimbamba",
+        city: "POINTE-NOIRE",
+        bp: "5988",
+        tel: "06 920 71 02",
+        portable: "05 530 50 90",
+        mail: "lepisaller@yahoo.fr"
+      },
+      {
+        name: "ÉCOLE PRIVÉE LES DAUPHINS",
+        sub_type: "Enseignement secondaire privé et public",
+        address: "Av. Sergent Malamine",
+        city: "POINTE-NOIRE",
+        bp: "523",
+        tel: "22 294 09 13",
+        portable: "06 668 54 40"
+      },
+      {
+        name: "ÉCOLE PRIVÉE LOUIS GREGORY",
+        sub_type: "Enseignement secondaire privé et public",
+        address: "Route N°5 - Faubourg",
+        city: "POINTE-NOIRE",
+        tel: "04 487 76 33",
+        portable: "04 434 47 63"
+      },
+      {
+        name: "ESTIC GECOM",
+        sub_type: "Grandes écoles",
+        address: "103, av. Marien Ngouabi - Z.I. Km 4",
+        city: "POINTE-NOIRE",
+        bp: "8001",
+        tel: "05 524 10 78",
+        mail: "esticgecom@yahoo.fr"
+      },
+      {
+        name: "EXIMIUS INTERNATIONAL SCHOOL",
+        sub_type: "Enseignement secondaire privé et public",
+        address: "104, av. Jacques Opangault - Z.I. Songolo",
+        city: "POINTE-NOIRE",
+        tel: "06 878 89 39",
+        web: "www.eximiusinternationalschool.com"
+      },
+      {
+        name: "FRANCOIS RENÉ DE CHÂTEAUBRIAND",
+        sub_type: "Enseignement secondaire privé et public",
+        address: "Bd Moé Kaat Matou - Lumumba",
+        city: "POINTE-NOIRE",
+        bp: "4316",
+        tel: "06 653 55 26",
+        portable: "06 664 76 24"
+      },
+      {
+        name: "GROUPE SCOLAIRE DOM HELDER CAMARA",
+        sub_type: "Enseignement secondaire privé et public",
+        address: "Av. Barthélémy Boganda",
+        city: "POINTE-NOIRE",
+        bp: "5709",
+        tel: "06 673 82 82",
+        portable: "05 520 38 59",
+        mail: "samuelbatis@yahoo.fr"
+      },
+      {
+        name: "GROUPE SCOLAIRE FANOE LIZABU",
+        sub_type: "Enseignement secondaire privé et public",
+        address: "Av. François Charles",
+        city: "POINTE-NOIRE",
+        bp: "5514",
+        tel: "06 625 43 90",
+        mail: "gsf_congo@yahoo.fr"
+      },
+      {
+        name: "HAUTE ÉCOLE LÉONARD DE VINCI",
+        sub_type: "Grandes écoles",
+        address: "76, av. Barthélémy Boganda",
+        city: "POINTE-NOIRE",
+        tel: "05 600 04 05",
+        portable: "06 663 56 96",
+        mail: "heleodevinci@gmail.com",
+        web: "www. heleodevinci.com"
+      },
+      {
+        name: "HEMIP",
+        sub_type: "Grandes écoles",
+        address: "9, av. de l'Emeraude",
+        city: "POINTE-NOIRE",
+        tel: "06 939 28 90",
+        portable: "05 383 83 17",
+        mail: "hemilapercee@yahoo.fr"
+      },
+      {
+        name: "INSTITUT CARDINAL ÉMILE BIAYENDA",
+        sub_type: "Enseignement secondaire privé et public",
+        address: "Av. de l'Indépendance - Tié-Tié",
+        city: "POINTE-NOIRE",
+        tel: "05 530 73 59",
+        portable: "06 661 50 67"
+      },
+      {
+        name: "INSTITUT INTERNATIONAL 2I",
+        sub_type: "Grandes écoles",
+        address: "6 rue Li-Lelemb, base industrielle de TotalEnergies EP Congo",
+        city: "POINTE-NOIRE",
+        tel: "06 915 50 01",
+        web: "http://institut-international-2i.com/"
+      },
+      {
+        name: "INSTITUT POLYTECHNIQUE PIERRE PRIE",
+        sub_type: "Enseignement secondaire privé et public",
+        address: "Rue Tchibongolo - Camp 31 juillet",
+        city: "POINTE-NOIRE",
+        bp: "1598",
+        tel: "05 530 27 09",
+        portable: "06 622 22 89",
+        mail: "nsatoud@yahoo.fr"
+      },
+      {
+        name: "INSTITUT SAINT NICOLAS",
+        sub_type: "Enseignement secondaire privé et public",
+        address: "Av. Bitélika Ndombi - Aéroport",
+        city: "POINTE-NOIRE",
+        bp: "4235",
+        tel: "06 663 31 61"
+      },
+      {
+        name: "INSTITUT SUPÉRIEUR DE COMPTABILITE",
+        sub_type: "Grandes écoles",
+        address: "71, av. Antonio Agostinho Néto",
+        city: "POINTE-NOIRE",
+        bp: "4886",
+        tel: "04 436 83 75",
+        mail: "ispnc@yahoo.fr"
+      },
+      {
+        name: "IS INDUSTRIE CONGO (Institut de Soudure)",
+        sub_type: "Formation professionnelle",
+        address: "26, av. du Havre - Imm. Unicongo",
+        city: "POINTE-NOIRE",
+        bp: "1713",
+        tel: "06 961 63 39",
+        mail: "s.elkadi@institutdesoudure.com",
+        web: "www.isgroupe.com"
+      },
+      {
+        name: "IST-AC",
+        sub_type: "Grandes écoles",
+        address: "Av. Benoît Loembet - Z.I. Km 4",
+        city: "POINTE-NOIRE",
+        bp: "871",
+        tel: "05 524 59 55",
+        mail: "info.pnr@ist.ac"
+      },
+      {
+        name: "IST-EC (Institut Supérieur de Technologie d’Afrique Centrale)",
+        sub_type: "Formation professionnelle",
+        address: "Av. Benoît Loembet - Z.I. KM 4",
+        city: "POINTE-NOIRE",
+        bp: "871",
+        tel: "05 524 59 55",
+        mail: "info.pnr@ist.ac"
+      },
+      {
+        name: "LYCÉE FRANCAIS CHARLEMAGNE",
+        sub_type: "Enseignement secondaire privé et public",
+        address: "Allée de Makinda - Près du Tribunal de Commerce",
+        city: "POINTE-NOIRE",
+        bp: "1256",
+        tel: "05 516 14 90",
+        mail: "sec.ecole@lycee-charlemangne.org"
+      },
+      {
+        name: "LYCÉE FRANCAIS CHARLEMAGNE (Section Primaire)",
+        sub_type: "Enseignement secondaire privé et public",
+        address: "Av. Emmanuel Dadet",
+        city: "POINTE-NOIRE",
+        bp: "1256",
+        tel: "05 310 12 34",
+        mail: "sec.ecole@lycee-charlemangne.org"
+      },
+      {
+        name: "SERICOM CONGO",
+        sub_type: "Formation professionnelle",
+        address: "225, av. de Kingambo",
+        city: "POINTE-NOIRE",
+        bp: "1023",
+        tel: "06 664 34 81"
+      },
+      {
+        name: "SERVTEC",
+        sub_type: "Formation professionnelle",
+        address: "Ngoyo",
+        city: "POINTE-NOIRE",
+        tel: "05 376 76 03",
+        mail: "servtec.formation@servtec-congo.com"
+      },
+      {
+        name: "SUECO",
+        sub_type: "Formation professionnelle",
+        address: "3, Av. Moé Téli",
+        city: "POINTE-NOIRE",
+        bp: "667",
+        tel: "22 294 04 43",
+        mail: "suecoeec@yahoo.fr"
+      },
+      {
+        name: "THE YOUNG TEACHERS SCHOOL",
+        sub_type: "Ecole de langues",
+        address: "Av. Jean Félix Tchicaya - Rex",
+        city: "POINTE-NOIRE",
+        bp: "508",
+        tel: "05 539 94 06",
+        portable: "06 677 07 70",
+        mail: "teacherschoolmail@gmail.com"
+      },
+      {
+        name: "THE YOUNG TEACHERS SCHOOL",
+        sub_type: "Formation professionnelle",
+        address: "Av. Jean Félix Tchicaya - Rex",
+        city: "POINTE-NOIRE",
+        bp: "508",
+        tel: "05 539 94 06",
+        mail: "teacherschoolmail@gmail.com"
+      },
+      {
+        name: "UNIVERSITÉ DE LOANGO",
+        sub_type: "Universités",
+        address: "Av. Barthélémy Boganda",
+        city: "POINTE-NOIRE",
+        bp: "336",
+        tel: "05 553 44 53",
+        portable: "06 922 96 76"
+      }
     ];
 
-    for (const item of items) {
-      await db.query(
-        `INSERT INTO portfolio_items 
-        (category_id, name, sub_type, city, tel) 
-        VALUES ($1, $2, $3, $4, $5)`,
-        [catId, item.name, item.sub_type, item.city, item.tel]
-      );
+    if (currentCount !== items.length) {
+      console.log("Seeding portfolio items for ENSEIGNEMENT ET FORMATION...");
+      await db.query("DELETE FROM portfolio_items WHERE category_id = $1", [catId]);
+
+      for (const item of items) {
+        await db.query(
+          `INSERT INTO portfolio_items 
+          (category_id, name, sub_type, address, city, bp, tel, fax, mail, web) 
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+          [catId, item.name, item.sub_type, (item as any).address || null, (item as any).city || null, (item as any).bp || null, (item as any).tel || (item as any).portable || null, (item as any).fax || null, (item as any).mail || null, (item as any).web || null]
+        );
+      }
+      console.log(`Seeded ${items.length} portfolio items for ENSEIGNEMENT ET FORMATION`);
     }
-    console.log(`Seeded ${items.length} portfolio items for ENSEIGNEMENT ET FORMATION`);
   } catch (err) {
     console.error("Failed to seed enseignement items:", err);
   }
@@ -3221,14 +6677,209 @@ async function seedTransportsItems() {
     for (const item of items) {
       await db.query(
         `INSERT INTO portfolio_items 
-        (category_id, name, sub_type, city, tel) 
-        VALUES ($1, $2, $3, $4, $5)`,
-        [catId, item.name, item.sub_type, item.city, item.tel]
+        (category_id, name, sub_type, address, city, bp, tel, fax, mail, web) 
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [catId, item.name, item.sub_type, (item as any).address || null, (item as any).city || null, (item as any).bp || null, (item as any).tel || null, (item as any).fax || null, (item as any).mail || null, (item as any).web || null]
       );
     }
     console.log(`Seeded ${items.length} portfolio items for TRANSPORTS AÉRIEN, MARITIME ET TERRESTRE`);
   } catch (err) {
     console.error("Failed to seed transports items:", err);
+  }
+}
+
+async function seedCoiffureEsthetiqueItems() {
+  try {
+    const catResult = await db.query("SELECT id FROM categories WHERE name = 'COIFFURE ET ESTHÉTIQUE'");
+    if (catResult.rows.length === 0) return;
+    const catId = catResult.rows[0].id;
+
+    const itemsCountResult = await db.query("SELECT COUNT(*) as count FROM portfolio_items WHERE category_id = $1", [catId]);
+    const currentCount = parseInt(itemsCountResult.rows[0].count);
+
+    const items = [
+      // Brazzaville
+      {
+        name: "AFROSPHÈRE",
+        sub_type: "Salons de coiffure",
+        address: "Rue Louis Tréchot",
+        city: "BRAZZAVILLE",
+        tel: "22 604 71 04",
+        mail: "contact@afro-sphere.com"
+      },
+      {
+        name: "BEAUTIFUL",
+        sub_type: "Instituts de beauté",
+        address: "80, rue Mayama - Moungali",
+        city: "BRAZZAVILLE",
+        tel: "05 387 02 95",
+        mail: "beautifull251@yahoo.fr"
+      },
+      {
+        name: "CENTRE DE BIEN-ÊTRE",
+        sub_type: "Salons de coiffure",
+        address: "Imm. CNSS - Rond-point City Center",
+        city: "BRAZZAVILLE",
+        tel: "04 409 49 49"
+      },
+      {
+        name: "DESTINY’S BEAUTY",
+        sub_type: "Instituts de beauté",
+        address: "Av. de la Tsiémé - Ouenzé",
+        city: "BRAZZAVILLE",
+        tel: "06 519 11 50",
+        portable: "06 858 37 58"
+      },
+      {
+        name: "EBONNE ESPACE BEAUTÉ",
+        sub_type: "Instituts de beauté",
+        address: "155, rue Bonga - Face Pressing 5 à sec",
+        city: "BRAZZAVILLE",
+        tel: "05 692 92 95"
+      },
+      {
+        name: "LA BEAUTÉ CHINOISE",
+        sub_type: "Instituts de beauté",
+        address: "1, rue Paul Kamba - Poto-Poto",
+        city: "BRAZZAVILLE",
+        tel: "05 553 16 03"
+      },
+      {
+        name: "MÈCHE A MÈCHE",
+        sub_type: "Salons de coiffure",
+        address: "Av. William Guynet",
+        city: "BRAZZAVILLE",
+        tel: "06 655 29 47"
+      },
+      {
+        name: "SERENITY CONGO",
+        sub_type: "Instituts de beauté",
+        address: "108, rue de la Musique Tambourinée",
+        city: "BRAZZAVILLE",
+        tel: "05 510 50 16",
+        portable: "06 953 76 78",
+        web: "www.serenityspa-congo.com"
+      },
+      {
+        name: "VILLA SERENITY SPA",
+        sub_type: "Salons de coiffure",
+        address: "108 Rue de la Musique Tambourinée",
+        city: "BRAZZAVILLE",
+        tel: "05 510 50 16",
+        portable: "06 953 76 78",
+        web: "www.serenityspa-congo.com"
+      },
+      // Pointe-Noire
+      {
+        name: "AMANI",
+        sub_type: "Instituts de beauté",
+        address: "Av. Moé Kaat Matou",
+        city: "POINTE-NOIRE",
+        tel: "06 617 06 63",
+        portable: "06 629 83 39"
+      },
+      {
+        name: "Comptoir du Bien-être",
+        sub_type: "Instituts de beauté",
+        address: "Av. Linguissi Pembelot, non loin ex bâta, en diagonale de l’immeuble des officiers",
+        city: "POINTE-NOIRE",
+        tel: "05 001 30 00",
+        portable: "05 000 88 99"
+      },
+      {
+        name: "ETHNIC-HAIR",
+        sub_type: "Salons de coiffure",
+        address: "Av. Gustave Ondziel - Z.I. Km 4",
+        city: "POINTE-NOIRE",
+        tel: "05 399 99 29"
+      },
+      {
+        name: "INSITUT AUDY HAIR",
+        sub_type: "Salons de coiffure",
+        address: "Marché Plateau",
+        city: "POINTE-NOIRE",
+        tel: "06 659 38 54",
+        mail: "blande2033@yahoo.fr"
+      },
+      {
+        name: "L et LUI",
+        sub_type: "Instituts de beauté",
+        address: "29, rue Emmanuel Dadet",
+        city: "POINTE-NOIRE",
+        tel: "05 559 53 50"
+      },
+      {
+        name: "L ET LUI",
+        sub_type: "Salons de coiffure",
+        address: "Av. Emmanuel Dadet",
+        city: "POINTE-NOIRE",
+        bp: "489",
+        tel: "05 559 53 50"
+      },
+      {
+        name: "MANO A MANO",
+        sub_type: "Instituts de beauté",
+        address: "Av. Stéphane Tchitchelle - Face ACS",
+        city: "POINTE-NOIRE",
+        tel: "05 628 57 57"
+      },
+      {
+        name: "MÈCHE CAPI",
+        sub_type: "Salons de coiffure",
+        address: "Av. Jacques Opangault - Camp 31 juillet",
+        city: "POINTE-NOIRE",
+        tel: "05 598 17 17",
+        mail: "mimichpnr@yahoo.fr"
+      },
+      {
+        name: "Salon espace coiffure mixte Hôtel l’orchidée",
+        sub_type: "Salons de coiffure",
+        address: "Avenu de l'émeraude, centre-ville",
+        city: "POINTE-NOIRE",
+        tel: "05 507 57 53",
+        portable: "06 661 94 11"
+      },
+      {
+        name: "SECRET DES SENS",
+        sub_type: "Instituts de beauté",
+        address: "16, rue Nemba - Face au Camp du 31 juillet",
+        city: "POINTE-NOIRE",
+        tel: "06 814 16 76",
+        mail: "secretdessens.pointenoire@gmail.com"
+      },
+      {
+        name: "SEVEN STYLE",
+        sub_type: "Salons de coiffure",
+        address: "Av. Moé Kaat Matou - Lumumba",
+        city: "POINTE-NOIRE",
+        tel: "06 671 74 04",
+        portable: "05 098 03 99"
+      },
+      {
+        name: "TOP NAILS",
+        sub_type: "Instituts de beauté",
+        address: "Av. Denis Goma",
+        city: "POINTE-NOIRE",
+        tel: "06 674 66 46"
+      }
+    ];
+
+    if (currentCount !== items.length) {
+      console.log("Seeding portfolio items for COIFFURE ET ESTHÉTIQUE...");
+      await db.query("DELETE FROM portfolio_items WHERE category_id = $1", [catId]);
+
+      for (const item of items) {
+        await db.query(
+          `INSERT INTO portfolio_items 
+          (category_id, name, sub_type, address, city, bp, tel, fax, mail, web) 
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+          [catId, item.name, item.sub_type, (item as any).address || null, (item as any).city || null, (item as any).bp || null, (item as any).tel || (item as any).portable || null, (item as any).fax || null, (item as any).mail || null, (item as any).web || null]
+        );
+      }
+      console.log(`Seeded ${items.length} portfolio items for COIFFURE ET ESTHÉTIQUE`);
+    }
+  } catch (err) {
+    console.error("Failed to seed coiffure items:", err);
   }
 }
 

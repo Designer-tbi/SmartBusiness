@@ -96,6 +96,17 @@ export default function Layout() {
     });
   }
 
+  const getPageTitle = () => {
+    for (const item of navItems) {
+      if (item.href === location.pathname) return item.name;
+      if (item.children) {
+        const child = item.children.find(c => c.href === location.pathname);
+        if (child) return child.name;
+      }
+    }
+    return 'SmartBusiness';
+  };
+
   return (
     <div className="flex h-screen bg-slate-50">
       {/* Sidebar */}
@@ -183,7 +194,7 @@ export default function Layout() {
       <div className="flex-1 flex flex-col overflow-hidden">
         <header className="h-16 bg-white border-b border-slate-200 flex items-center px-8">
           <h2 className="text-lg font-semibold text-slate-800">
-            {navItems.find(item => item.href === location.pathname)?.name || 'SmartBusiness'}
+            {getPageTitle()}
           </h2>
         </header>
         <main className="flex-1 overflow-auto p-8">
