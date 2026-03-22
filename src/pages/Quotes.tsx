@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { FileText, Plus, Search, Trash2, Edit2, Filter, DollarSign, Calendar, Download, X, Save, PlusCircle, MinusCircle, Send, CheckCircle, Share2 } from 'lucide-react';
+import { FileText, Plus, Search, Trash2, Edit2, Filter, DollarSign, Calendar, Download, X, Save, PlusCircle, MinusCircle, Send, CheckCircle, Share2, AlertCircle } from 'lucide-react';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 
@@ -9,6 +9,8 @@ export default function Quotes() {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [showModal, setShowModal] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [customers, setCustomers] = useState<any[]>([]);
   const [leads, setLeads] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
@@ -90,6 +92,19 @@ export default function Quotes() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError(null);
+
+    if (!formData.customerId && !formData.leadId) {
+      setError("Veuillez sélectionner un client ou un prospect.");
+      return;
+    }
+
+    if (formData.items.length === 0 || formData.items.some(item => !item.description)) {
+      setError("Veuillez ajouter au moins un article avec une description.");
+      return;
+    }
+
+    setIsSubmitting(true);
     const totalAmount = formData.items.reduce((acc, item) => acc + item.totalPrice, 0);
     
     try {
@@ -111,9 +126,15 @@ export default function Quotes() {
           notes: '',
           items: [{ productId: '', description: '', quantity: 1, unitPrice: 0, totalPrice: 0 }]
         });
+      } else {
+        const data = await response.json();
+        setError(data.error || "Erreur lors de l'enregistrement du devis.");
       }
     } catch (err) {
       console.error("Error saving quote:", err);
+      setError("Erreur de connexion au serveur.");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -259,6 +280,12 @@ export default function Quotes() {
             </div>
 
             <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-8">
+              {error && (
+                <div className="p-4 bg-red-50 border border-red-200 text-red-600 rounded-xl text-sm flex items-center gap-2 animate-in fade-in slide-in-from-top-2">
+                  <AlertCircle size={18} />
+                  {error}
+                </div>
+              )}
               {/* Basic Info */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div className="space-y-2">
@@ -466,10 +493,11 @@ export default function Quotes() {
                 </button>
                 <button 
                   type="submit"
-                  className="px-8 py-2 bg-indigo-600 text-white rounded-lg font-semibold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200 flex items-center gap-2"
+                  disabled={isSubmitting}
+                  className="px-8 py-2 bg-indigo-600 text-white rounded-lg font-semibold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200 flex items-center gap-2 disabled:opacity-50"
                 >
                   <Save size={20} />
-                  Enregistrer le Devis
+                  {isSubmitting ? 'Enregistrement...' : 'Enregistrer le Devis'}
                 </button>
               </div>
             </form>

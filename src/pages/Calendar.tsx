@@ -59,6 +59,9 @@ export default function Calendar() {
   const [customers, setCustomers] = useState<any[]>([]);
   const [leads, setLeads] = useState<any[]>([]);
   const [opportunities, setOpportunities] = useState<any[]>([]);
+  const [users, setUsers] = useState<any[]>([]);
+  const [userFilter, setUserFilter] = useState('all');
+  const [roleFilter, setRoleFilter] = useState('all');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -74,17 +77,19 @@ export default function Calendar() {
 
   const fetchActivities = async () => {
     try {
-      const [actRes, custRes, leadsRes, oppsRes] = await Promise.all([
+      const [actRes, custRes, leadsRes, oppsRes, usersRes] = await Promise.all([
         fetch('/api/activities'),
         fetch('/api/customers'),
         fetch('/api/leads'),
-        fetch('/api/opportunities')
+        fetch('/api/opportunities'),
+        fetch('/api/users')
       ]);
       
       if (actRes.ok) setActivities(await actRes.json());
       if (custRes.ok) setCustomers(await custRes.json());
       if (leadsRes.ok) setLeads(await leadsRes.json());
       if (oppsRes.ok) setOpportunities(await oppsRes.json());
+      if (usersRes.ok) setUsers(await usersRes.json());
     } catch (error) {
       console.error("Error fetching data:", error);
     } finally {
@@ -161,15 +166,23 @@ export default function Calendar() {
     }
   };
 
+  const filteredActivities = useMemo(() => {
+    return activities.filter(activity => {
+      const matchesUser = userFilter === 'all' || activity.agent_id === userFilter;
+      const matchesRole = roleFilter === 'all' || activity.agentRole === roleFilter;
+      return matchesUser && matchesRole;
+    });
+  }, [activities, userFilter, roleFilter]);
+
   const activitiesByDate = useMemo(() => {
     const map: Record<string, any[]> = {};
-    activities.forEach(act => {
+    filteredActivities.forEach(act => {
       const dateKey = format(new Date(act.date), 'yyyy-MM-dd');
       if (!map[dateKey]) map[dateKey] = [];
       map[dateKey].push(act);
     });
     return map;
-  }, [activities]);
+  }, [filteredActivities]);
 
   const stats = useMemo(() => {
     const now = new Date();
@@ -180,15 +193,15 @@ export default function Calendar() {
     const startOfY = startOfYear(now);
     const endOfY = endOfYear(now);
 
-    const weekActs = activities.filter(a => {
+    const weekActs = filteredActivities.filter(a => {
       const d = new Date(a.date);
       return d >= startOfW && d <= endOfW;
     });
-    const monthActs = activities.filter(a => {
+    const monthActs = filteredActivities.filter(a => {
       const d = new Date(a.date);
       return d >= startOfM && d <= endOfM;
     });
-    const yearActs = activities.filter(a => {
+    const yearActs = filteredActivities.filter(a => {
       const d = new Date(a.date);
       return d >= startOfY && d <= endOfY;
     });
@@ -198,7 +211,7 @@ export default function Calendar() {
       month: { total: monthActs.length, done: monthActs.filter(a => a.status === 'Terminé').length },
       year: { total: yearActs.length, done: yearActs.filter(a => a.status === 'Terminé').length }
     };
-  }, [activities]);
+  }, [filteredActivities]);
 
   const getTypeIcon = (type: string) => {
     switch (type) {
@@ -476,9 +489,33 @@ export default function Calendar() {
   return (
     <div className="space-y-6 animate-in fade-in duration-500 pb-12">
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-800">Calendrier</h2>
-          <p className="text-slate-500 text-sm">Visualisez et organisez votre emploi du temps</p>
+        <div className="flex items-center gap-4">
+          <div>
+            <h2 className="text-2xl font-bold text-slate-800">Calendrier</h2>
+            <p className="text-slate-500 text-sm">Visualisez et organisez votre emploi du temps</p>
+          </div>
+          <div className="flex items-center gap-2 bg-white p-1 rounded-xl shadow-sm border border-slate-200 ml-4">
+            <select
+              value={roleFilter}
+              onChange={(e) => setRoleFilter(e.target.value)}
+              className="px-3 py-1.5 text-sm bg-transparent outline-none border-none text-slate-600 font-medium cursor-pointer"
+            >
+              <option value="all">Tous les rôles</option>
+              <option value="admin">Administrateurs</option>
+              <option value="agent">Agents</option>
+            </select>
+            <div className="w-px h-4 bg-slate-200"></div>
+            <select
+              value={userFilter}
+              onChange={(e) => setUserFilter(e.target.value)}
+              className="px-3 py-1.5 text-sm bg-transparent outline-none border-none text-slate-600 font-medium cursor-pointer"
+            >
+              <option value="all">Tous les utilisateurs</option>
+              {users.map(u => (
+                <option key={u.uid} value={u.uid}>{u.name}</option>
+              ))}
+            </select>
+          </div>
         </div>
         
         <div className="flex flex-wrap items-center gap-2 bg-white p-1 rounded-xl shadow-sm border border-slate-200">

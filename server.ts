@@ -1418,7 +1418,16 @@ async function startServer() {
     try {
       const result = await db.query(
         "INSERT INTO quotes (number, customer_id, lead_id, amount, status, date, expiry_date, notes) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id",
-        [number, customerId, leadId, amount, status || 'Brouillon', date, expiryDate, notes]
+        [
+          number, 
+          customerId === "" ? null : customerId, 
+          leadId === "" ? null : leadId, 
+          amount, 
+          status || 'Brouillon', 
+          date, 
+          expiryDate, 
+          notes
+        ]
       );
       const quoteId = result.rows[0].id;
 
@@ -1426,7 +1435,14 @@ async function startServer() {
         for (const item of items) {
           await db.query(
             "INSERT INTO quote_items (quote_id, product_id, description, quantity, unit_price, total_price) VALUES ($1, $2, $3, $4, $5, $6)",
-            [quoteId, item.productId, item.description, item.quantity, item.unitPrice, item.totalPrice]
+            [
+              quoteId, 
+              item.productId === "" ? null : item.productId, 
+              item.description, 
+              item.quantity, 
+              item.unitPrice, 
+              item.totalPrice
+            ]
           );
         }
       }
@@ -1452,7 +1468,14 @@ async function startServer() {
         for (const item of items) {
           await db.query(
             "INSERT INTO quote_items (quote_id, product_id, description, quantity, unit_price, total_price) VALUES ($1, $2, $3, $4, $5, $6)",
-            [id, item.productId, item.description, item.quantity, item.unitPrice, item.totalPrice]
+            [
+              id, 
+              item.productId === "" ? null : item.productId, 
+              item.description, 
+              item.quantity, 
+              item.unitPrice, 
+              item.totalPrice
+            ]
           );
         }
       }
@@ -1598,7 +1621,8 @@ async function startServer() {
         SELECT a.*, c.name as "customerName", 
                l.first_name || ' ' || l.last_name as "leadName", 
                o.title as "opportunityTitle",
-               u.name as "agentName"
+               u.name as "agentName",
+               u.role as "agentRole"
         FROM activities a
         LEFT JOIN customers c ON a.customer_id = c.id
         LEFT JOIN leads l ON a.lead_id = l.id
