@@ -27,6 +27,13 @@ export default function Quotes() {
   });
 
   useEffect(() => {
+    window.dispatchEvent(new CustomEvent('sb-hide-sidebar', { detail: showModal }));
+    return () => {
+      window.dispatchEvent(new CustomEvent('sb-hide-sidebar', { detail: false }));
+    };
+  }, [showModal]);
+
+  useEffect(() => {
     fetchQuotes();
     fetchData();
   }, []);
@@ -188,7 +195,7 @@ export default function Quotes() {
             placeholder="Rechercher un devis ou un client..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+            className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
           />
         </div>
         <div className="flex items-center gap-2 w-full md:w-auto">
@@ -196,7 +203,7 @@ export default function Quotes() {
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
-            className="w-full md:w-auto px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+            className="w-full md:w-auto px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
           >
             <option value="all">Tous les statuts</option>
             <option value="Brouillon">Brouillon</option>
@@ -265,8 +272,8 @@ export default function Quotes() {
       {/* New Quote Modal */}
       {showModal && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
-            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+          <div className="bg-white rounded-2xl shadow-xl w-full sm:max-w-4xl lg:max-w-5xl xl:max-w-6xl max-h-[95vh] overflow-hidden flex flex-col animate-in zoom-in duration-200">
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/80 backdrop-blur-md">
               <div>
                 <h3 className="text-xl font-bold text-slate-800">Nouveau Devis</h3>
                 <p className="text-slate-500 text-sm">Créez une proposition commerciale détaillée</p>
@@ -289,16 +296,16 @@ export default function Quotes() {
               {/* Basic Info */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div className="space-y-2">
-                  <label className="text-sm font-semibold text-slate-700">N° Devis</label>
+                  <label className="block text-sm font-medium text-slate-700">N° Devis</label>
                   <input
                     type="text"
                     value={formData.number}
                     readOnly
-                    className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-500 outline-none"
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-500 outline-none"
                   />
                 </div>
                 <div className="space-y-4">
-                  <label className="text-sm font-semibold text-slate-700 block">Type de destinataire</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Type de destinataire</label>
                   <div className="flex gap-4 p-1 bg-slate-100 rounded-lg w-fit">
                     <button
                       type="button"
@@ -330,7 +337,7 @@ export default function Quotes() {
                           required={recipientType === 'customer'}
                           value={formData.customerId}
                           onChange={(e) => setFormData({ ...formData, customerId: e.target.value, leadId: '' })}
-                          className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
+                          className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
                         >
                           <option value="">Choisir un client...</option>
                           {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -343,7 +350,7 @@ export default function Quotes() {
                           required={recipientType === 'lead'}
                           value={formData.leadId}
                           onChange={(e) => setFormData({ ...formData, leadId: e.target.value, customerId: '' })}
-                          className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
+                          className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
                         >
                           <option value="">Choisir un prospect...</option>
                           {leads.filter(l => l.status !== 'Converti').map(l => (
@@ -359,13 +366,13 @@ export default function Quotes() {
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm font-semibold text-slate-700">Date d'expiration</label>
+                  <label className="block text-sm font-medium text-slate-700">Date d'expiration</label>
                   <input
                     type="date"
                     required
                     value={formData.expiryDate}
                     onChange={(e) => setFormData({ ...formData, expiryDate: e.target.value })}
-                    className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
+                    className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
                   />
                 </div>
               </div>
@@ -386,8 +393,8 @@ export default function Quotes() {
                   </button>
                 </div>
 
-                <div className="border border-slate-200 rounded-xl overflow-hidden">
-                  <table className="w-full text-left text-sm">
+                <div className="border border-slate-200 rounded-xl overflow-x-auto">
+                  <table className="w-full text-left text-sm min-w-[600px]">
                     <thead className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200">
                       <tr>
                         <th className="px-4 py-3">Produit / Description</th>
@@ -405,7 +412,7 @@ export default function Quotes() {
                               <select
                                 value={item.productId}
                                 onChange={(e) => handleItemChange(index, 'productId', e.target.value)}
-                                className="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs outline-none"
+                                className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
                               >
                                 <option value="">Sélectionner un produit...</option>
                                 {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
@@ -415,7 +422,7 @@ export default function Quotes() {
                                 placeholder="Description personnalisée..."
                                 value={item.description}
                                 onChange={(e) => handleItemChange(index, 'description', e.target.value)}
-                                className="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs outline-none"
+                                className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
                               />
                             </div>
                           </td>
@@ -425,7 +432,7 @@ export default function Quotes() {
                               min="1"
                               value={item.quantity}
                               onChange={(e) => handleItemChange(index, 'quantity', e.target.value)}
-                              className="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs text-center outline-none"
+                              className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm text-center focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
                             />
                           </td>
                           <td className="px-4 py-3">
@@ -433,7 +440,7 @@ export default function Quotes() {
                               type="number"
                               value={item.unitPrice}
                               onChange={(e) => handleItemChange(index, 'unitPrice', e.target.value)}
-                              className="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs text-right outline-none"
+                              className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm text-right focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
                             />
                           </td>
                           <td className="px-4 py-3 text-right font-bold text-slate-900">
@@ -473,13 +480,13 @@ export default function Quotes() {
               </div>
 
               <div className="space-y-2">
-                <label className="text-sm font-semibold text-slate-700">Notes / Conditions</label>
+                <label className="block text-sm font-medium text-slate-700">Notes / Conditions</label>
                 <textarea
                   rows={3}
                   value={formData.notes}
                   onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
                   placeholder="Conditions de paiement, délais de livraison..."
-                  className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all resize-none"
+                  className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all resize-none"
                 ></textarea>
               </div>
 

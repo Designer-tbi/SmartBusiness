@@ -34,7 +34,7 @@ export default function Settings() {
             </div>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Nom de l'Application</label>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">Nom de l'Application</label>
                 <input
                   type="text"
                   value={appName}
@@ -43,7 +43,7 @@ export default function Settings() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Langue par Défaut</label>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">Langue par Défaut</label>
                 <select
                   value={language}
                   onChange={(e) => setLanguage(e.target.value)}

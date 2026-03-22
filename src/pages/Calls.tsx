@@ -211,7 +211,7 @@ export default function Calls() {
             <h3 className="text-lg font-bold text-slate-900 mb-4">Nouvel Appel</h3>
             <form onSubmit={handleCreateCall} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Client</label>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">Client</label>
                 <select
                   required
                   value={customerId}
@@ -227,7 +227,7 @@ export default function Calls() {
 
               {profile?.role === 'admin' && (
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Agent Assigné</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Agent Assigné</label>
                   <select
                     required
                     value={agentId}
@@ -243,7 +243,7 @@ export default function Calls() {
               )}
 
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Statut</label>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">Statut</label>
                 <select
                   value={status}
                   onChange={(e) => setStatus(e.target.value)}
@@ -257,7 +257,7 @@ export default function Calls() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Notes</label>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">Notes</label>
                 <textarea
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}

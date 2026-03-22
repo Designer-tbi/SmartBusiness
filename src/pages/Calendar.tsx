@@ -21,7 +21,8 @@ import {
   endOfYear,
   eachMonthOfInterval,
   isToday,
-  parseISO
+  parseISO,
+  setHours
 } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { 
@@ -61,6 +62,7 @@ export default function Calendar() {
   const [opportunities, setOpportunities] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
   const [userFilter, setUserFilter] = useState('all');
+  const [clientFilter, setClientFilter] = useState('all');
   const [roleFilter, setRoleFilter] = useState('all');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -74,6 +76,7 @@ export default function Calendar() {
   const [status, setStatus] = useState('À faire');
   const [date, setDate] = useState(format(new Date(), "yyyy-MM-dd'T'HH:mm"));
   const [notes, setNotes] = useState('');
+  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
 
   const fetchActivities = async () => {
     try {
@@ -107,6 +110,12 @@ export default function Calendar() {
     setDate(format(new Date(), "yyyy-MM-dd'T'HH:mm"));
     setNotes('');
     setError(null);
+  };
+
+  const handleDateClick = (clickedDate: Date) => {
+    resetForm();
+    setDate(format(clickedDate, "yyyy-MM-dd'T'HH:mm"));
+    setShowModal(true);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -170,9 +179,10 @@ export default function Calendar() {
     return activities.filter(activity => {
       const matchesUser = userFilter === 'all' || activity.agent_id === userFilter;
       const matchesRole = roleFilter === 'all' || activity.agentRole === roleFilter;
-      return matchesUser && matchesRole;
+      const matchesClient = clientFilter === 'all' || activity.customer_id?.toString() === clientFilter;
+      return matchesUser && matchesRole && matchesClient;
     });
-  }, [activities, userFilter, roleFilter]);
+  }, [activities, userFilter, roleFilter, clientFilter]);
 
   const activitiesByDate = useMemo(() => {
     const map: Record<string, any[]> = {};
@@ -250,8 +260,9 @@ export default function Calendar() {
             return (
               <div 
                 key={day.toString()} 
+                onClick={() => handleDateClick(day)}
                 className={cn(
-                  "min-h-[120px] p-2 border-b border-r border-slate-100 transition-colors hover:bg-slate-50/50",
+                  "min-h-[120px] p-2 border-b border-r border-slate-100 transition-colors hover:bg-slate-50/50 cursor-pointer",
                   !isCurrentMonth && "bg-slate-50/30 text-slate-400"
                 )}
               >
@@ -267,6 +278,7 @@ export default function Calendar() {
                   {dayActs.slice(0, 3).map(act => (
                     <div 
                       key={act.id} 
+                      onClick={(e) => e.stopPropagation()}
                       className={cn(
                         "text-[10px] px-1.5 py-0.5 rounded border flex items-center gap-1 truncate",
                         act.status === 'Terminé' 
@@ -330,10 +342,15 @@ export default function Calendar() {
                 });
 
                 return (
-                  <div key={day.toString()} className="relative min-h-[60px] p-1 border-r border-slate-100 group-hover:bg-slate-50/20">
+                  <div 
+                    key={day.toString()} 
+                    onClick={() => handleDateClick(setHours(day, hour))}
+                    className="relative min-h-[60px] p-1 border-r border-slate-100 group-hover:bg-slate-50/20 cursor-pointer"
+                  >
                     {hourActs.map(act => (
                       <div 
                         key={act.id} 
+                        onClick={(e) => e.stopPropagation()}
                         className={cn(
                           "text-[10px] p-1.5 rounded border mb-1 shadow-sm",
                           act.status === 'Terminé' 
@@ -385,10 +402,14 @@ export default function Calendar() {
                 <div className="w-24 py-4 px-4 text-right text-sm font-bold text-slate-400 border-r border-slate-200 bg-slate-50/30">
                   {hour}:00
                 </div>
-                <div className="flex-1 p-3 space-y-2 group-hover:bg-slate-50/20 transition-colors">
+                <div 
+                  className="flex-1 p-3 space-y-2 group-hover:bg-slate-50/20 transition-colors cursor-pointer"
+                  onClick={() => handleDateClick(setHours(currentDate, hour))}
+                >
                   {hourActs.map(act => (
                     <div 
                       key={act.id} 
+                      onClick={(e) => e.stopPropagation()}
                       className={cn(
                         "p-3 rounded-xl border shadow-sm flex items-center justify-between",
                         act.status === 'Terminé' 
@@ -456,8 +477,9 @@ export default function Calendar() {
                   return (
                     <div 
                       key={i} 
+                      onClick={() => handleDateClick(day)}
                       className={cn(
-                        "w-full aspect-square flex items-center justify-center text-[10px] rounded-full relative",
+                        "w-full aspect-square flex items-center justify-center text-[10px] rounded-full relative cursor-pointer hover:bg-indigo-100 transition-colors",
                         !isCurrentMonth && "opacity-20",
                         isToday(day) && "bg-indigo-600 text-white font-bold",
                         hasActs && !isToday(day) && "bg-indigo-50 text-indigo-700 font-bold"
@@ -513,6 +535,17 @@ export default function Calendar() {
               <option value="all">Tous les utilisateurs</option>
               {users.map(u => (
                 <option key={u.uid} value={u.uid}>{u.name}</option>
+              ))}
+            </select>
+            <div className="w-px h-4 bg-slate-200"></div>
+            <select
+              value={clientFilter}
+              onChange={(e) => setClientFilter(e.target.value)}
+              className="px-3 py-1.5 text-sm bg-transparent outline-none border-none text-slate-600 font-medium cursor-pointer"
+            >
+              <option value="all">Tous les clients</option>
+              {customers.map(c => (
+                <option key={c.id} value={c.id}>{c.name || c.company_name || `${c.first_name} ${c.last_name}`}</option>
               ))}
             </select>
           </div>
@@ -606,7 +639,7 @@ export default function Calendar() {
 
       {showModal && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
             <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
               <h3 className="text-lg font-bold text-slate-900">Nouvelle Activité / RDV</h3>
               <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-slate-600">
@@ -624,23 +657,23 @@ export default function Calendar() {
               
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="md:col-span-2">
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Sujet</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Sujet</label>
                   <input
                     type="text"
                     required
                     value={subject}
                     onChange={(e) => setSubject(e.target.value)}
-                    className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
+                    className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
                     placeholder="Ex: Appel de suivi, Présentation produit..."
                   />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Type</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Type</label>
                   <select
                     value={type}
                     onChange={(e) => setType(e.target.value)}
-                    className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
+                    className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
                   >
                     <option value="Appel">Appel</option>
                     <option value="Email">Email</option>
@@ -651,40 +684,44 @@ export default function Calendar() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Date & Heure</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Date & Heure</label>
                   <input
                     type="datetime-local"
                     required
                     value={date}
                     onChange={(e) => setDate(e.target.value)}
-                    className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
+                    className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Client</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Client</label>
                   <select
                     value={customerId}
                     onChange={(e) => {
                       setCustomerId(e.target.value);
                       if (e.target.value) { setLeadId(''); setOpportunityId(''); }
                     }}
-                    className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
+                    className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
                   >
                     <option value="">Aucun client</option>
-                    {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    {customers.map(c => (
+                      <option key={c.id} value={c.id}>
+                        {c.name || c.company_name || `${c.first_name} ${c.last_name}`}
+                      </option>
+                    ))}
                   </select>
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Prospect (Lead)</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Prospect (Lead)</label>
                   <select
                     value={leadId}
                     onChange={(e) => {
                       setLeadId(e.target.value);
                       if (e.target.value) { setCustomerId(''); setOpportunityId(''); }
                     }}
-                    className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
+                    className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
                   >
                     <option value="">Aucun prospect</option>
                     {leads.map(l => (
@@ -696,7 +733,7 @@ export default function Calendar() {
                 </div>
 
                 <div className="md:col-span-2">
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Opportunité</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Opportunité</label>
                   <select
                     value={opportunityId}
                     onChange={(e) => {
@@ -709,7 +746,7 @@ export default function Calendar() {
                         }
                       }
                     }}
-                    className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
+                    className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
                   >
                     <option value="">Aucune opportunité</option>
                     {opportunities.map(o => <option key={o.id} value={o.id}>{o.title}</option>)}
@@ -717,12 +754,12 @@ export default function Calendar() {
                 </div>
 
                 <div className="md:col-span-2">
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Notes</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Notes</label>
                   <textarea
                     value={notes}
                     onChange={(e) => setNotes(e.target.value)}
                     rows={3}
-                    className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all resize-none"
+                    className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all resize-none"
                     placeholder="Détails de l'activité..."
                   />
                 </div>

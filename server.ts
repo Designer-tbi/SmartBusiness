@@ -7,6 +7,8 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import cookieParser from "cookie-parser";
 import dotenv from "dotenv";
+import multer from "multer";
+import fs from "fs";
 
 dotenv.config();
 
@@ -203,14 +205,36 @@ class AppDatabase {
         FOREIGN KEY (category_id) REFERENCES categories (id)
       );
 
+      CREATE TABLE IF NOT EXISTS catalogues (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        description TEXT,
+        is_active INTEGER DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS vat_rates (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        label TEXT NOT NULL,
+        rate REAL NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
       CREATE TABLE IF NOT EXISTS products (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
+        type TEXT NOT NULL DEFAULT 'product', -- 'product' or 'service'
         category TEXT,
+        category_id INTEGER REFERENCES categories(id),
+        catalog_id INTEGER REFERENCES catalogues(id),
         price REAL NOT NULL DEFAULT 0,
+        vat_rate REAL NOT NULL DEFAULT 20,
+        vat_rate_id INTEGER REFERENCES vat_rates(id),
         stock INTEGER NOT NULL DEFAULT 0,
         unit TEXT,
         description TEXT,
+        technical_file_url TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
@@ -220,6 +244,7 @@ class AppDatabase {
         number TEXT UNIQUE NOT NULL,
         customer_id INTEGER REFERENCES customers(id),
         lead_id INTEGER REFERENCES leads(id),
+        agent_id TEXT REFERENCES users(uid),
         amount REAL NOT NULL DEFAULT 0,
         status TEXT NOT NULL DEFAULT 'Brouillon',
         date TEXT NOT NULL,
@@ -248,6 +273,7 @@ class AppDatabase {
         number TEXT UNIQUE NOT NULL,
         customer_id INTEGER REFERENCES customers(id),
         quote_id INTEGER REFERENCES quotes(id),
+        agent_id TEXT REFERENCES users(uid),
         amount REAL NOT NULL DEFAULT 0,
         status TEXT NOT NULL DEFAULT 'En attente',
         date TEXT NOT NULL,
@@ -291,6 +317,19 @@ class AppDatabase {
         start_date TEXT,
         end_date TEXT,
         description TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS objectives (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        agent_id TEXT REFERENCES users(uid),
+        type TEXT NOT NULL, -- 'revenue', 'calls', 'meetings', 'quotes'
+        target_value REAL NOT NULL,
+        period TEXT NOT NULL, -- 'monthly', 'quarterly', 'yearly'
+        start_date TEXT NOT NULL,
+        end_date TEXT NOT NULL,
+        status TEXT DEFAULT 'En cours',
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
@@ -908,6 +947,17 @@ async function startServer() {
   });
 
   // Portfolio Items Routes
+  app.get("/api/portfolio-items", authenticateToken, async (req, res) => {
+    try {
+      const result = await db.query(
+        "SELECT * FROM portfolio_items ORDER BY name ASC"
+      );
+      res.json(result.rows);
+    } catch (err) {
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
   app.get("/api/categories/:categoryId/items", authenticateToken, async (req, res) => {
     const { categoryId } = req.params;
     try {
@@ -1354,26 +1404,142 @@ async function startServer() {
     }
   });
 
-  // Products Routes
-  app.get("/api/products", authenticateToken, async (req, res) => {
+  // Ensure uploads directory exists
+  const uploadsDir = path.join(__dirname, "public", "uploads");
+  if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+  }
+
+  // Multer configuration for file uploads
+  const storage = multer.diskStorage({
+    destination: (req, file, cb) => {
+      cb(null, uploadsDir);
+    },
+    filename: (req, file, cb) => {
+      const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+      cb(null, uniqueSuffix + "-" + file.originalname);
+    },
+  });
+  const upload = multer({ storage });
+
+  // Serve uploaded files
+  app.use("/uploads", express.static(uploadsDir));
+
+  // File Upload Route
+  app.post("/api/upload", authenticateToken, upload.single("file"), (req: any, res) => {
+    if (!req.file) {
+      return res.status(400).json({ error: "No file uploaded" });
+    }
+    const fileUrl = `/uploads/${req.file.filename}`;
+    res.json({ url: fileUrl });
+  });
+
+  // VAT Rates Routes
+  app.get("/api/vat-rates", authenticateToken, async (req, res) => {
     try {
-      const result = await db.query("SELECT * FROM products ORDER BY name ASC");
+      const result = await db.query("SELECT * FROM vat_rates ORDER BY rate ASC");
       res.json(result.rows);
     } catch (err) {
       res.status(500).json({ error: "Server error" });
     }
   });
 
-  // Quotes Routes
-  app.get("/api/quotes", authenticateToken, async (req, res) => {
+  app.post("/api/vat-rates", authenticateToken, async (req: any, res) => {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ error: "Only admins can create VAT rates" });
+    }
+    const { label, rate } = req.body;
+    try {
+      const result = await db.query(
+        "INSERT INTO vat_rates (label, rate) VALUES ($1, $2) RETURNING *",
+        [label, parseFloat(rate)]
+      );
+      res.status(201).json(result.rows[0]);
+    } catch (err) {
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // Catalogues Routes
+  app.get("/api/catalogues", authenticateToken, async (req, res) => {
+    try {
+      const result = await db.query("SELECT * FROM catalogues ORDER BY name ASC");
+      res.json(result.rows);
+    } catch (err) {
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  app.post("/api/catalogues", authenticateToken, async (req: any, res) => {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ error: "Only admins can create catalogues" });
+    }
+    const { name, description, is_active } = req.body;
+    try {
+      const result = await db.query(
+        "INSERT INTO catalogues (name, description, is_active) VALUES ($1, $2, $3) RETURNING *",
+        [name, description, is_active !== undefined ? is_active : 1]
+      );
+      res.status(201).json(result.rows[0]);
+    } catch (err) {
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // Products Routes
+  app.get("/api/products", authenticateToken, async (req, res) => {
     try {
       const result = await db.query(`
-        SELECT q.*, c.name as "customerName", l.first_name || ' ' || l.last_name as "leadName"
+        SELECT p.*, c.name as "categoryName", cat.name as "catalogName"
+        FROM products p
+        LEFT JOIN categories c ON p.category_id = c.id
+        LEFT JOIN catalogues cat ON p.catalog_id = cat.id
+        ORDER BY p.name ASC
+      `);
+      res.json(result.rows);
+    } catch (err) {
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  app.post("/api/products", authenticateToken, async (req: any, res) => {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ error: "Only admins can create products" });
+    }
+    const { name, type, category, categoryId, catalogId, price, vatRate, vatRateId, stock, unit, description, technicalFileUrl } = req.body;
+    try {
+      const result = await db.query(
+        `INSERT INTO products (name, type, category, category_id, catalog_id, price, vat_rate, vat_rate_id, stock, unit, description, technical_file_url) 
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
+        [name, type || 'product', category, categoryId, catalogId, price, vatRate || 20, vatRateId, stock || 0, unit, description, technicalFileUrl]
+      );
+      res.status(201).json(result.rows[0]);
+    } catch (err) {
+      console.error("Error creating product:", err);
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // Quotes Routes
+  app.get("/api/quotes", authenticateToken, async (req: any, res) => {
+    try {
+      let query = `
+        SELECT q.*, c.name as "customerName", l.first_name || ' ' || l.last_name as "leadName", u.name as "agentName"
         FROM quotes q
         LEFT JOIN customers c ON q.customer_id = c.id
         LEFT JOIN leads l ON q.lead_id = l.id
-        ORDER BY q.date DESC
-      `);
+        LEFT JOIN users u ON q.agent_id = u.uid
+      `;
+      let params: any[] = [];
+
+      if (req.user.role !== 'admin') {
+        query += ` WHERE q.agent_id = $1`;
+        params.push(req.user.uid);
+      }
+
+      query += ` ORDER BY q.date DESC`;
+      
+      const result = await db.query(query, params);
       res.json(result.rows.map(row => ({
         ...row,
         customerName: row.customerName || (row.leadName ? `Prospect: ${row.leadName}` : 'Inconnu'),
@@ -1413,15 +1579,16 @@ async function startServer() {
     }
   });
 
-  app.post("/api/quotes", authenticateToken, async (req, res) => {
+  app.post("/api/quotes", authenticateToken, async (req: any, res) => {
     const { number, customerId, leadId, amount, status, date, expiryDate, notes, items } = req.body;
     try {
       const result = await db.query(
-        "INSERT INTO quotes (number, customer_id, lead_id, amount, status, date, expiry_date, notes) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id",
+        "INSERT INTO quotes (number, customer_id, lead_id, agent_id, amount, status, date, expiry_date, notes) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id",
         [
           number, 
           customerId === "" ? null : customerId, 
           leadId === "" ? null : leadId, 
+          req.user.uid,
           amount, 
           status || 'Brouillon', 
           date, 
@@ -1531,20 +1698,53 @@ async function startServer() {
   });
 
   // Invoices Routes
-  app.get("/api/invoices", authenticateToken, async (req, res) => {
+  app.get("/api/invoices", authenticateToken, async (req: any, res) => {
     try {
-      const result = await db.query(`
-        SELECT i.*, c.name as "customerName"
+      let query = `
+        SELECT i.*, c.name as "customerName", u.name as "agentName"
         FROM invoices i
         LEFT JOIN customers c ON i.customer_id = c.id
-        ORDER BY i.date DESC
-      `);
+        LEFT JOIN users u ON i.agent_id = u.uid
+      `;
+      let params: any[] = [];
+
+      if (req.user.role !== 'admin') {
+        query += ` WHERE i.agent_id = $1`;
+        params.push(req.user.uid);
+      }
+
+      query += ` ORDER BY i.date DESC`;
+      
+      const result = await db.query(query, params);
       res.json(result.rows.map(row => ({
         ...row,
         dueDate: row.due_date,
         paidAt: row.paid_at
       })));
     } catch (err) {
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  app.post("/api/invoices", authenticateToken, async (req: any, res) => {
+    const { number, customerId, quoteId, amount, status, date, dueDate } = req.body;
+    try {
+      const result = await db.query(
+        "INSERT INTO invoices (number, customer_id, quote_id, agent_id, amount, status, date, due_date) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id",
+        [
+          number, 
+          customerId === "" ? null : customerId, 
+          quoteId === "" ? null : quoteId, 
+          req.user.uid,
+          amount, 
+          status || 'En attente', 
+          date, 
+          dueDate
+        ]
+      );
+      res.status(201).json({ id: result.rows[0].id });
+    } catch (err) {
+      console.error(err);
       res.status(500).json({ error: "Server error" });
     }
   });
@@ -1634,6 +1834,142 @@ async function startServer() {
         ...row,
         customerName: row.customerName || (row.leadName ? `Prospect: ${row.leadName}` : row.opportunityTitle || 'N/A')
       })));
+    } catch (err) {
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // Objectives Routes
+  app.get("/api/objectives", authenticateToken, async (req: any, res) => {
+    try {
+      let query = `
+        SELECT o.*, u.name as "agentName"
+        FROM objectives o
+        LEFT JOIN users u ON o.agent_id = u.uid
+      `;
+      let params: any[] = [];
+
+      if (req.user.role !== 'admin') {
+        query += ` WHERE o.agent_id = $1`;
+        params.push(req.user.uid);
+      }
+
+      query += ` ORDER BY o.end_date DESC`;
+      
+      const result = await db.query(query, params);
+      res.json(result.rows);
+    } catch (err) {
+      console.error("Error fetching objectives:", err);
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  app.get("/api/objectives/stats", authenticateToken, async (req: any, res) => {
+    try {
+      const objectivesQuery = `
+        SELECT o.*, u.name as "agentName"
+        FROM objectives o
+        LEFT JOIN users u ON o.agent_id = u.uid
+        ${req.user.role !== 'admin' ? 'WHERE o.agent_id = $1' : ''}
+      `;
+      const objectivesParams = req.user.role !== 'admin' ? [req.user.uid] : [];
+      const objectives = await db.query(objectivesQuery, objectivesParams);
+
+      const stats = await Promise.all(objectives.rows.map(async (obj: any) => {
+        let currentValue = 0;
+        const { type, agent_id, start_date, end_date } = obj;
+
+        if (type === 'revenue') {
+          const result = await db.query(`
+            SELECT SUM(amount) as total
+            FROM invoices
+            WHERE agent_id = $1 AND status = 'Payée' AND date BETWEEN $2 AND $3
+          `, [agent_id, start_date, end_date]);
+          currentValue = result.rows[0].total || 0;
+        } else if (type === 'calls') {
+          const result = await db.query(`
+            SELECT COUNT(*) as count
+            FROM activities
+            WHERE agent_id = $1 AND type = 'Appel' AND date BETWEEN $2 AND $3
+          `, [agent_id, start_date, end_date]);
+          currentValue = result.rows[0].count || 0;
+        } else if (type === 'meetings') {
+          const result = await db.query(`
+            SELECT COUNT(*) as count
+            FROM activities
+            WHERE agent_id = $1 AND type = 'RDV' AND date BETWEEN $2 AND $3
+          `, [agent_id, start_date, end_date]);
+          currentValue = result.rows[0].count || 0;
+        } else if (type === 'quotes') {
+          const result = await db.query(`
+            SELECT COUNT(*) as count
+            FROM quotes
+            WHERE agent_id = $1 AND date BETWEEN $2 AND $3
+          `, [agent_id, start_date, end_date]);
+          currentValue = result.rows[0].count || 0;
+        }
+
+        return {
+          ...obj,
+          currentValue
+        };
+      }));
+
+      res.json(stats);
+    } catch (err) {
+      console.error("Error fetching objective stats:", err);
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  app.post("/api/objectives", authenticateToken, async (req: any, res) => {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ error: "Only admins can assign objectives" });
+    }
+
+    const { agentId, type, targetValue, period, startDate, endDate, status } = req.body;
+    try {
+      const result = await db.query(
+        `INSERT INTO objectives (agent_id, type, target_value, period, start_date, end_date, status) 
+         VALUES ($1, $2, $3, $4, $5, $6, $7) 
+         RETURNING id, agent_id as "agentId", type, target_value as "targetValue", period, start_date as "startDate", end_date as "endDate", status`,
+        [agentId, type, targetValue, period, startDate, endDate, status || 'En cours']
+      );
+      res.status(201).json(result.rows[0]);
+    } catch (err) {
+      console.error("Error creating objective:", err);
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  app.put("/api/objectives/:id", authenticateToken, async (req: any, res) => {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ error: "Only admins can update objectives" });
+    }
+
+    const { id } = req.params;
+    const { targetValue, status, endDate } = req.body;
+    try {
+      const result = await db.query(
+        "UPDATE objectives SET target_value = $1, status = $2, end_date = $3, updated_at = CURRENT_TIMESTAMP WHERE id = $4 RETURNING *",
+        [targetValue, status, endDate, id]
+      );
+      if (result.rows.length === 0) return res.status(404).json({ error: "Objective not found" });
+      res.json(result.rows[0]);
+    } catch (err) {
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  app.delete("/api/objectives/:id", authenticateToken, async (req: any, res) => {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ error: "Only admins can delete objectives" });
+    }
+
+    const { id } = req.params;
+    try {
+      await db.query("DELETE FROM objectives WHERE id = $1", [id]);
+      res.status(204).send();
     } catch (err) {
       res.status(500).json({ error: "Server error" });
     }
@@ -5528,18 +5864,13 @@ async function seedRestaurantsItems() {
     if (catResult.rows.length === 0) return;
     const catId = catResult.rows[0].id;
 
-    const itemsCountResult = await db.query("SELECT COUNT(*) as count FROM portfolio_items WHERE category_id = $1", [catId]);
-    if (parseInt(itemsCountResult.rows[0].count) > 0) return;
+    // Clear existing items to re-seed with the comprehensive list
+    await db.query("DELETE FROM portfolio_items WHERE category_id = $1", [catId]);
 
     console.log("Seeding portfolio items for RESTAURANTS ET SORTIES...");
 
-    const items = [
-      { name: "Mami Wata", sub_type: "Restaurant", city: "BRAZZAVILLE", tel: "06 666 88 88" },
-      { name: "L'Arbalète", sub_type: "Restaurant", city: "BRAZZAVILLE", tel: "06 666 99 99" },
-      { name: "Le Jardin des Saveurs", sub_type: "Restaurant", city: "BRAZZAVILLE", tel: "06 666 77 77" },
-      { name: "Le Derrick", sub_type: "Restaurant", city: "POINTE-NOIRE", tel: "06 666 55 55" },
-      { name: "La Pyrogue", sub_type: "Restaurant", city: "POINTE-NOIRE", tel: "06 666 44 44" }
-    ];
+    const restaurantsDataPath = path.join(process.cwd(), 'seed_restaurants.json');
+    const items = JSON.parse(fs.readFileSync(restaurantsDataPath, 'utf-8'));
 
     for (const item of items) {
       await db.query(

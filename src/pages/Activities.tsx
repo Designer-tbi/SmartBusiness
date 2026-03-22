@@ -63,6 +63,13 @@ export default function Activities() {
   };
 
   useEffect(() => {
+    window.dispatchEvent(new CustomEvent('sb-hide-sidebar', { detail: showModal }));
+    return () => {
+      window.dispatchEvent(new CustomEvent('sb-hide-sidebar', { detail: false }));
+    };
+  }, [showModal]);
+
+  useEffect(() => {
     fetchData();
   }, []);
 
@@ -222,7 +229,7 @@ export default function Activities() {
             placeholder="Rechercher une activité..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+            className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
           />
         </div>
         <div className="flex items-center gap-2">
@@ -341,8 +348,8 @@ export default function Activities() {
 
       {showModal && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
-            <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+          <div className="bg-white rounded-3xl shadow-2xl w-full sm:max-w-2xl lg:max-w-3xl max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in duration-200">
+            <div className="sticky top-0 z-10 px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/80 backdrop-blur-md">
               <h3 className="text-lg font-bold text-slate-900">
                 {editingActivity ? 'Modifier l\'Activité' : 'Nouvelle Activité'}
               </h3>
@@ -361,23 +368,23 @@ export default function Activities() {
               
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="md:col-span-2">
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Sujet</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Sujet</label>
                   <input
                     type="text"
                     required
                     value={subject}
                     onChange={(e) => setSubject(e.target.value)}
-                    className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
+                    className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
                     placeholder="Ex: Appel de suivi, Présentation produit..."
                   />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Type</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Type</label>
                   <select
                     value={type}
                     onChange={(e) => setType(e.target.value)}
-                    className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
+                    className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
                   >
                     <option value="Appel">Appel</option>
                     <option value="Email">Email</option>
@@ -388,25 +395,25 @@ export default function Activities() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Date & Heure</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Date & Heure</label>
                   <input
                     type="datetime-local"
                     required
                     value={date}
                     onChange={(e) => setDate(e.target.value)}
-                    className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
+                    className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Client</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Client</label>
                   <select
                     value={customerId}
                     onChange={(e) => {
                       setCustomerId(e.target.value);
                       if (e.target.value) { setLeadId(''); setOpportunityId(''); }
                     }}
-                    className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
+                    className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
                   >
                     <option value="">Aucun client</option>
                     {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -414,14 +421,14 @@ export default function Activities() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Prospect (Lead)</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Prospect (Lead)</label>
                   <select
                     value={leadId}
                     onChange={(e) => {
                       setLeadId(e.target.value);
                       if (e.target.value) { setCustomerId(''); setOpportunityId(''); }
                     }}
-                    className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
+                    className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
                   >
                     <option value="">Aucun prospect</option>
                     {leads.map(l => (
@@ -433,7 +440,7 @@ export default function Activities() {
                 </div>
 
                 <div className="md:col-span-2">
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Opportunité</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Opportunité</label>
                   <select
                     value={opportunityId}
                     onChange={(e) => {
@@ -446,7 +453,7 @@ export default function Activities() {
                         }
                       }
                     }}
-                    className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
+                    className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
                   >
                     <option value="">Aucune opportunité</option>
                     {opportunities.map(o => <option key={o.id} value={o.id}>{o.title}</option>)}
@@ -454,12 +461,12 @@ export default function Activities() {
                 </div>
 
                 <div className="md:col-span-2">
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Notes</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Notes</label>
                   <textarea
                     value={notes}
                     onChange={(e) => setNotes(e.target.value)}
                     rows={3}
-                    className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all resize-none"
+                    className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all resize-none"
                     placeholder="Détails de l'activité..."
                   />
                 </div>

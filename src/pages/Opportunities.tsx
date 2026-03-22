@@ -56,6 +56,13 @@ export default function Opportunities() {
   };
 
   useEffect(() => {
+    window.dispatchEvent(new CustomEvent('sb-hide-sidebar', { detail: showModal }));
+    return () => {
+      window.dispatchEvent(new CustomEvent('sb-hide-sidebar', { detail: false }));
+    };
+  }, [showModal]);
+
+  useEffect(() => {
     fetchData();
   }, []);
 
@@ -232,7 +239,7 @@ export default function Opportunities() {
             placeholder="Rechercher une opportunité ou un client..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+            className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
           />
         </div>
         <div className="flex items-center gap-2 w-full md:w-auto">
@@ -240,7 +247,7 @@ export default function Opportunities() {
           <select
             value={stageFilter}
             onChange={(e) => setStageFilter(e.target.value)}
-            className="w-full md:w-auto px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+            className="w-full md:w-auto px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
           >
             <option value="all">Toutes les étapes</option>
             <option value="Prospection">Prospection</option>
@@ -352,8 +359,8 @@ export default function Opportunities() {
 
       {showModal && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
-            <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+          <div className="bg-white rounded-3xl shadow-2xl w-full sm:max-w-2xl lg:max-w-3xl max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in duration-200">
+            <div className="sticky top-0 z-10 px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/80 backdrop-blur-md">
               <h3 className="text-lg font-bold text-slate-900">
                 {editingOpportunity ? 'Modifier l\'Opportunité' : 'Nouvelle Opportunité'}
               </h3>
@@ -371,27 +378,27 @@ export default function Opportunities() {
               )}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="md:col-span-2">
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Titre de l'opportunité</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Titre de l'opportunité</label>
                   <input
                     type="text"
                     required
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
-                    className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
+                    className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
                     placeholder="Ex: Refonte site web - TBI Center"
                   />
                 </div>
 
                 <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Client</label>
+                    <label className="block text-sm font-medium text-slate-700 mb-1.5">Client</label>
                     <select
                       value={customerId}
                       onChange={(e) => {
                         setCustomerId(e.target.value);
                         if (e.target.value) setLeadId(''); // Clear lead if customer selected
                       }}
-                      className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
+                      className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
                     >
                       <option value="">Sélectionner un client</option>
                       {customers.map(c => (
@@ -400,14 +407,14 @@ export default function Opportunities() {
                     </select>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Prospect (Lead)</label>
+                    <label className="block text-sm font-medium text-slate-700 mb-1.5">Prospect (Lead)</label>
                     <select
                       value={leadId}
                       onChange={(e) => {
                         setLeadId(e.target.value);
                         if (e.target.value) setCustomerId(''); // Clear customer if lead selected
                       }}
-                      className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
+                      className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
                     >
                       <option value="">Sélectionner un prospect</option>
                       {leads.map(l => (
@@ -420,19 +427,19 @@ export default function Opportunities() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Montant (FCFA)</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Montant (FCFA)</label>
                   <input
                     type="number"
                     required
                     value={amount}
                     onChange={(e) => setAmount(e.target.value)}
-                    className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
+                    className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
                     placeholder="0"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Probabilité (%)</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Probabilité (%)</label>
                   <input
                     type="number"
                     min="0"
@@ -440,16 +447,16 @@ export default function Opportunities() {
                     required
                     value={probability}
                     onChange={(e) => setProbability(e.target.value)}
-                    className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
+                    className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Étape</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Étape</label>
                   <select
                     value={stage}
                     onChange={(e) => setStage(e.target.value)}
-                    className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
+                    className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
                   >
                     <option value="Prospection">Prospection</option>
                     <option value="Qualification">Qualification</option>
@@ -461,22 +468,22 @@ export default function Opportunities() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Date de clôture prévue</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Date de clôture prévue</label>
                   <input
                     type="date"
                     value={expectedCloseDate}
                     onChange={(e) => setExpectedCloseDate(e.target.value)}
-                    className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
+                    className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
                   />
                 </div>
 
                 <div className="md:col-span-2">
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Notes</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Notes</label>
                   <textarea
                     value={notes}
                     onChange={(e) => setNotes(e.target.value)}
                     rows={3}
-                    className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
+                    className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
                     placeholder="Détails de l'opportunité..."
                   />
                 </div>

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Search, Folder, Loader2, AlertCircle, ChevronLeft, Building2, Phone, Mail, Globe, MapPin, Hash } from 'lucide-react';
+import { Plus, Search, Folder, Loader2, AlertCircle, ChevronLeft, Building2, Phone, Mail, Globe, MapPin, Hash, Map as MapIcon, List } from 'lucide-react';
+import MapView from '../components/MapView';
 
 interface Category {
   id: number;
@@ -25,6 +26,8 @@ interface PortfolioItem {
 export default function Portfolio() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<Category | null>(null);
+  const [viewAll, setViewAll] = useState(false);
+  const [viewMode, setViewMode] = useState<'list' | 'map'>('list');
   const [items, setItems] = useState<PortfolioItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -46,14 +49,24 @@ export default function Portfolio() {
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
+    const isAnyModalOpen = isAddingCategory || isAddingItem;
+    window.dispatchEvent(new CustomEvent('sb-hide-sidebar', { detail: isAnyModalOpen }));
+    return () => {
+      window.dispatchEvent(new CustomEvent('sb-hide-sidebar', { detail: false }));
+    };
+  }, [isAddingCategory, isAddingItem]);
+
+  useEffect(() => {
     fetchCategories();
   }, []);
 
   useEffect(() => {
     if (selectedCategory) {
       fetchItems(selectedCategory.id);
+    } else if (viewAll) {
+      fetchAllItems();
     }
-  }, [selectedCategory]);
+  }, [selectedCategory, viewAll]);
 
   const fetchCategories = async () => {
     try {
@@ -73,6 +86,20 @@ export default function Portfolio() {
     try {
       setLoading(true);
       const response = await fetch(`/api/categories/${categoryId}/items`);
+      if (!response.ok) throw new Error('Erreur lors du chargement des éléments');
+      const data = await response.json();
+      setItems(data);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchAllItems = async () => {
+    try {
+      setLoading(true);
+      const response = await fetch('/api/portfolio-items');
       if (!response.ok) throw new Error('Erreur lors du chargement des éléments');
       const data = await response.json();
       setItems(data);
@@ -151,7 +178,7 @@ export default function Portfolio() {
     item.city?.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  if (loading && categories.length === 0 && !selectedCategory) {
+  if (loading && categories.length === 0 && !selectedCategory && !viewAll) {
     return (
       <div className="flex items-center justify-center h-full">
         <Loader2 className="animate-spin text-indigo-500" size={48} />
@@ -164,10 +191,11 @@ export default function Portfolio() {
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex items-center gap-4">
-          {selectedCategory && (
+          {(selectedCategory || viewAll) && (
             <button 
               onClick={() => {
                 setSelectedCategory(null);
+                setViewAll(false);
                 setItems([]);
                 setSearchQuery('');
               }}
@@ -178,32 +206,45 @@ export default function Portfolio() {
           )}
           <div>
             <h1 className="text-2xl font-bold text-slate-800">
-              {selectedCategory ? selectedCategory.name : 'Portefeuille Client'}
+              {selectedCategory ? selectedCategory.name : viewAll ? 'Tous les établissements' : 'Portefeuille Client'}
             </h1>
             <p className="text-slate-500">
               {selectedCategory 
                 ? `Liste des établissements dans ${selectedCategory.name.toLowerCase()}`
-                : 'Gérez vos catégories de clients par secteur d\'activité.'}
+                : viewAll
+                  ? 'Liste complète de tous les établissements'
+                  : 'Gérez vos catégories de clients par secteur d\'activité.'}
             </p>
           </div>
         </div>
-        {!selectedCategory ? (
-          <button
-            onClick={() => setIsAddingCategory(true)}
-            className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition-colors shadow-sm"
-          >
-            <Plus size={20} />
-            Nouvelle Catégorie
-          </button>
-        ) : (
-          <button
-            onClick={() => setIsAddingItem(true)}
-            className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition-colors shadow-sm"
-          >
-            <Plus size={20} />
-            Ajouter un établissement
-          </button>
-        )}
+        <div className="flex items-center gap-3">
+          {!selectedCategory && !viewAll && (
+            <button
+              onClick={() => setViewAll(true)}
+              className="flex items-center gap-2 bg-white border border-slate-200 text-slate-700 px-4 py-2 rounded-lg hover:bg-slate-50 transition-colors shadow-sm"
+            >
+              <Building2 size={20} />
+              Voir tous les établissements
+            </button>
+          )}
+          {!selectedCategory && !viewAll ? (
+            <button
+              onClick={() => setIsAddingCategory(true)}
+              className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition-colors shadow-sm"
+            >
+              <Plus size={20} />
+              Nouvelle Catégorie
+            </button>
+          ) : selectedCategory ? (
+            <button
+              onClick={() => setIsAddingItem(true)}
+              className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition-colors shadow-sm"
+            >
+              <Plus size={20} />
+              Ajouter un établissement
+            </button>
+          ) : null}
+        </div>
       </div>
 
       {error && (
@@ -213,16 +254,44 @@ export default function Portfolio() {
         </div>
       )}
 
-      {/* Search */}
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
-        <input
-          type="text"
-          placeholder={selectedCategory ? "Rechercher un établissement..." : "Rechercher une catégorie..."}
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
-        />
+      {/* Search and View Toggle */}
+      <div className="flex flex-col sm:flex-row gap-4">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
+          <input
+            type="text"
+            placeholder={(selectedCategory || viewAll) ? "Rechercher un établissement..." : "Rechercher une catégorie..."}
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+          />
+        </div>
+        {(selectedCategory || viewAll) && (
+          <div className="flex bg-white border border-slate-200 rounded-lg p-1 shrink-0">
+            <button
+              onClick={() => setViewMode('list')}
+              className={`flex items-center gap-2 px-4 py-1.5 rounded-md transition-colors ${
+                viewMode === 'list' 
+                  ? 'bg-indigo-50 text-indigo-700 font-medium' 
+                  : 'text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              <List size={18} />
+              Liste
+            </button>
+            <button
+              onClick={() => setViewMode('map')}
+              className={`flex items-center gap-2 px-4 py-1.5 rounded-md transition-colors ${
+                viewMode === 'map' 
+                  ? 'bg-indigo-50 text-indigo-700 font-medium' 
+                  : 'text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              <MapIcon size={18} />
+              Carte
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Add Category Form */}
@@ -230,7 +299,7 @@ export default function Portfolio() {
         <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
           <form onSubmit={handleAddCategory} className="flex flex-col md:flex-row gap-4">
             <div className="flex-1">
-              <label htmlFor="categoryName" className="block text-sm font-medium text-slate-700 mb-1">
+              <label htmlFor="categoryName" className="block text-sm font-medium text-slate-700 mb-1.5">
                 Nom de la catégorie
               </label>
               <input
@@ -239,7 +308,7 @@ export default function Portfolio() {
                 value={newCategoryName}
                 onChange={(e) => setNewCategoryName(e.target.value)}
                 placeholder="Ex: IMMOBILIER"
-                className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
                 autoFocus
               />
             </div>
@@ -270,86 +339,86 @@ export default function Portfolio() {
           <form onSubmit={handleAddItem} className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Nom de l'établissement *</label>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">Nom de l'établissement *</label>
                 <input
                   type="text"
                   required
                   value={newItem.name}
                   onChange={(e) => setNewItem({...newItem, name: e.target.value})}
-                  className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Type / Sous-catégorie</label>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">Type / Sous-catégorie</label>
                 <input
                   type="text"
                   value={newItem.sub_type}
                   onChange={(e) => setNewItem({...newItem, sub_type: e.target.value})}
                   placeholder="Ex: Ambassades et consulats"
-                  className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
                 />
               </div>
               <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-slate-700 mb-1">Adresse</label>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">Adresse</label>
                 <input
                   type="text"
                   value={newItem.address}
                   onChange={(e) => setNewItem({...newItem, address: e.target.value})}
-                  className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Ville</label>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">Ville</label>
                 <input
                   type="text"
                   value={newItem.city}
                   onChange={(e) => setNewItem({...newItem, city: e.target.value})}
-                  className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">BP</label>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">BP</label>
                 <input
                   type="text"
                   value={newItem.bp}
                   onChange={(e) => setNewItem({...newItem, bp: e.target.value})}
-                  className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Téléphone</label>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">Téléphone</label>
                 <input
                   type="text"
                   value={newItem.tel}
                   onChange={(e) => setNewItem({...newItem, tel: e.target.value})}
-                  className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Fax</label>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">Fax</label>
                 <input
                   type="text"
                   value={newItem.fax}
                   onChange={(e) => setNewItem({...newItem, fax: e.target.value})}
-                  className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">Email</label>
                 <input
                   type="email"
                   value={newItem.mail}
                   onChange={(e) => setNewItem({...newItem, mail: e.target.value})}
-                  className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Site Web</label>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">Site Web</label>
                 <input
                   type="text"
                   value={newItem.web}
                   onChange={(e) => setNewItem({...newItem, web: e.target.value})}
-                  className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
                 />
               </div>
             </div>
@@ -375,7 +444,7 @@ export default function Portfolio() {
       )}
 
       {/* Categories Grid */}
-      {!selectedCategory && (
+      {!selectedCategory && !viewAll && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredCategories.map((category) => (
             <div
@@ -402,72 +471,81 @@ export default function Portfolio() {
       )}
 
       {/* Items List */}
-      {selectedCategory && (
+      {(selectedCategory || viewAll) && (
         <div className="space-y-4">
           {loading && items.length === 0 ? (
             <div className="flex justify-center py-12">
               <Loader2 className="animate-spin text-indigo-500" size={32} />
             </div>
+          ) : viewMode === 'map' ? (
+            <MapView items={filteredItems} />
           ) : (
-            <div className="grid grid-cols-1 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {filteredItems.map((item) => (
-                <div key={item.id} className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-all">
-                  <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
-                    <div className="space-y-3">
+                <div key={item.id} className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-all flex flex-col h-full">
+                  <div className="flex flex-col h-full gap-4">
+                    <div className="space-y-3 flex-1">
                       <div>
-                        <div className="flex items-center gap-2 mb-1">
-                          <Building2 size={18} className="text-indigo-600" />
-                          <h3 className="font-bold text-slate-800 text-lg">{item.name}</h3>
+                        <div className="flex items-start gap-3 mb-2">
+                          <div className="p-2 bg-indigo-50 text-indigo-600 rounded-lg shrink-0">
+                            <Building2 size={20} />
+                          </div>
+                          <div>
+                            <h3 className="font-bold text-slate-800 text-lg leading-tight">{item.name}</h3>
+                            {item.sub_type && (
+                              <span className="inline-block mt-1 px-2 py-0.5 bg-slate-100 text-slate-600 text-[10px] font-bold rounded uppercase tracking-wider">
+                                {item.sub_type}
+                              </span>
+                            )}
+                          </div>
                         </div>
-                        {item.sub_type && (
-                          <span className="inline-block px-2 py-1 bg-slate-100 text-slate-600 text-xs font-medium rounded uppercase">
-                            {item.sub_type}
-                          </span>
-                        )}
                       </div>
 
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-2 text-sm">
-                        <div className="flex items-start gap-2 text-slate-600">
-                          <MapPin size={16} className="mt-0.5 shrink-0" />
-                          <span>
-                            <span className="font-semibold">Adresse : </span>
-                            {item.address || 'Non renseignée'}
+                      <div className="space-y-3 text-sm pt-2 border-t border-slate-100">
+                        <div className="flex items-start gap-3 text-slate-600">
+                          <MapPin size={16} className="mt-0.5 shrink-0 text-slate-400" />
+                          <span className="leading-relaxed">
+                            {item.address || 'Adresse non renseignée'}
                             {item.city ? ` - ${item.city}` : ''}
                           </span>
                         </div>
-                        <div className="flex items-center gap-2 text-slate-600">
-                          <Hash size={16} className="shrink-0" />
-                          <span><span className="font-semibold">Adresse postale : </span>{item.bp ? `BP ${item.bp}` : 'Non renseignée'}</span>
-                        </div>
-                        <div className="flex items-start gap-2 text-slate-600">
-                          <Phone size={16} className="mt-0.5 shrink-0" />
-                          <div className="flex flex-col">
-                            <span className="font-semibold">Tél : </span>
-                            {item.tel ? item.tel.split(/[\n/]+/).map((t, i) => (
-                              <span key={i}>{t.trim()}</span>
-                            )) : <span>Non renseigné</span>}
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2 text-slate-600">
-                          <Mail size={16} className="shrink-0" />
-                          <span>
-                            <span className="font-semibold">Mail : </span>
-                            {item.mail ? (
-                              <a href={`mailto:${item.mail}`} className="hover:text-indigo-600 transition-colors">{item.mail}</a>
-                            ) : 'Non renseigné'}
-                          </span>
-                        </div>
-                        {item.fax && (
-                          <div className="flex items-center gap-2 text-slate-600">
-                            <Phone size={16} className="shrink-0" />
-                            <span><span className="font-semibold">Fax : </span>{item.fax}</span>
+                        
+                        {item.bp && (
+                          <div className="flex items-center gap-3 text-slate-600">
+                            <Hash size={16} className="shrink-0 text-slate-400" />
+                            <span>BP {item.bp}</span>
                           </div>
                         )}
+
+                        <div className="flex items-start gap-3 text-slate-600">
+                          <Phone size={16} className="mt-0.5 shrink-0 text-slate-400" />
+                          <div className="flex flex-col">
+                            {item.tel ? item.tel.split(/[\n/]+/).map((t, i) => (
+                              <span key={i}>{t.trim()}</span>
+                            )) : <span>Tél non renseigné</span>}
+                          </div>
+                        </div>
+
+                        {item.fax && (
+                          <div className="flex items-center gap-3 text-slate-600">
+                            <Phone size={16} className="shrink-0 text-slate-400" />
+                            <span>Fax: {item.fax}</span>
+                          </div>
+                        )}
+
+                        <div className="flex items-center gap-3 text-slate-600">
+                          <Mail size={16} className="shrink-0 text-slate-400" />
+                          <span className="truncate">
+                            {item.mail ? (
+                              <a href={`mailto:${item.mail}`} className="hover:text-indigo-600 transition-colors">{item.mail}</a>
+                            ) : 'Mail non renseigné'}
+                          </span>
+                        </div>
+
                         {item.web && (
-                          <div className="flex items-center gap-2 text-slate-600">
-                            <Globe size={16} className="shrink-0" />
-                            <span>
-                              <span className="font-semibold">Site Web : </span>
+                          <div className="flex items-center gap-3 text-slate-600">
+                            <Globe size={16} className="shrink-0 text-slate-400" />
+                            <span className="truncate">
                               <a href={item.web.startsWith('http') ? item.web : `https://${item.web}`} target="_blank" rel="noopener noreferrer" className="hover:text-indigo-600 transition-colors">{item.web}</a>
                             </span>
                           </div>
@@ -485,16 +563,16 @@ export default function Portfolio() {
       {/* Empty States */}
       {!loading && (
         <>
-          {!selectedCategory && filteredCategories.length === 0 && (
+          {!selectedCategory && !viewAll && filteredCategories.length === 0 && (
             <div className="text-center py-12 bg-white rounded-xl border border-dashed border-slate-300">
               <Folder className="mx-auto text-slate-300 mb-4" size={48} />
               <p className="text-slate-500">Aucune catégorie trouvée.</p>
             </div>
           )}
-          {selectedCategory && filteredItems.length === 0 && (
+          {(selectedCategory || viewAll) && filteredItems.length === 0 && (
             <div className="text-center py-12 bg-white rounded-xl border border-dashed border-slate-300">
               <Building2 className="mx-auto text-slate-300 mb-4" size={48} />
-              <p className="text-slate-500">Aucun établissement trouvé dans cette catégorie.</p>
+              <p className="text-slate-500">Aucun établissement trouvé.</p>
             </div>
           )}
         </>

@@ -15,12 +15,14 @@ import Opportunities from './pages/Opportunities';
 import Quotes from './pages/Quotes';
 import Activities from './pages/Activities';
 import Calendar from './pages/Calendar';
+import Catalog from './pages/Catalog';
 import QuotePublicView from './pages/QuotePublicView';
 import Invoices from './pages/Invoices';
 import Commissions from './pages/Commissions';
 import Tracking from './pages/Tracking';
 import Products from './pages/Products';
 import Projects from './pages/Projects';
+import Objectives from './pages/Objectives';
 import SalesAnalysis from './pages/SalesAnalysis';
 import Placeholder from './pages/Placeholder';
 import Layout from './components/Layout';
@@ -69,8 +71,8 @@ export default function App() {
             <Route path="tracking" element={<Tracking />} />
             <Route path="activities" element={<Activities />} />
             <Route path="calendar" element={<Calendar />} />
-            <Route path="goals" element={<Placeholder />} />
-            <Route path="catalog" element={<Placeholder />} />
+            <Route path="goals" element={<Objectives />} />
+            <Route path="catalog" element={<Catalog />} />
             <Route path="products" element={<Products />} />
             <Route path="projects" element={<Projects />} />
             <Route path="documents" element={<Placeholder />} />

@@ -23,6 +23,13 @@ export default function Commissions() {
   });
 
   useEffect(() => {
+    window.dispatchEvent(new CustomEvent('sb-hide-sidebar', { detail: showModal }));
+    return () => {
+      window.dispatchEvent(new CustomEvent('sb-hide-sidebar', { detail: false }));
+    };
+  }, [showModal]);
+
+  useEffect(() => {
     fetchCommissions();
     if (profile?.role === 'admin') {
       fetchData();
@@ -170,7 +177,7 @@ export default function Commissions() {
             placeholder="Rechercher par agent ou facture..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+            className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
           />
         </div>
       </div>
@@ -256,12 +263,12 @@ export default function Commissions() {
 
             <form onSubmit={handleSubmit} className="p-6 space-y-4">
               <div className="space-y-2">
-                <label className="text-sm font-semibold text-slate-700">Agent</label>
+                <label className="block text-sm font-medium text-slate-700">Agent</label>
                 <select
                   required
                   value={formData.agentId}
                   onChange={(e) => setFormData({ ...formData, agentId: e.target.value })}
-                  className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
+                  className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
                 >
                   <option value="">Sélectionner un agent...</option>
                   {agents.map(a => <option key={a.uid} value={a.uid}>{a.name}</option>)}
@@ -269,7 +276,7 @@ export default function Commissions() {
               </div>
 
               <div className="space-y-2">
-                <label className="text-sm font-semibold text-slate-700">Facture (Optionnel)</label>
+                <label className="block text-sm font-medium text-slate-700">Facture (Optionnel)</label>
                 <select
                   value={formData.invoiceId}
                   onChange={(e) => {
@@ -280,7 +287,7 @@ export default function Commissions() {
                       amount: inv ? (Number(inv.amount) * (Number(formData.rate) / 100)).toString() : formData.amount
                     });
                   }}
-                  className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
+                  className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
                 >
                   <option value="">Vente directe / Sans facture</option>
                   {invoices.map(i => <option key={i.id} value={i.id}>{i.number} ({Number(i.amount).toLocaleString()} FCFA)</option>)}
@@ -289,7 +296,7 @@ export default function Commissions() {
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <label className="text-sm font-semibold text-slate-700">Taux (%)</label>
+                  <label className="block text-sm font-medium text-slate-700">Taux (%)</label>
                   <input
                     type="number"
                     required
@@ -303,29 +310,29 @@ export default function Commissions() {
                         amount: inv ? (Number(inv.amount) * (Number(rate) / 100)).toString() : formData.amount
                       });
                     }}
-                    className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
+                    className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
                   />
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm font-semibold text-slate-700">Montant (FCFA)</label>
+                  <label className="block text-sm font-medium text-slate-700">Montant (FCFA)</label>
                   <input
                     type="number"
                     required
                     value={formData.amount}
                     onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
-                    className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
+                    className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
                   />
                 </div>
               </div>
 
               <div className="space-y-2">
-                <label className="text-sm font-semibold text-slate-700">Date</label>
+                <label className="block text-sm font-medium text-slate-700">Date</label>
                 <input
                   type="date"
                   required
                   value={formData.date}
                   onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-                  className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
+                  className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
                 />
               </div>
 

@@ -1,6 +1,24 @@
 @import "tailwindcss";
 
+body {
+  @apply bg-slate-50 text-slate-900 overflow-x-hidden;
+}
+
+/* Hide horizontal scrollbars globally */
+*::-webkit-scrollbar:horizontal {
+  display: none;
+}
+
+* {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: thin;     /* Firefox (thin vertical, but we can't hide horizontal only easily in FF without hiding all) */
+}
+
 @layer utilities {
+  ::-webkit-scrollbar:horizontal {
+    display: none;
+  }
+  
   .custom-scrollbar::-webkit-scrollbar {
     width: 4px;
   }
