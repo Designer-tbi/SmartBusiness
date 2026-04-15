@@ -842,7 +842,7 @@ async function startServer() {
       return res.status(503).json({ 
         error: "Database connection failed. Please check your DATABASE_URL secret.",
         isPlaceholder: true,
-        details: "The database hostname is set to 'base', which is a placeholder. Please update your DATABASE_URL in AI Studio Secrets (Gear Icon -> Secrets)."
+        details: "La base de données n'est pas configurée. Veuillez définir DATABASE_URL dans les variables d'environnement."
       });
     }
 
@@ -879,7 +879,7 @@ async function startServer() {
       return res.status(503).json({ 
         error: "Database connection failed. Please check your DATABASE_URL secret.",
         isPlaceholder: true,
-        details: "The database hostname is set to 'base', which is a placeholder. Please update your DATABASE_URL in AI Studio Secrets (Gear Icon -> Secrets)."
+        details: "La base de données n'est pas configurée. Veuillez définir DATABASE_URL dans les variables d'environnement."
       });
     }
 
