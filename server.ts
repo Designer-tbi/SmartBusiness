@@ -31,7 +31,10 @@ class AppDatabase {
     const dbUrl = process.env.DATABASE_URL;
     const isPlaceholder = isPlaceholderUrl(dbUrl);
 
-    if (isPlaceholder) {
+    if (process.env.VERCEL && isPlaceholder) {
+      console.error("VERCEL: DATABASE_URL is missing! PostgreSQL is required.");
+      this.mode = 'postgres'; // Force postgres on Vercel, will error on first query
+    } else if (isPlaceholder) {
       console.log("DATABASE_URL is missing or placeholder. Falling back to SQLite.");
       this.mode = 'sqlite';
     } else {
@@ -55,8 +58,13 @@ class AppDatabase {
 
   private async getSqliteDb() {
     if (!this.sqliteDb) {
-      const Database = (await import("better-sqlite3")).default;
-      this.sqliteDb = new Database(path.join(__dirname, "database.sqlite"));
+      try {
+        const Database = (await import("better-sqlite3")).default;
+        this.sqliteDb = new Database(path.join(__dirname, "database.sqlite"));
+      } catch (err) {
+        console.error("SQLite not available (normal on Vercel serverless):", err);
+        throw new Error("SQLite is not available in this environment. Please configure DATABASE_URL for PostgreSQL.");
+      }
     }
     return this.sqliteDb;
   }
@@ -76,6 +84,10 @@ class AppDatabase {
         ]) as QueryResult;
       } catch (err: any) {
         if (err.message.includes('getaddrinfo') || err.message.includes('EAI_AGAIN') || err.message.includes('timed out')) {
+          if (process.env.VERCEL) {
+            console.error(`Postgres connection failed on Vercel: ${err.message}`);
+            throw new Error('Database connection failed. Check DATABASE_URL environment variable in Vercel settings.');
+          }
           console.error(`Postgres connection failed (${err.message}). Falling back to SQLite for this session.`);
           this.mode = 'sqlite';
           await this.initSqlite();
@@ -603,6 +615,10 @@ async function initDb() {
     console.log("Postgres database schema initialized");
   } catch (err: any) {
     console.error("Failed to initialize Postgres database:", err.message);
+    if (process.env.VERCEL) {
+      console.error("VERCEL: Cannot fall back to SQLite. Ensure DATABASE_URL is correctly set.");
+      return;
+    }
     if (err.message.includes('getaddrinfo') || err.message.includes('EAI_AGAIN') || err.message.includes('more than one statement')) {
       console.log("Falling back to SQLite due to Postgres connection error or multi-statement incompatibility.");
       await db.initSqlite();
