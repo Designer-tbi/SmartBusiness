@@ -1,5 +1,5 @@
 import express from "express";
-import { createServer as createViteServer } from "vite";
+// Note: createViteServer is imported dynamically below to avoid issues on Vercel
 import path from "path";
 import url from "url";
 import { fileURLToPath } from "url";
@@ -15,7 +15,7 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const isPlaceholderUrl = (url: string | undefined) => !url || url.includes('base');
+const isPlaceholderUrl = (url: string | undefined) => !url || url === 'base' || url.startsWith('postgresql://base') || url.includes('://base/');
 
 // Database abstraction to handle both Postgres and SQLite
 interface QueryResult {
@@ -774,10 +774,12 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  // Start listening immediately to satisfy the platform's health check
-  const server = app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server is now listening on http://0.0.0.0:${PORT}`);
-  });
+  // Start listening immediately to satisfy the platform's health check (skip on Vercel)
+  if (!process.env.VERCEL) {
+    const server = app.listen(PORT, "0.0.0.0", () => {
+      console.log(`Server is now listening on http://0.0.0.0:${PORT}`);
+    });
+  }
 
   app.use(express.json());
   app.use(cookieParser());
@@ -2126,64 +2128,67 @@ async function startServer() {
     }
   });
 
-  // Placeholder for Vite middleware to prevent blocking server startup
-  let viteMiddleware: any = null;
-  
-  // Vite middleware for development
-  if (process.env.NODE_ENV !== "production") {
-    (async () => {
-      try {
-        const vite = await createViteServer({
-          server: { middlewareMode: true },
-          appType: "spa",
-        });
-        viteMiddleware = vite.middlewares;
-        console.log("Vite development server initialized.");
-      } catch (err) {
-        console.error("Failed to initialize Vite server:", err);
-      }
-    })();
-
-    app.use((req, res, next) => {
-      console.log(`Request: ${req.method} ${req.path}`);
-      if (viteMiddleware) {
-        viteMiddleware(req, res, next);
-      } else {
-        // If it's an API request, let it through (they don't need Vite)
-        if (req.path.startsWith('/api')) {
-          next();
-        } else {
-          res.setHeader('Content-Type', 'text/html');
-          res.send(`
-            <html>
-              <head>
-                <meta http-equiv="refresh" content="2">
-                <style>
-                  body { font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #f4f4f5; }
-                  .card { background: white; padding: 2rem; border-radius: 0.75rem; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); text-align: center; }
-                  .spinner { border: 3px solid #e2e8f0; border-top: 3px solid #3b82f6; border-radius: 50%; width: 24px; height: 24px; animation: spin 1s linear infinite; margin: 0 auto 1rem; }
-                  @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-                </style>
-              </head>
-              <body>
-                <div class="card">
-                  <div class="spinner"></div>
-                  <p>Initializing application components...</p>
-                  <p style="font-size: 0.875rem; color: #64748b;">This page will refresh automatically.</p>
-                </div>
-              </body>
-            </html>
-          `);
+  // Skip Vite middleware and static file serving on Vercel (handled by Vercel itself)
+  if (!process.env.VERCEL) {
+    // Placeholder for Vite middleware to prevent blocking server startup
+    let viteMiddleware: any = null;
+    
+    // Vite middleware for development
+    if (process.env.NODE_ENV !== "production") {
+      (async () => {
+        try {
+          const { createServer: createViteServer } = await import("vite");
+          const vite = await createViteServer({
+            server: { middlewareMode: true },
+            appType: "spa",
+          });
+          viteMiddleware = vite.middlewares;
+          console.log("Vite development server initialized.");
+        } catch (err) {
+          console.error("Failed to initialize Vite server:", err);
         }
-      }
-    });
-  } else {
-    console.log("Serving static files from dist...");
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
+      })();
+
+      app.use((req, res, next) => {
+        console.log(`Request: ${req.method} ${req.path}`);
+        if (viteMiddleware) {
+          viteMiddleware(req, res, next);
+        } else {
+          if (req.path.startsWith('/api')) {
+            next();
+          } else {
+            res.setHeader('Content-Type', 'text/html');
+            res.send(`
+              <html>
+                <head>
+                  <meta http-equiv="refresh" content="2">
+                  <style>
+                    body { font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #f4f4f5; }
+                    .card { background: white; padding: 2rem; border-radius: 0.75rem; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); text-align: center; }
+                    .spinner { border: 3px solid #e2e8f0; border-top: 3px solid #3b82f6; border-radius: 50%; width: 24px; height: 24px; animation: spin 1s linear infinite; margin: 0 auto 1rem; }
+                    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+                  </style>
+                </head>
+                <body>
+                  <div class="card">
+                    <div class="spinner"></div>
+                    <p>Initializing application components...</p>
+                    <p style="font-size: 0.875rem; color: #64748b;">This page will refresh automatically.</p>
+                  </div>
+                </body>
+              </html>
+            `);
+          }
+        }
+      });
+    } else {
+      console.log("Serving static files from dist...");
+      const distPath = path.join(process.cwd(), 'dist');
+      app.use(express.static(distPath));
+      app.get('*', (req, res) => {
+        res.sendFile(path.join(distPath, 'index.html'));
+      });
+    }
   }
 
   // Initialize database in background
@@ -2218,6 +2223,9 @@ async function startServer() {
       console.error("Background: Failed to initialize database:", err);
     }
   })();
+
+  // Return the app for Vercel export
+  return app;
 }
 
   // Background tasks - run independently to not block the main thread
@@ -7239,5 +7247,24 @@ async function seedCoiffureEsthetiqueItems() {
 }
 
 
-startServer();
-console.log("Server script execution reached the end.");
+// Vercel serverless handler export
+let appPromise: Promise<express.Express> | null = null;
+
+async function getApp(): Promise<express.Express> {
+  if (!appPromise) {
+    appPromise = startServer();
+  }
+  return appPromise;
+}
+
+// Export handler for Vercel
+export default async function handler(req: any, res: any) {
+  const app = await getApp();
+  return app(req, res);
+}
+
+// Only start server in non-Vercel environments
+if (!process.env.VERCEL) {
+  startServer();
+  console.log("Server script execution reached the end.");
+}
