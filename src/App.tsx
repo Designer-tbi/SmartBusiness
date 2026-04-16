@@ -25,6 +25,7 @@ import Projects from './pages/Projects';
 import Objectives from './pages/Objectives';
 import SalesAnalysis from './pages/SalesAnalysis';
 import Placeholder from './pages/Placeholder';
+import Documents from './pages/Documents';
 import Layout from './components/Layout';
 
 const ProtectedRoute = ({ children, requiredRole }: { children: React.ReactNode, requiredRole?: 'admin' | 'agent' }) => {
@@ -75,7 +76,7 @@ export default function App() {
             <Route path="catalog" element={<Catalog />} />
             <Route path="products" element={<Products />} />
             <Route path="projects" element={<Projects />} />
-            <Route path="documents" element={<Placeholder />} />
+            <Route path="documents" element={<Documents />} />
             <Route path="sales-analysis" element={<SalesAnalysis />} />
           </Route>
         </Routes>

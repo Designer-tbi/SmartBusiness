@@ -63,6 +63,7 @@ async function ensureDbInitialized() {
       "CREATE TABLE IF NOT EXISTS activities (id SERIAL PRIMARY KEY, type TEXT NOT NULL, subject TEXT NOT NULL, customer_id INTEGER, lead_id INTEGER, opportunity_id INTEGER, agent_id TEXT, status TEXT NOT NULL DEFAULT 'À faire', date TIMESTAMP WITH TIME ZONE NOT NULL, notes TEXT, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
       "CREATE TABLE IF NOT EXISTS projects (id SERIAL PRIMARY KEY, name TEXT NOT NULL, customer_id INTEGER, status TEXT NOT NULL DEFAULT 'En cours', start_date DATE, end_date DATE, description TEXT, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
       "CREATE TABLE IF NOT EXISTS objectives (id SERIAL PRIMARY KEY, agent_id TEXT, type TEXT NOT NULL, target_value NUMERIC NOT NULL, period TEXT NOT NULL, start_date TEXT NOT NULL, end_date TEXT NOT NULL, status TEXT DEFAULT 'En cours', created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
+      "CREATE TABLE IF NOT EXISTS documents (id SERIAL PRIMARY KEY, name TEXT NOT NULL, file_name TEXT NOT NULL, file_type TEXT, file_size INTEGER, file_data TEXT, customer_id INTEGER, quote_id INTEGER, invoice_id INTEGER, uploaded_by TEXT, notes TEXT, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
     ];
     for (const s of schema) { await query(s); }
     // Seed admin
@@ -538,6 +539,72 @@ app.post("/api/opportunities/:id/convert-to-customer", authenticateToken, async 
     }
     await query("UPDATE opportunities SET customer_id=$1, lead_id=NULL, stage='won', probability=100, updated_at=CURRENT_TIMESTAMP WHERE id=$2", [customerId, id]);
     res.json({ success: true, customerId });
+  } catch (err) { res.status(500).json({ error: "Server error" }); }
+});
+
+// Admin: Purge all CRM data (keep only admin user)
+app.post("/api/admin/purge", authenticateToken, async (req: any, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: "Forbidden" });
+  try {
+    // Order matters due to foreign keys
+    await query("DELETE FROM quote_items");
+    await query("DELETE FROM commissions");
+    await query("DELETE FROM activities");
+    await query("DELETE FROM objectives");
+    await query("DELETE FROM documents");
+    await query("DELETE FROM invoices");
+    await query("DELETE FROM quotes");
+    await query("DELETE FROM calls");
+    await query("DELETE FROM opportunities");
+    await query("DELETE FROM leads");
+    await query("DELETE FROM portfolio_items");
+    await query("DELETE FROM products");
+    await query("DELETE FROM projects");
+    await query("DELETE FROM customers");
+    await query("DELETE FROM categories");
+    await query("DELETE FROM catalogues");
+    await query("DELETE FROM vat_rates");
+    // Delete non-admin users
+    await query("DELETE FROM users WHERE email != 'eden@tbi-center.fr'");
+    res.json({ success: true, message: "All CRM data purged. Only admin account remains." });
+  } catch (err: any) {
+    console.error("Purge error:", err);
+    res.status(500).json({ error: "Server error", details: err.message });
+  }
+});
+
+// Documents Routes
+app.get("/api/documents", authenticateToken, async (req, res) => {
+  try {
+    const result = await query('SELECT id, name, file_name, file_type, file_size, customer_id, quote_id, invoice_id, uploaded_by, notes, created_at as "createdAt" FROM documents ORDER BY created_at DESC');
+    res.json(result.rows);
+  } catch (err) { res.status(500).json({ error: "Server error" }); }
+});
+
+app.get("/api/documents/:id", authenticateToken, async (req, res) => {
+  try {
+    const result = await query("SELECT * FROM documents WHERE id = $1", [req.params.id]);
+    if (result.rows.length === 0) return res.status(404).json({ error: "Document not found" });
+    res.json(result.rows[0]);
+  } catch (err) { res.status(500).json({ error: "Server error" }); }
+});
+
+app.post("/api/documents", authenticateToken, async (req: any, res) => {
+  const { name, fileName, fileType, fileSize, fileData, customerId, quoteId, invoiceId, notes } = req.body;
+  if (!name || !fileName || !fileData) return res.status(400).json({ error: "Name, fileName and fileData are required" });
+  try {
+    const result = await query(
+      'INSERT INTO documents (name, file_name, file_type, file_size, file_data, customer_id, quote_id, invoice_id, uploaded_by, notes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id, name, file_name, file_type, file_size, customer_id, quote_id, invoice_id, uploaded_by, notes, created_at as "createdAt"',
+      [name, fileName, fileType, fileSize, fileData, customerId || null, quoteId || null, invoiceId || null, req.user.uid, notes]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) { res.status(500).json({ error: "Server error" }); }
+});
+
+app.delete("/api/documents/:id", authenticateToken, async (req, res) => {
+  try {
+    await query("DELETE FROM documents WHERE id = $1", [req.params.id]);
+    res.json({ success: true });
   } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 
