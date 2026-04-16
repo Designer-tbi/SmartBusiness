@@ -1422,29 +1422,35 @@ async function startServer() {
     }
   });
 
-  // Ensure uploads directory exists
-  const uploadsDir = path.join(__dirname, "public", "uploads");
-  if (!fs.existsSync(uploadsDir)) {
-    fs.mkdirSync(uploadsDir, { recursive: true });
+  // File uploads - skip disk storage on Vercel (read-only filesystem)
+  let upload: any;
+  if (!process.env.VERCEL) {
+    const uploadsDir = path.join(__dirname, "public", "uploads");
+    if (!fs.existsSync(uploadsDir)) {
+      fs.mkdirSync(uploadsDir, { recursive: true });
+    }
+
+    const storage = multer.diskStorage({
+      destination: (req, file, cb) => {
+        cb(null, uploadsDir);
+      },
+      filename: (req, file, cb) => {
+        const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+        cb(null, uniqueSuffix + "-" + file.originalname);
+      },
+    });
+    upload = multer({ storage });
+
+    app.use("/uploads", express.static(uploadsDir));
+  } else {
+    upload = multer({ storage: multer.memoryStorage() });
   }
-
-  // Multer configuration for file uploads
-  const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-      cb(null, uploadsDir);
-    },
-    filename: (req, file, cb) => {
-      const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-      cb(null, uniqueSuffix + "-" + file.originalname);
-    },
-  });
-  const upload = multer({ storage });
-
-  // Serve uploaded files
-  app.use("/uploads", express.static(uploadsDir));
 
   // File Upload Route
   app.post("/api/upload", authenticateToken, upload.single("file"), (req: any, res) => {
+    if (process.env.VERCEL) {
+      return res.status(503).json({ error: "File uploads are not supported in serverless mode." });
+    }
     if (!req.file) {
       return res.status(400).json({ error: "No file uploaded" });
     }
@@ -2142,6 +2148,12 @@ async function startServer() {
       console.error("Error converting opportunity to customer:", err);
       res.status(500).json({ error: "Server error" });
     }
+  });
+
+  // Global error handler - ensures JSON responses even on unexpected errors
+  app.use((err: any, req: any, res: any, next: any) => {
+    console.error("Unhandled error:", err);
+    res.status(500).json({ error: "Internal server error", details: err.message });
   });
 
   // Skip Vite middleware and static file serving on Vercel (handled by Vercel itself)
@@ -7275,8 +7287,13 @@ async function getApp(): Promise<express.Express> {
 
 // Export handler for Vercel
 export default async function handler(req: any, res: any) {
-  const app = await getApp();
-  return app(req, res);
+  try {
+    const app = await getApp();
+    return app(req, res);
+  } catch (err: any) {
+    console.error("Vercel handler error:", err);
+    res.status(500).json({ error: "Server initialization failed", details: err.message });
+  }
 }
 
 // Only start server in non-Vercel environments
