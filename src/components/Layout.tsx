@@ -25,7 +25,8 @@ import {
   Files,
   PieChart,
   ChevronDown,
-  ChevronRight
+  ChevronRight,
+  Monitor
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 
@@ -100,6 +101,7 @@ export default function Layout() {
       children: [
         { name: 'Rapports', href: '/reports', icon: BarChart3 },
         { name: 'Utilisateurs', href: '/users', icon: UserCircle },
+        { name: 'Sessions', href: '/sessions', icon: Monitor },
         { name: 'Paramètres', href: '/settings', icon: Settings },
       ]
     });

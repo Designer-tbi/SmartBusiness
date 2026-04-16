@@ -64,6 +64,9 @@ async function ensureDbInitialized() {
       "CREATE TABLE IF NOT EXISTS projects (id SERIAL PRIMARY KEY, name TEXT NOT NULL, customer_id INTEGER, status TEXT NOT NULL DEFAULT 'En cours', start_date DATE, end_date DATE, description TEXT, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
       "CREATE TABLE IF NOT EXISTS objectives (id SERIAL PRIMARY KEY, agent_id TEXT, type TEXT NOT NULL, target_value NUMERIC NOT NULL, period TEXT NOT NULL, start_date TEXT NOT NULL, end_date TEXT NOT NULL, status TEXT DEFAULT 'En cours', created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
       "CREATE TABLE IF NOT EXISTS documents (id SERIAL PRIMARY KEY, name TEXT NOT NULL, file_name TEXT NOT NULL, file_type TEXT, file_size INTEGER, file_data TEXT, customer_id INTEGER, quote_id INTEGER, invoice_id INTEGER, uploaded_by TEXT, notes TEXT, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
+      "CREATE TABLE IF NOT EXISTS sessions (id SERIAL PRIMARY KEY, user_uid TEXT NOT NULL, user_email TEXT NOT NULL, user_name TEXT NOT NULL, user_role TEXT NOT NULL, ip_address TEXT, user_agent TEXT, logged_in_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, logged_out_at TIMESTAMP WITH TIME ZONE)",
+      "ALTER TABLE customers ADD COLUMN IF NOT EXISTS agent_id TEXT",
+      "ALTER TABLE leads ADD COLUMN IF NOT EXISTS agent_id TEXT",
     ];
     for (const s of schema) { await query(s); }
     // Seed admin
@@ -128,6 +131,12 @@ app.post("/api/auth/login", async (req, res) => {
     if (!validPassword) return res.status(400).json({ error: "Invalid password" });
     const token = jwt.sign({ uid: user.uid, role: user.role }, JWT_SECRET);
     res.cookie("token", token, { httpOnly: true, secure: true, sameSite: 'none' });
+    // Log session
+    try {
+      const ip = req.headers['x-forwarded-for'] || req.headers['x-real-ip'] || req.ip || 'unknown';
+      const ua = req.headers['user-agent'] || 'unknown';
+      await query("INSERT INTO sessions (user_uid, user_email, user_name, user_role, ip_address, user_agent) VALUES ($1,$2,$3,$4,$5,$6)", [user.uid, user.email, user.name, user.role, typeof ip === 'string' ? ip : String(ip), ua]);
+    } catch (e) { console.error("Session log error:", e); }
     res.json({ uid: user.uid, email: user.email, name: user.name, role: user.role });
   } catch (err: any) {
     console.error("Login error:", err);
@@ -220,14 +229,20 @@ app.get("/api/admin/stats", authenticateToken, async (req: any, res) => {
   } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 
-// Customers
-app.get("/api/customers", authenticateToken, async (req, res) => {
-  try { res.json((await query('SELECT id, type, first_name as "firstName", last_name as "lastName", company_name as "companyName", name, email, phone, address, city, industry, created_at as "createdAt", updated_at as "updatedAt" FROM customers ORDER BY created_at DESC')).rows); } catch (err) { res.status(500).json({ error: "Server error" }); }
+// Customers (agent sees own, admin sees all)
+app.get("/api/customers", authenticateToken, async (req: any, res) => {
+  try {
+    let q = 'SELECT id, type, first_name as "firstName", last_name as "lastName", company_name as "companyName", name, email, phone, address, city, industry, agent_id, created_at as "createdAt", updated_at as "updatedAt" FROM customers';
+    let params: any[] = [];
+    if (req.user.role !== 'admin') { q += ' WHERE agent_id = $1'; params.push(req.user.uid); }
+    q += ' ORDER BY created_at DESC';
+    res.json((await query(q, params)).rows);
+  } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
-app.post("/api/customers", authenticateToken, async (req, res) => {
+app.post("/api/customers", authenticateToken, async (req: any, res) => {
   const { type, firstName, lastName, companyName, email, phone, address, city, industry } = req.body;
   const name = type === 'company' ? companyName : `${firstName} ${lastName}`;
-  try { res.status(201).json((await query('INSERT INTO customers (type, first_name, last_name, company_name, name, email, phone, address, city, industry) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id, type, first_name as "firstName", last_name as "lastName", company_name as "companyName", name, email, phone, address, city, industry, created_at as "createdAt"', [type || 'individual', firstName, lastName, companyName, name, email, phone, address, city, industry])).rows[0]); } catch (err) { res.status(500).json({ error: "Server error" }); }
+  try { res.status(201).json((await query('INSERT INTO customers (type, first_name, last_name, company_name, name, email, phone, address, city, industry, agent_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id, type, first_name as "firstName", last_name as "lastName", company_name as "companyName", name, email, phone, address, city, industry, created_at as "createdAt"', [type || 'individual', firstName, lastName, companyName, name, email, phone, address, city, industry, req.user.uid])).rows[0]); } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 app.put("/api/customers/:id", authenticateToken, async (req, res) => {
   const { id } = req.params; const { type, firstName, lastName, companyName, email, phone, address, city, industry } = req.body;
@@ -242,14 +257,20 @@ app.delete("/api/customers/:id", authenticateToken, async (req, res) => {
   try { await query("DELETE FROM customers WHERE id = $1", [req.params.id]); res.json({ success: true }); } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 
-// Leads
-app.get("/api/leads", authenticateToken, async (req, res) => {
-  try { res.json((await query('SELECT id, type, first_name as "firstName", last_name as "lastName", company_name as "companyName", email, phone, source, status, notes, created_at as "createdAt", updated_at as "updatedAt" FROM leads ORDER BY created_at DESC')).rows); } catch (err) { res.status(500).json({ error: "Server error" }); }
+// Leads (agent sees own, admin sees all)
+app.get("/api/leads", authenticateToken, async (req: any, res) => {
+  try {
+    let q = 'SELECT id, type, first_name as "firstName", last_name as "lastName", company_name as "companyName", email, phone, source, status, notes, agent_id, created_at as "createdAt", updated_at as "updatedAt" FROM leads';
+    let params: any[] = [];
+    if (req.user.role !== 'admin') { q += ' WHERE agent_id = $1'; params.push(req.user.uid); }
+    q += ' ORDER BY created_at DESC';
+    res.json((await query(q, params)).rows);
+  } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 app.post("/api/leads", authenticateToken, async (req: any, res) => {
   const { type, firstName, lastName, companyName, email, phone, source, status, notes } = req.body;
   try {
-    const result = await query('INSERT INTO leads (type, first_name, last_name, company_name, email, phone, source, status, notes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id, type, first_name as "firstName", last_name as "lastName", company_name as "companyName", email, phone, source, status, notes, created_at as "createdAt"', [type || 'individual', firstName, lastName, companyName, email, phone, source, status || 'Nouveau', notes]);
+    const result = await query('INSERT INTO leads (type, first_name, last_name, company_name, email, phone, source, status, notes, agent_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id, type, first_name as "firstName", last_name as "lastName", company_name as "companyName", email, phone, source, status, notes, created_at as "createdAt"', [type || 'individual', firstName, lastName, companyName, email, phone, source, status || 'Nouveau', notes, req.user.uid]);
     const leadId = result.rows[0].id;
     try { const d = new Date(); d.setDate(d.getDate() + 1); await query("INSERT INTO activities (type, subject, lead_id, agent_id, status, date, notes) VALUES ($1,$2,$3,$4,$5,$6,$7)", ['Appel', `Premier contact - Lead #${leadId}`, leadId, req.user.uid, 'À faire', d.toISOString(), `Contacter: ${type === 'company' ? companyName : firstName + ' ' + lastName}`]); } catch (e) {}
     res.status(201).json(result.rows[0]);
@@ -542,6 +563,22 @@ app.post("/api/opportunities/:id/convert-to-customer", authenticateToken, async 
   } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 
+// Sessions tracking (Admin only)
+app.get("/api/admin/sessions", authenticateToken, async (req: any, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: "Forbidden" });
+  try {
+    const { user, dateFrom, dateTo } = req.query;
+    let q = 'SELECT id, user_uid, user_email, user_name, user_role, ip_address, user_agent, logged_in_at as "loggedInAt", logged_out_at as "loggedOutAt" FROM sessions WHERE 1=1';
+    const params: any[] = [];
+    let idx = 1;
+    if (user) { q += ` AND (user_email ILIKE $${idx} OR user_name ILIKE $${idx})`; params.push(`%${user}%`); idx++; }
+    if (dateFrom) { q += ` AND logged_in_at >= $${idx}`; params.push(dateFrom); idx++; }
+    if (dateTo) { q += ` AND logged_in_at <= $${idx}`; params.push(dateTo); idx++; }
+    q += ' ORDER BY logged_in_at DESC LIMIT 200';
+    res.json((await query(q, params)).rows);
+  } catch (err) { res.status(500).json({ error: "Server error" }); }
+});
+
 // Admin: Purge all CRM data (keep only admin user)
 app.post("/api/admin/purge", authenticateToken, async (req: any, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: "Forbidden" });
@@ -552,6 +589,7 @@ app.post("/api/admin/purge", authenticateToken, async (req: any, res) => {
     await query("DELETE FROM activities");
     await query("DELETE FROM objectives");
     await query("DELETE FROM documents");
+    await query("DELETE FROM sessions");
     await query("DELETE FROM invoices");
     await query("DELETE FROM quotes");
     await query("DELETE FROM calls");
