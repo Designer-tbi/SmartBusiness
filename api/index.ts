@@ -40,6 +40,51 @@ const app = express();
 app.use(express.json());
 app.use(cookieParser());
 
+// Initialize database tables on first request
+let dbInitialized = false;
+async function ensureDbInitialized() {
+  if (dbInitialized) return;
+  try {
+    const schema = [
+      "CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, uid TEXT UNIQUE NOT NULL, email TEXT UNIQUE NOT NULL, password TEXT NOT NULL, name TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'agent', created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
+      "CREATE TABLE IF NOT EXISTS customers (id SERIAL PRIMARY KEY, type TEXT NOT NULL DEFAULT 'individual', first_name TEXT, last_name TEXT, company_name TEXT, name TEXT, email TEXT, phone TEXT NOT NULL, address TEXT, city TEXT, industry TEXT, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
+      "CREATE TABLE IF NOT EXISTS leads (id SERIAL PRIMARY KEY, type TEXT NOT NULL DEFAULT 'individual', first_name TEXT, last_name TEXT, company_name TEXT, email TEXT, phone TEXT, source TEXT, status TEXT NOT NULL DEFAULT 'new', notes TEXT, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
+      "CREATE TABLE IF NOT EXISTS opportunities (id SERIAL PRIMARY KEY, customer_id INTEGER REFERENCES customers(id), lead_id INTEGER REFERENCES leads(id), title TEXT NOT NULL, amount NUMERIC, stage TEXT NOT NULL DEFAULT 'discovery', probability INTEGER, expected_close_date DATE, notes TEXT, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
+      "CREATE TABLE IF NOT EXISTS calls (id SERIAL PRIMARY KEY, customer_id INTEGER REFERENCES customers(id), customer_name TEXT NOT NULL, customer_phone TEXT NOT NULL, agent_id TEXT REFERENCES users(uid), agent_name TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', notes TEXT, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
+      "CREATE TABLE IF NOT EXISTS categories (id SERIAL PRIMARY KEY, name TEXT UNIQUE NOT NULL, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
+      "CREATE TABLE IF NOT EXISTS portfolio_items (id SERIAL PRIMARY KEY, category_id INTEGER NOT NULL REFERENCES categories(id), name TEXT NOT NULL, sub_type TEXT, address TEXT, city TEXT, bp TEXT, tel TEXT, fax TEXT, mail TEXT, web TEXT, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
+      "CREATE TABLE IF NOT EXISTS products (id SERIAL PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL DEFAULT 'product', category TEXT, category_id INTEGER, catalog_id INTEGER, price NUMERIC NOT NULL DEFAULT 0, vat_rate NUMERIC NOT NULL DEFAULT 20, vat_rate_id INTEGER, stock INTEGER NOT NULL DEFAULT 0, unit TEXT, description TEXT, technical_file_url TEXT, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
+      "CREATE TABLE IF NOT EXISTS vat_rates (id SERIAL PRIMARY KEY, label TEXT NOT NULL, rate NUMERIC NOT NULL, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
+      "CREATE TABLE IF NOT EXISTS catalogues (id SERIAL PRIMARY KEY, name TEXT NOT NULL, description TEXT, is_active INTEGER DEFAULT 1, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
+      "CREATE TABLE IF NOT EXISTS quotes (id SERIAL PRIMARY KEY, number TEXT UNIQUE NOT NULL, customer_id INTEGER REFERENCES customers(id), lead_id INTEGER REFERENCES leads(id), agent_id TEXT, amount NUMERIC NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'Brouillon', date DATE NOT NULL, expiry_date DATE, notes TEXT, signature TEXT, signature_date TIMESTAMP WITH TIME ZONE, signed_by TEXT, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
+      "CREATE TABLE IF NOT EXISTS quote_items (id SERIAL PRIMARY KEY, quote_id INTEGER NOT NULL REFERENCES quotes(id) ON DELETE CASCADE, product_id INTEGER, description TEXT NOT NULL, quantity NUMERIC NOT NULL DEFAULT 1, unit_price NUMERIC NOT NULL DEFAULT 0, total_price NUMERIC NOT NULL DEFAULT 0, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
+      "CREATE TABLE IF NOT EXISTS invoices (id SERIAL PRIMARY KEY, number TEXT UNIQUE NOT NULL, customer_id INTEGER REFERENCES customers(id), quote_id INTEGER REFERENCES quotes(id), agent_id TEXT, amount NUMERIC NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'En attente', date DATE NOT NULL, due_date DATE, paid_at TIMESTAMP WITH TIME ZONE, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
+      "CREATE TABLE IF NOT EXISTS commissions (id SERIAL PRIMARY KEY, agent_id TEXT, invoice_id INTEGER REFERENCES invoices(id), amount NUMERIC NOT NULL DEFAULT 0, rate NUMERIC NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'En attente', date DATE NOT NULL, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
+      "CREATE TABLE IF NOT EXISTS activities (id SERIAL PRIMARY KEY, type TEXT NOT NULL, subject TEXT NOT NULL, customer_id INTEGER, lead_id INTEGER, opportunity_id INTEGER, agent_id TEXT, status TEXT NOT NULL DEFAULT 'À faire', date TIMESTAMP WITH TIME ZONE NOT NULL, notes TEXT, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
+      "CREATE TABLE IF NOT EXISTS projects (id SERIAL PRIMARY KEY, name TEXT NOT NULL, customer_id INTEGER, status TEXT NOT NULL DEFAULT 'En cours', start_date DATE, end_date DATE, description TEXT, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
+      "CREATE TABLE IF NOT EXISTS objectives (id SERIAL PRIMARY KEY, agent_id TEXT, type TEXT NOT NULL, target_value NUMERIC NOT NULL, period TEXT NOT NULL, start_date TEXT NOT NULL, end_date TEXT NOT NULL, status TEXT DEFAULT 'En cours', created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
+    ];
+    for (const s of schema) { await query(s); }
+    // Seed admin
+    const adminCheck = await query("SELECT * FROM users WHERE email = $1", ['eden@tbi-center.fr']);
+    if (adminCheck.rows.length === 0) {
+      const hashedPassword = await bcrypt.hash('loub@ki2014D', 10);
+      const uid = Math.random().toString(36).substring(2, 15);
+      await query("INSERT INTO users (uid, email, password, name, role) VALUES ($1, $2, $3, $4, $5)", [uid, 'eden@tbi-center.fr', hashedPassword, 'Admin Eden', 'admin']);
+    }
+    dbInitialized = true;
+    console.log("Database initialized successfully");
+  } catch (err) {
+    console.error("DB init error:", err);
+  }
+}
+
+// Auto-init middleware
+app.use(async (req, res, next) => {
+  await ensureDbInitialized();
+  next();
+});
+
 // Health Check
 app.get("/api/health", async (req, res) => {
   try {
