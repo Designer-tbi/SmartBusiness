@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Search, Folder, Loader2, AlertCircle, ChevronLeft, Building2, Phone, Mail, Globe, MapPin, Hash, Map as MapIcon, List } from 'lucide-react';
+import { Plus, Search, Folder, Loader2, AlertCircle, ChevronLeft, Building2, Phone, Mail, Globe, MapPin, Hash, Map as MapIcon, List, UserPlus, ArrowRight } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import MapView from '../components/MapView';
 
 interface Category {
@@ -24,6 +25,7 @@ interface PortfolioItem {
 }
 
 export default function Portfolio() {
+  const navigate = useNavigate();
   const [categories, setCategories] = useState<Category[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<Category | null>(null);
   const [viewAll, setViewAll] = useState(false);
@@ -177,6 +179,32 @@ export default function Portfolio() {
     item.sub_type?.toLowerCase().includes(searchQuery.toLowerCase()) ||
     item.city?.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  const handleConvertToLead = async (item: PortfolioItem) => {
+    try {
+      const res = await fetch('/api/leads', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'company',
+          companyName: item.name,
+          email: item.mail || '',
+          phone: item.tel?.split(/[\n/]+/)[0]?.trim() || '',
+          source: 'Portefeuille',
+          status: 'Nouveau',
+          notes: `Converti depuis le portefeuille. ${item.sub_type ? `Type: ${item.sub_type}.` : ''} ${item.address ? `Adresse: ${item.address}` : ''} ${item.city ? `- ${item.city}` : ''}`
+        }),
+      });
+      if (res.ok) {
+        alert(`"${item.name}" converti en lead avec succès !`);
+        navigate('/leads');
+      } else {
+        alert("Erreur lors de la conversion.");
+      }
+    } catch (err) {
+      alert("Erreur réseau.");
+    }
+  };
 
   if (loading && categories.length === 0 && !selectedCategory && !viewAll) {
     return (
@@ -551,6 +579,17 @@ export default function Portfolio() {
                           </div>
                         )}
                       </div>
+                    </div>
+                    <div className="pt-3 border-t border-slate-100">
+                      <button
+                        onClick={() => handleConvertToLead(item)}
+                        data-testid={`convert-lead-${item.id}`}
+                        className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-indigo-50 text-indigo-700 rounded-lg text-sm font-medium hover:bg-indigo-100 transition-colors"
+                      >
+                        <UserPlus size={16} />
+                        Convertir en Lead
+                        <ArrowRight size={14} />
+                      </button>
                     </div>
                   </div>
                 </div>

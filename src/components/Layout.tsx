@@ -37,6 +37,7 @@ export default function Layout() {
   const [isSidebarOpen, setIsSidebarOpen] = React.useState(true);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = React.useState(false);
   const [forceHideSidebar, setForceHideSidebar] = React.useState(false);
+  const [collapsedSections, setCollapsedSections] = React.useState<Record<string, boolean>>({});
 
   React.useEffect(() => {
     const handleHideSidebar = (e: any) => setForceHideSidebar(e.detail);
@@ -152,39 +153,54 @@ export default function Layout() {
             const Icon = item.icon;
             
             if (item.children) {
+              const isCollapsed = collapsedSections[item.name];
+              const hasActiveChild = item.children.some(c => location.pathname === c.href);
               return (
-                <div key={item.name} className="py-2">
+                <div key={item.name} className="py-1">
                   {isSidebarOpen ? (
-                    <p className="text-[10px] uppercase tracking-wider text-slate-500 font-bold px-3 mb-2">
-                      {item.name}
-                    </p>
+                    <button
+                      onClick={() => setCollapsedSections(prev => ({ ...prev, [item.name]: !prev[item.name] }))}
+                      className={cn(
+                        "w-full flex items-center justify-between px-3 py-2 rounded-lg text-[11px] uppercase tracking-wider font-bold transition-colors",
+                        hasActiveChild ? "text-indigo-400" : "text-slate-500 hover:text-slate-300"
+                      )}
+                      data-testid={`nav-section-${item.name}`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <Icon size={14} />
+                        <span>{item.name}</span>
+                      </div>
+                      <ChevronDown size={14} className={cn("transition-transform duration-200", isCollapsed && "-rotate-90")} />
+                    </button>
                   ) : (
                     <div className="h-px bg-slate-800 my-4 mx-2" />
                   )}
-                  <div className="space-y-1">
-                    {item.children.map((child) => {
-                      const ChildIcon = child.icon;
-                      const isActive = location.pathname === child.href;
-                      return (
-                        <Link
-                          key={child.name}
-                          to={child.href}
-                          onClick={() => setIsMobileMenuOpen(false)}
-                          className={cn(
-                            "flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-200 text-sm",
-                            isActive 
-                              ? "bg-indigo-600 text-white shadow-lg shadow-indigo-900/20" 
-                              : "text-slate-400 hover:bg-slate-800 hover:text-white",
-                            !isSidebarOpen && "justify-center px-0"
-                          )}
-                          title={!isSidebarOpen ? child.name : ""}
-                        >
-                          <ChildIcon size={18} />
-                          {isSidebarOpen && <span className="font-medium">{child.name}</span>}
-                        </Link>
-                      );
-                    })}
-                  </div>
+                  {(!isCollapsed || !isSidebarOpen) && (
+                    <div className="space-y-0.5 mt-0.5">
+                      {item.children.map((child) => {
+                        const ChildIcon = child.icon;
+                        const isActive = location.pathname === child.href;
+                        return (
+                          <Link
+                            key={child.name}
+                            to={child.href}
+                            onClick={() => setIsMobileMenuOpen(false)}
+                            className={cn(
+                              "flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-200 text-sm",
+                              isActive 
+                                ? "bg-indigo-600 text-white shadow-lg shadow-indigo-900/20" 
+                                : "text-slate-400 hover:bg-slate-800 hover:text-white",
+                              !isSidebarOpen && "justify-center px-0"
+                            )}
+                            title={!isSidebarOpen ? child.name : ""}
+                          >
+                            <ChildIcon size={18} />
+                            {isSidebarOpen && <span className="font-medium">{child.name}</span>}
+                          </Link>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               );
             }
