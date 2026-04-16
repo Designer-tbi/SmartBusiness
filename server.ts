@@ -57,13 +57,18 @@ class AppDatabase {
   }
 
   private async getSqliteDb() {
+    if (process.env.VERCEL) {
+      throw new Error("SQLite is not available on Vercel. Configure DATABASE_URL for PostgreSQL.");
+    }
     if (!this.sqliteDb) {
       try {
-        const Database = (await import("better-sqlite3")).default;
+        // Use variable to prevent esbuild from bundling native module
+        const moduleName = 'better-' + 'sqlite3';
+        const Database = (await import(/* @vite-ignore */ moduleName)).default;
         this.sqliteDb = new Database(path.join(__dirname, "database.sqlite"));
       } catch (err) {
-        console.error("SQLite not available (normal on Vercel serverless):", err);
-        throw new Error("SQLite is not available in this environment. Please configure DATABASE_URL for PostgreSQL.");
+        console.error("SQLite not available:", err);
+        throw new Error("SQLite is not available. Please configure DATABASE_URL for PostgreSQL.");
       }
     }
     return this.sqliteDb;
