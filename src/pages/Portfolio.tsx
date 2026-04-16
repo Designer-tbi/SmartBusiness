@@ -271,6 +271,14 @@ export default function Portfolio() {
               <Plus size={20} />
               Ajouter un établissement
             </button>
+          ) : viewAll ? (
+            <button
+              onClick={() => { setViewAll(false); setIsAddingCategory(true); }}
+              className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition-colors shadow-sm"
+            >
+              <Plus size={20} />
+              Nouvelle Catégorie
+            </button>
           ) : null}
         </div>
       </div>

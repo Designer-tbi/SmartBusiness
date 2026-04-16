@@ -19,6 +19,9 @@ export default function Leads() {
   const [source, setSource] = useState('');
   const [status, setStatus] = useState('Nouveau');
   const [notes, setNotes] = useState('');
+  const [address, setAddress] = useState('');
+  const [city, setCity] = useState('');
+  const [niu, setNiu] = useState('');
 
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -58,6 +61,9 @@ export default function Leads() {
     setSource('');
     setStatus('Nouveau');
     setNotes('');
+    setAddress('');
+    setCity('');
+    setNiu('');
     setEditingLead(null);
     setError(null);
   };
@@ -73,6 +79,9 @@ export default function Leads() {
     setSource(lead.source || '');
     setStatus(lead.status || 'Nouveau');
     setNotes(lead.notes || '');
+    setAddress(lead.address || '');
+    setCity(lead.city || '');
+    setNiu(lead.niu || '');
     setError(null);
     setShowModal(true);
   };
@@ -91,7 +100,9 @@ export default function Leads() {
       email: email || null,
       source: source || null,
       status,
-      notes: notes || null,
+      notes: notes ? `${niu ? `NIU: ${niu}\n` : ''}${notes}` : (niu ? `NIU: ${niu}` : null),
+      address: address || null,
+      city: city || null,
     };
 
     try {
@@ -383,87 +394,64 @@ export default function Leads() {
                 {type === 'individual' ? (
                   <>
                     <div>
-                      <label className="block text-sm font-medium text-slate-700 mb-1.5">Prénom</label>
-                      <input
-                        type="text"
-                        required
-                        value={firstName}
-                        onChange={(e) => setFirstName(e.target.value)}
-                        className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
-                        placeholder="Ex: Jean"
-                      />
+                      <label className="block text-sm font-medium text-slate-700 mb-1.5">Prénom *</label>
+                      <input type="text" required value={firstName} onChange={(e) => setFirstName(e.target.value)} className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all" placeholder="Ex: Jean" />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-slate-700 mb-1.5">Nom</label>
-                      <input
-                        type="text"
-                        required
-                        value={lastName}
-                        onChange={(e) => setLastName(e.target.value)}
-                        className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
-                        placeholder="Ex: Dupont"
-                      />
+                      <label className="block text-sm font-medium text-slate-700 mb-1.5">Nom *</label>
+                      <input type="text" required value={lastName} onChange={(e) => setLastName(e.target.value)} className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all" placeholder="Ex: Dupont" />
                     </div>
                   </>
                 ) : (
-                  <div className="md:col-span-2">
-                    <label className="block text-sm font-medium text-slate-700 mb-1.5">Nom de l'entreprise</label>
-                    <input
-                      type="text"
-                      required
-                      value={companyName}
-                      onChange={(e) => setCompanyName(e.target.value)}
-                      className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
-                      placeholder="Ex: TBI Center"
-                    />
-                  </div>
+                  <>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1.5">Nom de l'entreprise *</label>
+                      <input type="text" required value={companyName} onChange={(e) => setCompanyName(e.target.value)} className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all" placeholder="Ex: TBI Center" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1.5">NIU (Identifiant Unique)</label>
+                      <input type="text" value={niu} onChange={(e) => setNiu(e.target.value)} className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all" placeholder="Ex: M012345678901A" />
+                    </div>
+                  </>
                 )}
 
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1.5">Téléphone</label>
-                  <input
-                    type="tel"
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
-                    placeholder="06 12 34 56 78"
-                  />
+                  <input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all" placeholder="06 12 34 56 78" />
                 </div>
 
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1.5">Email</label>
-                  <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
-                    placeholder="contact@exemple.com"
-                  />
+                  <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all" placeholder="contact@exemple.com" />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Adresse</label>
+                  <input type="text" value={address} onChange={(e) => setAddress(e.target.value)} className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all" placeholder="Rue, avenue..." />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Ville</label>
+                  <input type="text" value={city} onChange={(e) => setCity(e.target.value)} className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all" placeholder="Ex: Brazzaville" />
                 </div>
 
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1.5">Source</label>
-                  <select
-                    value={source}
-                    onChange={(e) => setSource(e.target.value)}
-                    className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
-                  >
+                  <select value={source} onChange={(e) => setSource(e.target.value)} className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all">
                     <option value="">Sélectionner une source</option>
                     <option value="Site Web">Site Web</option>
                     <option value="Recommandation">Recommandation</option>
                     <option value="Réseaux Sociaux">Réseaux Sociaux</option>
                     <option value="Publicité">Publicité</option>
+                    <option value="Portefeuille">Portefeuille</option>
+                    <option value="Appel entrant">Appel entrant</option>
                     <option value="Autre">Autre</option>
                   </select>
                 </div>
 
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1.5">Statut</label>
-                  <select
-                    value={status}
-                    onChange={(e) => setStatus(e.target.value)}
-                    className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
-                  >
+                  <select value={status} onChange={(e) => setStatus(e.target.value)} className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all">
                     <option value="Nouveau">Nouveau</option>
                     <option value="Contacté">Contacté</option>
                     <option value="Qualifié">Qualifié</option>
@@ -474,13 +462,7 @@ export default function Leads() {
 
                 <div className="md:col-span-2">
                   <label className="block text-sm font-medium text-slate-700 mb-1.5">Notes</label>
-                  <textarea
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                    rows={3}
-                    className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
-                    placeholder="Informations complémentaires..."
-                  />
+                  <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all" placeholder="Informations complémentaires..." />
                 </div>
               </div>
 

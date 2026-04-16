@@ -48,7 +48,7 @@ async function ensureDbInitialized() {
     const schema = [
       "CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, uid TEXT UNIQUE NOT NULL, email TEXT UNIQUE NOT NULL, password TEXT NOT NULL, name TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'agent', created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
       "CREATE TABLE IF NOT EXISTS customers (id SERIAL PRIMARY KEY, type TEXT NOT NULL DEFAULT 'individual', first_name TEXT, last_name TEXT, company_name TEXT, name TEXT, email TEXT, phone TEXT NOT NULL, address TEXT, city TEXT, industry TEXT, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
-      "CREATE TABLE IF NOT EXISTS leads (id SERIAL PRIMARY KEY, type TEXT NOT NULL DEFAULT 'individual', first_name TEXT, last_name TEXT, company_name TEXT, email TEXT, phone TEXT, source TEXT, status TEXT NOT NULL DEFAULT 'new', notes TEXT, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
+      "CREATE TABLE IF NOT EXISTS leads (id SERIAL PRIMARY KEY, type TEXT NOT NULL DEFAULT 'individual', first_name TEXT, last_name TEXT, company_name TEXT, email TEXT, phone TEXT, source TEXT, status TEXT NOT NULL DEFAULT 'new', notes TEXT, address TEXT, city TEXT, niu TEXT, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
       "CREATE TABLE IF NOT EXISTS opportunities (id SERIAL PRIMARY KEY, customer_id INTEGER REFERENCES customers(id), lead_id INTEGER REFERENCES leads(id), title TEXT NOT NULL, amount NUMERIC, stage TEXT NOT NULL DEFAULT 'discovery', probability INTEGER, expected_close_date DATE, notes TEXT, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
       "CREATE TABLE IF NOT EXISTS calls (id SERIAL PRIMARY KEY, customer_id INTEGER REFERENCES customers(id), customer_name TEXT NOT NULL, customer_phone TEXT NOT NULL, agent_id TEXT REFERENCES users(uid), agent_name TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', notes TEXT, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
       "CREATE TABLE IF NOT EXISTS categories (id SERIAL PRIMARY KEY, name TEXT UNIQUE NOT NULL, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
@@ -67,6 +67,9 @@ async function ensureDbInitialized() {
       "CREATE TABLE IF NOT EXISTS sessions (id SERIAL PRIMARY KEY, user_uid TEXT NOT NULL, user_email TEXT NOT NULL, user_name TEXT NOT NULL, user_role TEXT NOT NULL, ip_address TEXT, user_agent TEXT, logged_in_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, logged_out_at TIMESTAMP WITH TIME ZONE)",
       "ALTER TABLE customers ADD COLUMN IF NOT EXISTS agent_id TEXT",
       "ALTER TABLE leads ADD COLUMN IF NOT EXISTS agent_id TEXT",
+      "ALTER TABLE leads ADD COLUMN IF NOT EXISTS address TEXT",
+      "ALTER TABLE leads ADD COLUMN IF NOT EXISTS city TEXT",
+      "ALTER TABLE leads ADD COLUMN IF NOT EXISTS niu TEXT",
     ];
     for (const s of schema) { await query(s); }
     // Seed admin
@@ -260,7 +263,7 @@ app.delete("/api/customers/:id", authenticateToken, async (req, res) => {
 // Leads (agent sees own, admin sees all)
 app.get("/api/leads", authenticateToken, async (req: any, res) => {
   try {
-    let q = 'SELECT id, type, first_name as "firstName", last_name as "lastName", company_name as "companyName", email, phone, source, status, notes, agent_id, created_at as "createdAt", updated_at as "updatedAt" FROM leads';
+    let q = 'SELECT id, type, first_name as "firstName", last_name as "lastName", company_name as "companyName", email, phone, source, status, notes, address, city, niu, agent_id, created_at as "createdAt", updated_at as "updatedAt" FROM leads';
     let params: any[] = [];
     if (req.user.role !== 'admin') { q += ' WHERE agent_id = $1'; params.push(req.user.uid); }
     q += ' ORDER BY created_at DESC';
@@ -268,18 +271,18 @@ app.get("/api/leads", authenticateToken, async (req: any, res) => {
   } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 app.post("/api/leads", authenticateToken, async (req: any, res) => {
-  const { type, firstName, lastName, companyName, email, phone, source, status, notes } = req.body;
+  const { type, firstName, lastName, companyName, email, phone, source, status, notes, address, city } = req.body;
   try {
-    const result = await query('INSERT INTO leads (type, first_name, last_name, company_name, email, phone, source, status, notes, agent_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id, type, first_name as "firstName", last_name as "lastName", company_name as "companyName", email, phone, source, status, notes, created_at as "createdAt"', [type || 'individual', firstName, lastName, companyName, email, phone, source, status || 'Nouveau', notes, req.user.uid]);
+    const result = await query('INSERT INTO leads (type, first_name, last_name, company_name, email, phone, source, status, notes, address, city, agent_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id, type, first_name as "firstName", last_name as "lastName", company_name as "companyName", email, phone, source, status, notes, address, city, created_at as "createdAt"', [type || 'individual', firstName, lastName, companyName, email, phone, source, status || 'Nouveau', notes, address, city, req.user.uid]);
     const leadId = result.rows[0].id;
     try { const d = new Date(); d.setDate(d.getDate() + 1); await query("INSERT INTO activities (type, subject, lead_id, agent_id, status, date, notes) VALUES ($1,$2,$3,$4,$5,$6,$7)", ['Appel', `Premier contact - Lead #${leadId}`, leadId, req.user.uid, 'À faire', d.toISOString(), `Contacter: ${type === 'company' ? companyName : firstName + ' ' + lastName}`]); } catch (e) {}
     res.status(201).json(result.rows[0]);
   } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 app.put("/api/leads/:id", authenticateToken, async (req, res) => {
-  const { id } = req.params; const { type, firstName, lastName, companyName, email, phone, source, status, notes } = req.body;
+  const { id } = req.params; const { type, firstName, lastName, companyName, email, phone, source, status, notes, address, city } = req.body;
   try {
-    const result = await query('UPDATE leads SET type=$1, first_name=$2, last_name=$3, company_name=$4, email=$5, phone=$6, source=$7, status=$8, notes=$9, updated_at=CURRENT_TIMESTAMP WHERE id=$10 RETURNING id, type, first_name as "firstName", last_name as "lastName", company_name as "companyName", email, phone, source, status, notes, updated_at as "updatedAt"', [type, firstName, lastName, companyName, email, phone, source, status, notes, id]);
+    const result = await query('UPDATE leads SET type=$1, first_name=$2, last_name=$3, company_name=$4, email=$5, phone=$6, source=$7, status=$8, notes=$9, address=$10, city=$11, updated_at=CURRENT_TIMESTAMP WHERE id=$12 RETURNING id, type, first_name as "firstName", last_name as "lastName", company_name as "companyName", email, phone, source, status, notes, address, city, updated_at as "updatedAt"', [type, firstName, lastName, companyName, email, phone, source, status, notes, address, city, id]);
     if (result.rows.length === 0) return res.status(404).json({ error: "Lead not found" });
     res.json(result.rows[0]);
   } catch (err) { res.status(500).json({ error: "Server error" }); }
