@@ -39,9 +39,7 @@ export default function Customers() {
   };
 
   useEffect(() => {
-    window.dispatchEvent(new CustomEvent('sb-hide-sidebar', { detail: showModal }));
     return () => {
-      window.dispatchEvent(new CustomEvent('sb-hide-sidebar', { detail: false }));
     };
   }, [showModal]);
 

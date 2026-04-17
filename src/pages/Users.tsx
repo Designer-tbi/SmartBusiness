@@ -10,9 +10,7 @@ export default function Users() {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    window.dispatchEvent(new CustomEvent('sb-hide-sidebar', { detail: showCreateModal }));
     return () => {
-      window.dispatchEvent(new CustomEvent('sb-hide-sidebar', { detail: false }));
     };
   }, [showCreateModal]);
 

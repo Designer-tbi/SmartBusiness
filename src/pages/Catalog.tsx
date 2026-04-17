@@ -119,9 +119,7 @@ export default function Catalog() {
 
   useEffect(() => {
     const isAnyModalOpen = showCatalogModal || showProductModal || showCategoryModal || showVatModal;
-    window.dispatchEvent(new CustomEvent('sb-hide-sidebar', { detail: isAnyModalOpen }));
     return () => {
-      window.dispatchEvent(new CustomEvent('sb-hide-sidebar', { detail: false }));
     };
   }, [showCatalogModal, showProductModal, showCategoryModal, showVatModal]);
 

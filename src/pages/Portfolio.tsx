@@ -53,14 +53,6 @@ export default function Portfolio() {
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    const isAnyModalOpen = isAddingCategory || isAddingItem;
-    window.dispatchEvent(new CustomEvent('sb-hide-sidebar', { detail: isAnyModalOpen }));
-    return () => {
-      window.dispatchEvent(new CustomEvent('sb-hide-sidebar', { detail: false }));
-    };
-  }, [isAddingCategory, isAddingItem]);
-
-  useEffect(() => {
     fetchCategories();
   }, []);
 
