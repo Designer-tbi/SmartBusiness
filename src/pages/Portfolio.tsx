@@ -36,6 +36,7 @@ export default function Portfolio() {
   const [searchQuery, setSearchQuery] = useState('');
   const [isAddingCategory, setIsAddingCategory] = useState(false);
   const [isAddingItem, setIsAddingItem] = useState(false);
+  const [selectedCategoryForAdd, setSelectedCategoryForAdd] = useState<number | null>(null);
   const [newCategoryName, setNewCategoryName] = useState('');
   const [newItem, setNewItem] = useState({
     name: '',
@@ -139,19 +140,24 @@ export default function Portfolio() {
 
   const handleAddItem = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newItem.name.trim() || !selectedCategory) return;
+    const categoryId = selectedCategory ? selectedCategory.id : selectedCategoryForAdd;
+    if (!newItem.name.trim() || !categoryId) return;
 
     try {
       setSubmitting(true);
       const response = await fetch('/api/portfolio-items', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...newItem, category_id: selectedCategory.id }),
+        body: JSON.stringify({ ...newItem, category_id: categoryId }),
       });
 
       if (!response.ok) throw new Error('Erreur lors de l\'ajout de l\'élément');
       
-      await fetchItems(selectedCategory.id);
+      if (selectedCategory) {
+        await fetchItems(selectedCategory.id);
+      } else if (viewAll) {
+        await fetchAllItems();
+      }
       setNewItem({
         name: '',
         sub_type: '',
@@ -164,6 +170,7 @@ export default function Portfolio() {
         web: '',
         niu: ''
       });
+      setSelectedCategoryForAdd(null);
       setIsAddingItem(false);
     } catch (err: any) {
       alert(err.message);
@@ -274,13 +281,22 @@ export default function Portfolio() {
               Ajouter un établissement
             </button>
           ) : viewAll ? (
-            <button
-              onClick={() => { setViewAll(false); setIsAddingCategory(true); }}
-              className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition-colors shadow-sm"
-            >
-              <Plus size={20} />
-              Nouvelle Catégorie
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setIsAddingItem(true)}
+                className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition-colors shadow-sm"
+              >
+                <Plus size={20} />
+                Ajouter un établissement
+              </button>
+              <button
+                onClick={() => { setViewAll(false); setIsAddingCategory(true); }}
+                className="flex items-center gap-2 bg-white text-indigo-600 border border-indigo-200 px-4 py-2 rounded-lg hover:bg-indigo-50 transition-colors shadow-sm"
+              >
+                <Plus size={20} />
+                Nouvelle Catégorie
+              </button>
+            </div>
           ) : null}
         </div>
       </div>
@@ -372,10 +388,24 @@ export default function Portfolio() {
       )}
 
       {/* Add Item Form */}
-      {isAddingItem && selectedCategory && (
+      {isAddingItem && (selectedCategory || viewAll) && (
         <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
           <form onSubmit={handleAddItem} className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {viewAll && !selectedCategory && (
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Catégorie *</label>
+                  <select
+                    required
+                    value={selectedCategoryForAdd || ''}
+                    onChange={(e) => setSelectedCategoryForAdd(Number(e.target.value))}
+                    className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+                  >
+                    <option value="">Choisir une catégorie...</option>
+                    {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </div>
+              )}
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1.5">Nom de l'établissement *</label>
                 <input
