@@ -103,7 +103,7 @@ export default function Layout() {
         { name: 'Rapports', href: '/reports', icon: BarChart3 },
         { name: 'Utilisateurs', href: '/users', icon: UserCircle },
         { name: 'Sessions', href: '/sessions', icon: Monitor },
-        { name: 'Paramètres', href: '/settings', icon: Settings },
+        { name: 'Super Admin', href: '/super-admin', icon: Settings },
       ]
     });
   }

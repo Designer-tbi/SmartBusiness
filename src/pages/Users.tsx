@@ -6,7 +6,7 @@ export default function Users() {
   const [users, setUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [newUser, setNewUser] = useState({ name: '', email: '', password: '', role: 'agent' });
+  const [newUser, setNewUser] = useState({ name: '', email: '', password: '', role: 'agent', accountType: 'demo', companyName: '' });
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -79,7 +79,7 @@ export default function Users() {
 
       if (response.ok) {
         setShowCreateModal(false);
-        setNewUser({ name: '', email: '', password: '', role: 'agent' });
+        setNewUser({ name: '', email: '', password: '', role: 'agent', accountType: 'demo', companyName: '' });
         fetchUsers();
       } else {
         const data = await response.json();
@@ -242,6 +242,29 @@ export default function Users() {
                   <option value="agent">Agent</option>
                   <option value="admin">Administrateur</option>
                 </select>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-sm font-medium text-slate-700">Type de compte</label>
+                <select
+                  className="w-full px-4 py-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all"
+                  value={newUser.accountType}
+                  onChange={(e) => setNewUser({ ...newUser, accountType: e.target.value })}
+                >
+                  <option value="demo">Démo (15 jours)</option>
+                  <option value="production">Production</option>
+                </select>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-sm font-medium text-slate-700">Nom de l'entreprise</label>
+                <input
+                  type="text"
+                  className="w-full px-4 py-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all"
+                  placeholder="Nom de l'entreprise (optionnel)"
+                  value={newUser.companyName}
+                  onChange={(e) => setNewUser({ ...newUser, companyName: e.target.value })}
+                />
               </div>
 
               <div className="flex gap-3 pt-4">

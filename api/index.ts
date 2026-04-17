@@ -46,7 +46,7 @@ async function ensureDbInitialized() {
   if (dbInitialized) return;
   try {
     const schema = [
-      "CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, uid TEXT UNIQUE NOT NULL, email TEXT UNIQUE NOT NULL, password TEXT NOT NULL, name TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'agent', created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
+      "CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, uid TEXT UNIQUE NOT NULL, email TEXT UNIQUE NOT NULL, password TEXT NOT NULL, name TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'agent', account_type TEXT NOT NULL DEFAULT 'production', is_active BOOLEAN NOT NULL DEFAULT true, first_login_at TIMESTAMP WITH TIME ZONE, deactivated_at TIMESTAMP WITH TIME ZONE, company_name TEXT, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
       "CREATE TABLE IF NOT EXISTS customers (id SERIAL PRIMARY KEY, type TEXT NOT NULL DEFAULT 'individual', first_name TEXT, last_name TEXT, company_name TEXT, name TEXT, email TEXT, phone TEXT NOT NULL, address TEXT, city TEXT, industry TEXT, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
       "CREATE TABLE IF NOT EXISTS leads (id SERIAL PRIMARY KEY, type TEXT NOT NULL DEFAULT 'individual', first_name TEXT, last_name TEXT, company_name TEXT, email TEXT, phone TEXT, source TEXT, status TEXT NOT NULL DEFAULT 'new', notes TEXT, address TEXT, city TEXT, niu TEXT, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
       "CREATE TABLE IF NOT EXISTS opportunities (id SERIAL PRIMARY KEY, customer_id INTEGER REFERENCES customers(id), lead_id INTEGER REFERENCES leads(id), title TEXT NOT NULL, amount NUMERIC, stage TEXT NOT NULL DEFAULT 'discovery', probability INTEGER, expected_close_date DATE, notes TEXT, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
@@ -71,14 +71,22 @@ async function ensureDbInitialized() {
       "ALTER TABLE leads ADD COLUMN IF NOT EXISTS city TEXT",
       "ALTER TABLE leads ADD COLUMN IF NOT EXISTS niu TEXT",
       "ALTER TABLE portfolio_items ADD COLUMN IF NOT EXISTS niu TEXT",
+      "ALTER TABLE users ADD COLUMN IF NOT EXISTS account_type TEXT DEFAULT 'production'",
+      "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true",
+      "ALTER TABLE users ADD COLUMN IF NOT EXISTS first_login_at TIMESTAMP WITH TIME ZONE",
+      "ALTER TABLE users ADD COLUMN IF NOT EXISTS deactivated_at TIMESTAMP WITH TIME ZONE",
+      "ALTER TABLE users ADD COLUMN IF NOT EXISTS company_name TEXT",
     ];
     for (const s of schema) { await query(s); }
-    // Seed admin
+    // Seed superadmin
     const adminCheck = await query("SELECT * FROM users WHERE email = $1", ['eden@tbi-center.fr']);
     if (adminCheck.rows.length === 0) {
       const hashedPassword = await bcrypt.hash('loub@ki2014D', 10);
       const uid = Math.random().toString(36).substring(2, 15);
-      await query("INSERT INTO users (uid, email, password, name, role) VALUES ($1, $2, $3, $4, $5)", [uid, 'eden@tbi-center.fr', hashedPassword, 'Admin Eden', 'admin']);
+      await query("INSERT INTO users (uid, email, password, name, role, account_type, is_active) VALUES ($1, $2, $3, $4, $5, $6, $7)", [uid, 'eden@tbi-center.fr', hashedPassword, 'Admin Eden', 'superadmin', 'production', true]);
+    } else {
+      // Ensure existing admin is superadmin
+      await query("UPDATE users SET role = 'superadmin', account_type = 'production', is_active = true WHERE email = 'eden@tbi-center.fr'");
     }
     dbInitialized = true;
     console.log("Database initialized successfully");
@@ -131,8 +139,31 @@ app.post("/api/auth/login", async (req, res) => {
     const result = await query("SELECT * FROM users WHERE email = $1", [email]);
     if (result.rows.length === 0) return res.status(400).json({ error: "User not found" });
     const user = result.rows[0];
+
+    // Check if account is active
+    if (user.is_active === false) {
+      return res.status(403).json({ error: "Compte désactivé. Contactez l'administrateur." });
+    }
+
+    // Auto-deactivate expired demo accounts (15 days after first login)
+    if (user.account_type === 'demo' && user.first_login_at) {
+      const firstLogin = new Date(user.first_login_at);
+      const now = new Date();
+      const diffDays = (now.getTime() - firstLogin.getTime()) / (1000 * 60 * 60 * 24);
+      if (diffDays >= 15) {
+        await query("UPDATE users SET is_active = false, deactivated_at = CURRENT_TIMESTAMP WHERE uid = $1", [user.uid]);
+        return res.status(403).json({ error: "Votre période d'essai de 15 jours est terminée. Contactez l'administrateur pour activer votre compte." });
+      }
+    }
+
     const validPassword = await bcrypt.compare(password, user.password);
     if (!validPassword) return res.status(400).json({ error: "Invalid password" });
+
+    // Set first_login_at if not set
+    if (!user.first_login_at) {
+      await query("UPDATE users SET first_login_at = CURRENT_TIMESTAMP WHERE uid = $1", [user.uid]);
+    }
+
     const token = jwt.sign({ uid: user.uid, role: user.role }, JWT_SECRET);
     res.cookie("token", token, { httpOnly: true, secure: true, sameSite: 'none' });
     // Log session
@@ -152,9 +183,15 @@ app.post("/api/auth/logout", (req, res) => { res.clearCookie("token"); res.json(
 
 app.get("/api/auth/me", authenticateToken, async (req: any, res) => {
   try {
-    const result = await query('SELECT uid, email, name, role, created_at as "createdAt" FROM users WHERE uid = $1', [req.user.uid]);
+    const result = await query('SELECT uid, email, name, role, account_type as "accountType", is_active as "isActive", first_login_at as "firstLoginAt", company_name as "companyName", created_at as "createdAt" FROM users WHERE uid = $1', [req.user.uid]);
     if (result.rows.length === 0) return res.status(404).json({ error: "User not found" });
-    res.json(result.rows[0]);
+    const user = result.rows[0];
+    // Calculate days remaining for demo
+    if (user.accountType === 'demo' && user.firstLoginAt) {
+      const diffDays = (new Date().getTime() - new Date(user.firstLoginAt).getTime()) / (1000 * 60 * 60 * 24);
+      (user as any).demoRemainingDays = Math.max(0, Math.ceil(15 - diffDays));
+    }
+    res.json(user);
   } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 
@@ -185,23 +222,29 @@ app.post("/api/portfolio-items", authenticateToken, async (req, res) => {
   try { res.status(201).json((await query("INSERT INTO portfolio_items (category_id, name, sub_type, address, city, bp, tel, fax, mail, web, niu) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *", [category_id, name, sub_type, address, city, bp, tel, fax, mail, web, niu])).rows[0]); } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 
-// Users (Admin)
+// Users (Superadmin/Admin)
 app.get("/api/users", authenticateToken, async (req: any, res) => {
-  if (req.user.role !== 'admin') return res.status(403).json({ error: "Forbidden" });
-  try { res.json((await query('SELECT uid, email, name, role, created_at as "createdAt" FROM users ORDER BY created_at DESC')).rows); } catch (err) { res.status(500).json({ error: "Server error" }); }
+  if (req.user.role !== 'admin' && req.user.role !== 'superadmin') return res.status(403).json({ error: "Forbidden" });
+  try { res.json((await query('SELECT uid, email, name, role, account_type as "accountType", is_active as "isActive", first_login_at as "firstLoginAt", deactivated_at as "deactivatedAt", company_name as "companyName", created_at as "createdAt" FROM users ORDER BY created_at DESC')).rows.map(u => {
+    if (u.accountType === 'demo' && u.firstLoginAt) {
+      const diffDays = (new Date().getTime() - new Date(u.firstLoginAt).getTime()) / (1000 * 60 * 60 * 24);
+      (u as any).demoRemainingDays = Math.max(0, Math.ceil(15 - diffDays));
+    }
+    return u;
+  })); } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 app.post("/api/users", authenticateToken, async (req: any, res) => {
-  if (req.user.role !== 'admin') return res.status(403).json({ error: "Forbidden" });
-  const { email, password, name, role } = req.body;
+  if (req.user.role !== 'admin' && req.user.role !== 'superadmin') return res.status(403).json({ error: "Forbidden" });
+  const { email, password, name, role, accountType, companyName } = req.body;
   if (!email || !password || !name || !role) return res.status(400).json({ error: "Missing required fields" });
   try {
     const hashedPassword = await bcrypt.hash(password, 10);
     const uid = Math.random().toString(36).substring(2, 15);
-    res.json((await query('INSERT INTO users (uid, email, password, name, role) VALUES ($1,$2,$3,$4,$5) RETURNING uid, email, name, role, created_at as "createdAt"', [uid, email, hashedPassword, name, role])).rows[0]);
+    res.json((await query('INSERT INTO users (uid, email, password, name, role, account_type, company_name, is_active) VALUES ($1,$2,$3,$4,$5,$6,$7,true) RETURNING uid, email, name, role, account_type as "accountType", company_name as "companyName", is_active as "isActive", created_at as "createdAt"', [uid, email, hashedPassword, name, role, accountType || 'production', companyName || null])).rows[0]);
   } catch (err) { res.status(400).json({ error: "Email already exists" }); }
 });
 app.put("/api/users/:uid/role", authenticateToken, async (req: any, res) => {
-  if (req.user.role !== 'admin') return res.status(403).json({ error: "Forbidden" });
+  if (req.user.role !== 'admin' && req.user.role !== 'superadmin') return res.status(403).json({ error: "Forbidden" });
   const { uid } = req.params; const { role } = req.body;
   try {
     const u = await query("SELECT email FROM users WHERE uid = $1", [uid]);
@@ -210,8 +253,28 @@ app.put("/api/users/:uid/role", authenticateToken, async (req: any, res) => {
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
+app.put("/api/users/:uid/toggle-active", authenticateToken, async (req: any, res) => {
+  if (req.user.role !== 'superadmin') return res.status(403).json({ error: "Forbidden" });
+  const { uid } = req.params;
+  try {
+    const u = await query("SELECT is_active, email FROM users WHERE uid = $1", [uid]);
+    if (u.rows.length === 0) return res.status(404).json({ error: "User not found" });
+    if (u.rows[0].email === 'eden@tbi-center.fr') return res.status(400).json({ error: "Cannot deactivate superadmin" });
+    const newActive = !u.rows[0].is_active;
+    await query("UPDATE users SET is_active = $1, deactivated_at = $2 WHERE uid = $3", [newActive, newActive ? null : new Date().toISOString(), uid]);
+    res.json({ success: true, isActive: newActive });
+  } catch (err) { res.status(500).json({ error: "Server error" }); }
+});
+app.put("/api/users/:uid/account-type", authenticateToken, async (req: any, res) => {
+  if (req.user.role !== 'superadmin') return res.status(403).json({ error: "Forbidden" });
+  const { uid } = req.params; const { accountType } = req.body;
+  try {
+    await query("UPDATE users SET account_type = $1 WHERE uid = $2", [accountType, uid]);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: "Server error" }); }
+});
 app.delete("/api/users/:uid", authenticateToken, async (req: any, res) => {
-  if (req.user.role !== 'admin') return res.status(403).json({ error: "Forbidden" });
+  if (req.user.role !== 'admin' && req.user.role !== 'superadmin') return res.status(403).json({ error: "Forbidden" });
   const { uid } = req.params;
   try {
     const u = await query("SELECT email FROM users WHERE uid = $1", [uid]);
@@ -223,7 +286,7 @@ app.delete("/api/users/:uid", authenticateToken, async (req: any, res) => {
 
 // Admin Stats
 app.get("/api/admin/stats", authenticateToken, async (req: any, res) => {
-  if (req.user.role !== 'admin') return res.status(403).json({ error: "Forbidden" });
+  if (req.user.role !== 'admin' && req.user.role !== 'superadmin') return res.status(403).json({ error: "Forbidden" });
   try {
     const [callsRes, customersRes, usersRes] = await Promise.all([
       query("SELECT status, agent_name FROM calls"), query("SELECT count(*) FROM customers"), query("SELECT uid, name FROM users WHERE role = 'agent'")
@@ -238,7 +301,7 @@ app.get("/api/customers", authenticateToken, async (req: any, res) => {
   try {
     let q = 'SELECT id, type, first_name as "firstName", last_name as "lastName", company_name as "companyName", name, email, phone, address, city, industry, agent_id, created_at as "createdAt", updated_at as "updatedAt" FROM customers';
     let params: any[] = [];
-    if (req.user.role !== 'admin') { q += ' WHERE agent_id = $1'; params.push(req.user.uid); }
+    if (req.user.role !== 'admin' && req.user.role !== 'superadmin') { q += ' WHERE agent_id = $1'; params.push(req.user.uid); }
     q += ' ORDER BY created_at DESC';
     res.json((await query(q, params)).rows);
   } catch (err) { res.status(500).json({ error: "Server error" }); }
@@ -266,7 +329,7 @@ app.get("/api/leads", authenticateToken, async (req: any, res) => {
   try {
     let q = 'SELECT id, type, first_name as "firstName", last_name as "lastName", company_name as "companyName", email, phone, source, status, notes, address, city, niu, agent_id, created_at as "createdAt", updated_at as "updatedAt" FROM leads';
     let params: any[] = [];
-    if (req.user.role !== 'admin') { q += ' WHERE agent_id = $1'; params.push(req.user.uid); }
+    if (req.user.role !== 'admin' && req.user.role !== 'superadmin') { q += ' WHERE agent_id = $1'; params.push(req.user.uid); }
     q += ' ORDER BY created_at DESC';
     res.json((await query(q, params)).rows);
   } catch (err) { res.status(500).json({ error: "Server error" }); }
@@ -340,14 +403,14 @@ app.post("/api/upload", authenticateToken, (req: any, res) => { res.status(503).
 // VAT Rates
 app.get("/api/vat-rates", authenticateToken, async (req, res) => { try { res.json((await query("SELECT * FROM vat_rates ORDER BY rate ASC")).rows); } catch (err) { res.status(500).json({ error: "Server error" }); } });
 app.post("/api/vat-rates", authenticateToken, async (req: any, res) => {
-  if (req.user.role !== 'admin') return res.status(403).json({ error: "Forbidden" });
+  if (req.user.role !== 'admin' && req.user.role !== 'superadmin') return res.status(403).json({ error: "Forbidden" });
   try { res.status(201).json((await query("INSERT INTO vat_rates (label, rate) VALUES ($1, $2) RETURNING *", [req.body.label, parseFloat(req.body.rate)])).rows[0]); } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 
 // Catalogues
 app.get("/api/catalogues", authenticateToken, async (req, res) => { try { res.json((await query("SELECT * FROM catalogues ORDER BY name ASC")).rows); } catch (err) { res.status(500).json({ error: "Server error" }); } });
 app.post("/api/catalogues", authenticateToken, async (req: any, res) => {
-  if (req.user.role !== 'admin') return res.status(403).json({ error: "Forbidden" });
+  if (req.user.role !== 'admin' && req.user.role !== 'superadmin') return res.status(403).json({ error: "Forbidden" });
   try { res.status(201).json((await query("INSERT INTO catalogues (name, description, is_active) VALUES ($1, $2, $3) RETURNING *", [req.body.name, req.body.description, req.body.is_active !== undefined ? req.body.is_active : 1])).rows[0]); } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 
@@ -356,7 +419,7 @@ app.get("/api/products", authenticateToken, async (req, res) => {
   try { res.json((await query('SELECT p.*, c.name as "categoryName", cat.name as "catalogName" FROM products p LEFT JOIN categories c ON p.category_id = c.id LEFT JOIN catalogues cat ON p.catalog_id = cat.id ORDER BY p.name ASC')).rows); } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 app.post("/api/products", authenticateToken, async (req: any, res) => {
-  if (req.user.role !== 'admin') return res.status(403).json({ error: "Forbidden" });
+  if (req.user.role !== 'admin' && req.user.role !== 'superadmin') return res.status(403).json({ error: "Forbidden" });
   const { name, type, category, categoryId, catalogId, price, vatRate, vatRateId, stock, unit, description, technicalFileUrl } = req.body;
   try { res.status(201).json((await query("INSERT INTO products (name, type, category, category_id, catalog_id, price, vat_rate, vat_rate_id, stock, unit, description, technical_file_url) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *", [name, type || 'product', category, categoryId, catalogId, price, vatRate || 20, vatRateId, stock || 0, unit, description, technicalFileUrl])).rows[0]); } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
@@ -366,7 +429,7 @@ app.get("/api/quotes", authenticateToken, async (req: any, res) => {
   try {
     let q = 'SELECT q.*, c.name as "customerName", l.first_name || \' \' || l.last_name as "leadName", u.name as "agentName" FROM quotes q LEFT JOIN customers c ON q.customer_id = c.id LEFT JOIN leads l ON q.lead_id = l.id LEFT JOIN users u ON q.agent_id = u.uid';
     let params: any[] = [];
-    if (req.user.role !== 'admin') { q += ' WHERE q.agent_id = $1'; params.push(req.user.uid); }
+    if (req.user.role !== 'admin' && req.user.role !== 'superadmin') { q += ' WHERE q.agent_id = $1'; params.push(req.user.uid); }
     q += ' ORDER BY q.date DESC';
     const result = await query(q, params);
     res.json(result.rows.map(r => ({ ...r, customerName: r.customerName || (r.leadName ? `Prospect: ${r.leadName}` : 'Inconnu'), expiryDate: r.expiry_date })));
@@ -421,7 +484,7 @@ app.get("/api/invoices", authenticateToken, async (req: any, res) => {
   try {
     let q = 'SELECT i.*, c.name as "customerName", u.name as "agentName" FROM invoices i LEFT JOIN customers c ON i.customer_id = c.id LEFT JOIN users u ON i.agent_id = u.uid';
     let params: any[] = [];
-    if (req.user.role !== 'admin') { q += ' WHERE i.agent_id = $1'; params.push(req.user.uid); }
+    if (req.user.role !== 'admin' && req.user.role !== 'superadmin') { q += ' WHERE i.agent_id = $1'; params.push(req.user.uid); }
     q += ' ORDER BY i.date DESC';
     res.json((await query(q, params)).rows.map(r => ({ ...r, dueDate: r.due_date, paidAt: r.paid_at })));
   } catch (err) { res.status(500).json({ error: "Server error" }); }
@@ -436,18 +499,18 @@ app.get("/api/commissions", authenticateToken, async (req: any, res) => {
   try {
     let q = 'SELECT cm.*, u.name as "agentName", i.number as "invoiceNumber" FROM commissions cm LEFT JOIN users u ON cm.agent_id = u.uid LEFT JOIN invoices i ON cm.invoice_id = i.id';
     let params: any[] = [];
-    if (req.user.role !== 'admin') { q += ' WHERE cm.agent_id = $1'; params.push(req.user.uid); }
+    if (req.user.role !== 'admin' && req.user.role !== 'superadmin') { q += ' WHERE cm.agent_id = $1'; params.push(req.user.uid); }
     q += ' ORDER BY cm.date DESC';
     res.json((await query(q, params)).rows);
   } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 app.post("/api/commissions", authenticateToken, async (req: any, res) => {
-  if (req.user.role !== 'admin') return res.status(403).json({ error: "Forbidden" });
+  if (req.user.role !== 'admin' && req.user.role !== 'superadmin') return res.status(403).json({ error: "Forbidden" });
   const { agentId, invoiceId, amount, rate, status, date } = req.body;
   try { res.status(201).json((await query('INSERT INTO commissions (agent_id, invoice_id, amount, rate, status, date) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id, agent_id as "agentId", invoice_id as "invoiceId", amount, rate, status, date', [agentId, invoiceId || null, amount, rate, status || 'En attente', date])).rows[0]); } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 app.put("/api/commissions/:id", authenticateToken, async (req: any, res) => {
-  if (req.user.role !== 'admin') return res.status(403).json({ error: "Forbidden" });
+  if (req.user.role !== 'admin' && req.user.role !== 'superadmin') return res.status(403).json({ error: "Forbidden" });
   const { id } = req.params; const { status } = req.body;
   try {
     const result = await query("UPDATE commissions SET status = $1 WHERE id = $2 RETURNING *", [status, id]);
@@ -479,15 +542,15 @@ app.delete("/api/activities/:id", authenticateToken, async (req, res) => {
 app.get("/api/objectives", authenticateToken, async (req: any, res) => {
   try {
     let q = 'SELECT o.*, u.name as "agentName" FROM objectives o LEFT JOIN users u ON o.agent_id = u.uid'; let params: any[] = [];
-    if (req.user.role !== 'admin') { q += ' WHERE o.agent_id = $1'; params.push(req.user.uid); }
+    if (req.user.role !== 'admin' && req.user.role !== 'superadmin') { q += ' WHERE o.agent_id = $1'; params.push(req.user.uid); }
     q += ' ORDER BY o.end_date DESC';
     res.json((await query(q, params)).rows);
   } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 app.get("/api/objectives/stats", authenticateToken, async (req: any, res) => {
   try {
-    const oq = `SELECT o.*, u.name as "agentName" FROM objectives o LEFT JOIN users u ON o.agent_id = u.uid ${req.user.role !== 'admin' ? 'WHERE o.agent_id = $1' : ''}`;
-    const objectives = await query(oq, req.user.role !== 'admin' ? [req.user.uid] : []);
+    const oq = `SELECT o.*, u.name as "agentName" FROM objectives o LEFT JOIN users u ON o.agent_id = u.uid ${req.user.role !== 'admin' && req.user.role !== 'superadmin' ? 'WHERE o.agent_id = $1' : ''}`;
+    const objectives = await query(oq, req.user.role !== 'admin' && req.user.role !== 'superadmin' ? [req.user.uid] : []);
     const stats = await Promise.all(objectives.rows.map(async (obj: any) => {
       let currentValue = 0; const { type, agent_id, start_date, end_date } = obj;
       if (type === 'revenue') { currentValue = (await query("SELECT SUM(amount) as total FROM invoices WHERE agent_id=$1 AND status='Payée' AND date BETWEEN $2 AND $3", [agent_id, start_date, end_date])).rows[0].total || 0; }
@@ -500,12 +563,12 @@ app.get("/api/objectives/stats", authenticateToken, async (req: any, res) => {
   } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 app.post("/api/objectives", authenticateToken, async (req: any, res) => {
-  if (req.user.role !== 'admin') return res.status(403).json({ error: "Forbidden" });
+  if (req.user.role !== 'admin' && req.user.role !== 'superadmin') return res.status(403).json({ error: "Forbidden" });
   const { agentId, type, targetValue, period, startDate, endDate, status } = req.body;
   try { res.status(201).json((await query('INSERT INTO objectives (agent_id, type, target_value, period, start_date, end_date, status) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id, agent_id as "agentId", type, target_value as "targetValue", period, start_date as "startDate", end_date as "endDate", status', [agentId, type, targetValue, period, startDate, endDate, status || 'En cours'])).rows[0]); } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 app.put("/api/objectives/:id", authenticateToken, async (req: any, res) => {
-  if (req.user.role !== 'admin') return res.status(403).json({ error: "Forbidden" });
+  if (req.user.role !== 'admin' && req.user.role !== 'superadmin') return res.status(403).json({ error: "Forbidden" });
   const { id } = req.params; const { targetValue, status, endDate } = req.body;
   try {
     const result = await query("UPDATE objectives SET target_value=$1, status=$2, end_date=$3, updated_at=CURRENT_TIMESTAMP WHERE id=$4 RETURNING *", [targetValue, status, endDate, id]);
@@ -514,7 +577,7 @@ app.put("/api/objectives/:id", authenticateToken, async (req: any, res) => {
   } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 app.delete("/api/objectives/:id", authenticateToken, async (req: any, res) => {
-  if (req.user.role !== 'admin') return res.status(403).json({ error: "Forbidden" });
+  if (req.user.role !== 'admin' && req.user.role !== 'superadmin') return res.status(403).json({ error: "Forbidden" });
   try { await query("DELETE FROM objectives WHERE id = $1", [req.params.id]); res.status(204).send(); } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 
@@ -567,9 +630,41 @@ app.post("/api/opportunities/:id/convert-to-customer", authenticateToken, async 
   } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 
+// Superadmin Dashboard - Demo countdown & stats
+app.get("/api/superadmin/dashboard", authenticateToken, async (req: any, res) => {
+  if (req.user.role !== 'superadmin') return res.status(403).json({ error: "Forbidden" });
+  try {
+    const allUsers = (await query('SELECT uid, email, name, role, account_type, is_active, first_login_at, deactivated_at, company_name, created_at FROM users ORDER BY created_at DESC')).rows;
+    const demoAccounts = allUsers.filter(u => u.account_type === 'demo').map(u => {
+      let daysRemaining = 15;
+      let daysUsed = 0;
+      if (u.first_login_at) {
+        daysUsed = Math.floor((new Date().getTime() - new Date(u.first_login_at).getTime()) / (1000 * 60 * 60 * 24));
+        daysRemaining = Math.max(0, 15 - daysUsed);
+      }
+      return { ...u, daysRemaining, daysUsed, expired: daysRemaining <= 0 };
+    });
+    const prodAccounts = allUsers.filter(u => u.account_type === 'production');
+    const totalSessions = (await query("SELECT COUNT(*) as count FROM sessions")).rows[0].count;
+    const todaySessions = (await query("SELECT COUNT(*) as count FROM sessions WHERE logged_in_at >= CURRENT_DATE")).rows[0].count;
+    res.json({
+      totalUsers: allUsers.length,
+      activeUsers: allUsers.filter(u => u.is_active).length,
+      inactiveUsers: allUsers.filter(u => !u.is_active).length,
+      demoAccounts,
+      prodAccounts,
+      demoCount: demoAccounts.length,
+      prodCount: prodAccounts.length,
+      expiredDemos: demoAccounts.filter(d => d.expired).length,
+      totalSessions: parseInt(totalSessions),
+      todaySessions: parseInt(todaySessions),
+    });
+  } catch (err) { res.status(500).json({ error: "Server error" }); }
+});
+
 // Sessions tracking (Admin only)
 app.get("/api/admin/sessions", authenticateToken, async (req: any, res) => {
-  if (req.user.role !== 'admin') return res.status(403).json({ error: "Forbidden" });
+  if (req.user.role !== 'admin' && req.user.role !== 'superadmin') return res.status(403).json({ error: "Forbidden" });
   try {
     const { user, dateFrom, dateTo } = req.query;
     let q = 'SELECT id, user_uid, user_email, user_name, user_role, ip_address, user_agent, logged_in_at as "loggedInAt", logged_out_at as "loggedOutAt" FROM sessions WHERE 1=1';
@@ -585,7 +680,7 @@ app.get("/api/admin/sessions", authenticateToken, async (req: any, res) => {
 
 // Admin: Purge all CRM data (keep only admin user)
 app.post("/api/admin/purge", authenticateToken, async (req: any, res) => {
-  if (req.user.role !== 'admin') return res.status(403).json({ error: "Forbidden" });
+  if (req.user.role !== 'admin' && req.user.role !== 'superadmin') return res.status(403).json({ error: "Forbidden" });
   try {
     // Order matters due to foreign keys
     await query("DELETE FROM quote_items");
