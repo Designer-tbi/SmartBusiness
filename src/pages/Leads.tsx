@@ -41,11 +41,6 @@ export default function Leads() {
   };
 
   useEffect(() => {
-    return () => {
-    };
-  }, [showModal]);
-
-  useEffect(() => {
     fetchLeads();
   }, []);
 

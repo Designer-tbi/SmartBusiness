@@ -125,7 +125,7 @@ app.post("/api/auth/register", async (req, res) => {
     );
     const user = result.rows[0];
     const token = jwt.sign({ uid: user.uid, role: user.role }, JWT_SECRET);
-    res.cookie("token", token, { httpOnly: true, secure: true, sameSite: 'none' });
+    res.cookie("token", token, { httpOnly: true, secure: true, sameSite: 'lax' });
     res.json(user);
   } catch (err: any) {
     res.status(400).json({ error: "Email already exists or invalid data" });
@@ -165,7 +165,7 @@ app.post("/api/auth/login", async (req, res) => {
     }
 
     const token = jwt.sign({ uid: user.uid, role: user.role }, JWT_SECRET);
-    res.cookie("token", token, { httpOnly: true, secure: true, sameSite: 'none' });
+    res.cookie("token", token, { httpOnly: true, secure: true, sameSite: 'lax' });
     // Log session
     try {
       const ip = req.headers['x-forwarded-for'] || req.headers['x-real-ip'] || req.ip || 'unknown';

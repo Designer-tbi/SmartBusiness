@@ -64,11 +64,6 @@ export default function Objectives() {
   const [endDate, setEndDate] = useState(format(new Date(), 'yyyy-MM-dd'));
 
   useEffect(() => {
-    return () => {
-    };
-  }, [showModal]);
-
-  useEffect(() => {
     fetchData();
     if (profile?.role === 'admin') {
       fetchUsers();

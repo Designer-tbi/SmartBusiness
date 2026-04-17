@@ -23,11 +23,6 @@ export default function Commissions() {
   });
 
   useEffect(() => {
-    return () => {
-    };
-  }, [showModal]);
-
-  useEffect(() => {
     fetchCommissions();
     if (profile?.role === 'admin') {
       fetchData();

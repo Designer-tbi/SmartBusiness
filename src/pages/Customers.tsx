@@ -39,11 +39,6 @@ export default function Customers() {
   };
 
   useEffect(() => {
-    return () => {
-    };
-  }, [showModal]);
-
-  useEffect(() => {
     fetchCustomers();
   }, []);
 

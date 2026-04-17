@@ -63,11 +63,6 @@ export default function Activities() {
   };
 
   useEffect(() => {
-    return () => {
-    };
-  }, [showModal]);
-
-  useEffect(() => {
     fetchData();
   }, []);
 

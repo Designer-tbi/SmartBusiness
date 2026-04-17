@@ -56,11 +56,6 @@ export default function Opportunities() {
   };
 
   useEffect(() => {
-    return () => {
-    };
-  }, [showModal]);
-
-  useEffect(() => {
     fetchData();
   }, []);
 

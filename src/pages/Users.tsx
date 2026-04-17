@@ -9,11 +9,6 @@ export default function Users() {
   const [newUser, setNewUser] = useState({ name: '', email: '', password: '', role: 'agent', accountType: 'demo', companyName: '' });
   const [error, setError] = useState('');
 
-  useEffect(() => {
-    return () => {
-    };
-  }, [showCreateModal]);
-
   const fetchUsers = async () => {
     try {
       const response = await fetch('/api/users');
