@@ -46,7 +46,8 @@ export default function Portfolio() {
     tel: '',
     fax: '',
     mail: '',
-    web: ''
+    web: '',
+    niu: ''
   });
   const [submitting, setSubmitting] = useState(false);
 
@@ -160,7 +161,8 @@ export default function Portfolio() {
         tel: '',
         fax: '',
         mail: '',
-        web: ''
+        web: '',
+        niu: ''
       });
       setIsAddingItem(false);
     } catch (err: any) {
@@ -454,6 +456,16 @@ export default function Portfolio() {
                   type="text"
                   value={newItem.web}
                   onChange={(e) => setNewItem({...newItem, web: e.target.value})}
+                  className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">NIU (Identifiant Unique)</label>
+                <input
+                  type="text"
+                  value={newItem.niu}
+                  onChange={(e) => setNewItem({...newItem, niu: e.target.value})}
+                  placeholder="Ex: M012345678901A"
                   className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
                 />
               </div>

@@ -52,7 +52,7 @@ async function ensureDbInitialized() {
       "CREATE TABLE IF NOT EXISTS opportunities (id SERIAL PRIMARY KEY, customer_id INTEGER REFERENCES customers(id), lead_id INTEGER REFERENCES leads(id), title TEXT NOT NULL, amount NUMERIC, stage TEXT NOT NULL DEFAULT 'discovery', probability INTEGER, expected_close_date DATE, notes TEXT, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
       "CREATE TABLE IF NOT EXISTS calls (id SERIAL PRIMARY KEY, customer_id INTEGER REFERENCES customers(id), customer_name TEXT NOT NULL, customer_phone TEXT NOT NULL, agent_id TEXT REFERENCES users(uid), agent_name TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', notes TEXT, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
       "CREATE TABLE IF NOT EXISTS categories (id SERIAL PRIMARY KEY, name TEXT UNIQUE NOT NULL, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
-      "CREATE TABLE IF NOT EXISTS portfolio_items (id SERIAL PRIMARY KEY, category_id INTEGER NOT NULL REFERENCES categories(id), name TEXT NOT NULL, sub_type TEXT, address TEXT, city TEXT, bp TEXT, tel TEXT, fax TEXT, mail TEXT, web TEXT, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
+      "CREATE TABLE IF NOT EXISTS portfolio_items (id SERIAL PRIMARY KEY, category_id INTEGER NOT NULL REFERENCES categories(id), name TEXT NOT NULL, sub_type TEXT, address TEXT, city TEXT, bp TEXT, tel TEXT, fax TEXT, mail TEXT, web TEXT, niu TEXT, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
       "CREATE TABLE IF NOT EXISTS products (id SERIAL PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL DEFAULT 'product', category TEXT, category_id INTEGER, catalog_id INTEGER, price NUMERIC NOT NULL DEFAULT 0, vat_rate NUMERIC NOT NULL DEFAULT 20, vat_rate_id INTEGER, stock INTEGER NOT NULL DEFAULT 0, unit TEXT, description TEXT, technical_file_url TEXT, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
       "CREATE TABLE IF NOT EXISTS vat_rates (id SERIAL PRIMARY KEY, label TEXT NOT NULL, rate NUMERIC NOT NULL, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
       "CREATE TABLE IF NOT EXISTS catalogues (id SERIAL PRIMARY KEY, name TEXT NOT NULL, description TEXT, is_active INTEGER DEFAULT 1, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
@@ -70,6 +70,7 @@ async function ensureDbInitialized() {
       "ALTER TABLE leads ADD COLUMN IF NOT EXISTS address TEXT",
       "ALTER TABLE leads ADD COLUMN IF NOT EXISTS city TEXT",
       "ALTER TABLE leads ADD COLUMN IF NOT EXISTS niu TEXT",
+      "ALTER TABLE portfolio_items ADD COLUMN IF NOT EXISTS niu TEXT",
     ];
     for (const s of schema) { await query(s); }
     // Seed admin
@@ -179,9 +180,9 @@ app.get("/api/categories/:categoryId/items", authenticateToken, async (req, res)
   try { res.json((await query("SELECT * FROM portfolio_items WHERE category_id = $1 ORDER BY name ASC", [req.params.categoryId])).rows); } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 app.post("/api/portfolio-items", authenticateToken, async (req, res) => {
-  const { category_id, name, sub_type, address, city, bp, tel, fax, mail, web } = req.body;
+  const { category_id, name, sub_type, address, city, bp, tel, fax, mail, web, niu } = req.body;
   if (!category_id || !name) return res.status(400).json({ error: "Category ID and Name are required" });
-  try { res.status(201).json((await query("INSERT INTO portfolio_items (category_id, name, sub_type, address, city, bp, tel, fax, mail, web) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *", [category_id, name, sub_type, address, city, bp, tel, fax, mail, web])).rows[0]); } catch (err) { res.status(500).json({ error: "Server error" }); }
+  try { res.status(201).json((await query("INSERT INTO portfolio_items (category_id, name, sub_type, address, city, bp, tel, fax, mail, web, niu) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *", [category_id, name, sub_type, address, city, bp, tel, fax, mail, web, niu])).rows[0]); } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 
 // Users (Admin)

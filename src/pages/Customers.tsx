@@ -19,6 +19,7 @@ export default function Customers() {
   const [address, setAddress] = useState('');
   const [city, setCity] = useState('');
   const [industry, setIndustry] = useState('');
+  const [niu, setNiu] = useState('');
 
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -58,6 +59,7 @@ export default function Customers() {
     setAddress('');
     setCity('');
     setIndustry('');
+    setNiu('');
     setEditingCustomer(null);
     setError(null);
   };
@@ -73,6 +75,7 @@ export default function Customers() {
     setAddress(customer.address || '');
     setCity(customer.city || '');
     setIndustry(customer.industry || '');
+    setNiu(customer.niu || '');
     setError(null);
     setShowModal(true);
   };
@@ -252,7 +255,7 @@ export default function Customers() {
 
       {showModal && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-3xl shadow-2xl w-full sm:max-w-2xl lg:max-w-3xl max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in duration-200">
+          <div className="bg-white rounded-3xl shadow-2xl w-full sm:max-w-3xl lg:max-w-5xl max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in duration-200">
             <div className="sticky top-0 z-10 px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/80 backdrop-blur-md">
               <h3 className="text-lg font-bold text-slate-900">
                 {editingCustomer ? 'Modifier le Client' : 'Nouveau Client'}
@@ -338,7 +341,7 @@ export default function Customers() {
                         placeholder="Ex: TBI Center"
                       />
                     </div>
-                    <div className="md:col-span-2">
+                    <div>
                       <label className="block text-sm font-medium text-slate-700 mb-1.5">Secteur d'activité</label>
                       <input
                         type="text"
@@ -346,6 +349,16 @@ export default function Customers() {
                         onChange={(e) => setIndustry(e.target.value)}
                         className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
                         placeholder="Ex: Informatique, Commerce..."
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1.5">NIU (Identifiant Unique)</label>
+                      <input
+                        type="text"
+                        value={niu}
+                        onChange={(e) => setNiu(e.target.value)}
+                        className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
+                        placeholder="Ex: M012345678901A"
                       />
                     </div>
                   </>
