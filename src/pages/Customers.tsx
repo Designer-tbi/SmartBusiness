@@ -304,107 +304,124 @@ export default function Customers() {
                 {type === 'individual' ? (
                   <>
                     <div>
-                      <label className="block text-sm font-medium text-slate-700 mb-1.5">Prénom</label>
-                      <input
-                        type="text"
-                        required
-                        value={firstName}
-                        onChange={(e) => setFirstName(e.target.value)}
-                        className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
-                        placeholder="Ex: Jean"
-                      />
+                      <label className="block text-sm font-medium text-slate-700 mb-1.5">Civilité</label>
+                      <select value={firstName.startsWith('M.') || firstName.startsWith('Mme') || firstName.startsWith('Mlle') ? '' : ''} className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all">
+                        <option value="">-</option>
+                        <option value="M.">M.</option>
+                        <option value="Mme">Mme</option>
+                        <option value="Mlle">Mlle</option>
+                      </select>
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-slate-700 mb-1.5">Nom</label>
-                      <input
-                        type="text"
-                        required
-                        value={lastName}
-                        onChange={(e) => setLastName(e.target.value)}
-                        className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
-                        placeholder="Ex: Dupont"
-                      />
+                      <label className="block text-sm font-medium text-slate-700 mb-1.5">Prénom *</label>
+                      <input type="text" required value={firstName} onChange={(e) => setFirstName(e.target.value)} className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all" placeholder="Ex: Jean" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1.5">Nom *</label>
+                      <input type="text" required value={lastName} onChange={(e) => setLastName(e.target.value)} className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all" placeholder="Ex: Dupont" />
                     </div>
                   </>
                 ) : (
                   <>
                     <div className="md:col-span-2">
-                      <label className="block text-sm font-medium text-slate-700 mb-1.5">Nom de l'entreprise</label>
-                      <input
-                        type="text"
-                        required
-                        value={companyName}
-                        onChange={(e) => setCompanyName(e.target.value)}
-                        className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
-                        placeholder="Ex: TBI Center"
-                      />
+                      <label className="block text-sm font-medium text-slate-700 mb-1.5">Raison sociale *</label>
+                      <input type="text" required value={companyName} onChange={(e) => setCompanyName(e.target.value)} className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all" placeholder="Ex: TBI Center SARL" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1.5">NIU / RCCM</label>
+                      <input type="text" value={niu} onChange={(e) => setNiu(e.target.value)} className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all" placeholder="Ex: M012345678901A" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1.5">Forme juridique</label>
+                      <select value={industry} onChange={(e) => setIndustry(e.target.value)} className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all">
+                        <option value="">Sélectionner...</option>
+                        <option value="SARL">SARL</option>
+                        <option value="SA">SA</option>
+                        <option value="SAS">SAS</option>
+                        <option value="EI">Entreprise Individuelle</option>
+                        <option value="SNC">SNC</option>
+                        <option value="GIE">GIE</option>
+                        <option value="Association">Association</option>
+                        <option value="ONG">ONG</option>
+                        <option value="Établissement public">Établissement public</option>
+                        <option value="Autre">Autre</option>
+                      </select>
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-slate-700 mb-1.5">Secteur d'activité</label>
-                      <input
-                        type="text"
-                        value={industry}
-                        onChange={(e) => setIndustry(e.target.value)}
-                        className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
-                        placeholder="Ex: Informatique, Commerce..."
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-slate-700 mb-1.5">NIU (Identifiant Unique)</label>
-                      <input
-                        type="text"
-                        value={niu}
-                        onChange={(e) => setNiu(e.target.value)}
-                        className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
-                        placeholder="Ex: M012345678901A"
-                      />
+                      <select className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all">
+                        <option value="">Sélectionner...</option>
+                        <option>BTP / Construction</option>
+                        <option>Commerce / Distribution</option>
+                        <option>Télécommunications</option>
+                        <option>Banque / Finance</option>
+                        <option>Assurances</option>
+                        <option>Transport / Logistique</option>
+                        <option>Hôtellerie / Restauration</option>
+                        <option>Santé / Pharmacie</option>
+                        <option>Éducation / Formation</option>
+                        <option>Informatique / Tech</option>
+                        <option>Agriculture / Agroalimentaire</option>
+                        <option>Mines / Énergie</option>
+                        <option>Immobilier</option>
+                        <option>Services / Conseil</option>
+                        <option>Autre</option>
+                      </select>
                     </div>
                   </>
                 )}
 
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Téléphone</label>
-                  <input
-                    type="tel"
-                    required
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
-                    placeholder="06 12 34 56 78"
-                  />
+                <div className="md:col-span-2 border-t border-slate-100 pt-4 mt-2">
+                  <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">Contact</p>
                 </div>
-
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Téléphone *</label>
+                  <div className="flex gap-2">
+                    <select className="w-28 px-2 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 outline-none text-sm">
+                      <option value="+242">+242 CG</option>
+                      <option value="+237">+237 CM</option>
+                      <option value="+241">+241 GA</option>
+                      <option value="+235">+235 TD</option>
+                      <option value="+236">+236 CF</option>
+                      <option value="+240">+240 GQ</option>
+                      <option value="+225">+225 CI</option>
+                      <option value="+221">+221 SN</option>
+                      <option value="+33">+33 FR</option>
+                      <option value="+1">+1 US</option>
+                    </select>
+                    <input type="tel" required value={phone} onChange={(e) => setPhone(e.target.value)} className="flex-1 px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all" placeholder="06 XXX XX XX" />
+                  </div>
+                </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1.5">Email</label>
-                  <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
-                    placeholder="contact@exemple.com"
-                  />
+                  <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all" placeholder="contact@exemple.com" />
                 </div>
 
+                <div className="md:col-span-2 border-t border-slate-100 pt-4 mt-2">
+                  <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">Localisation</p>
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Adresse / Quartier</label>
+                  <input type="text" value={address} onChange={(e) => setAddress(e.target.value)} className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all" placeholder="Quartier, avenue, numéro..." />
+                </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1.5">Ville</label>
-                  <input
-                    type="text"
-                    value={city}
-                    onChange={(e) => setCity(e.target.value)}
-                    className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
-                    placeholder="Ex: Brazzaville"
-                  />
+                  <input type="text" value={city} onChange={(e) => setCity(e.target.value)} className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all" placeholder="Ex: Brazzaville" />
                 </div>
-
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Adresse</label>
-                  <input
-                    type="text"
-                    value={address}
-                    onChange={(e) => setAddress(e.target.value)}
-                    className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
-                    placeholder="Rue, Quartier..."
-                  />
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Pays</label>
+                  <select className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all">
+                    <option value="CG">Congo (Brazzaville)</option>
+                    <option value="CM">Cameroun</option>
+                    <option value="GA">Gabon</option>
+                    <option value="TD">Tchad</option>
+                    <option value="CF">République Centrafricaine</option>
+                    <option value="GQ">Guinée Équatoriale</option>
+                    <option value="CD">RD Congo</option>
+                    <option value="CI">Côte d'Ivoire</option>
+                    <option value="SN">Sénégal</option>
+                    <option value="FR">France</option>
+                  </select>
                 </div>
               </div>
 
