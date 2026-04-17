@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
-import { PhoneCall } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Lock, Mail, ArrowRight, Shield } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
 export default function Login() {
@@ -11,126 +11,142 @@ export default function Login() {
   const navigate = useNavigate();
   const { refreshProfile } = useAuth();
 
-  const [showSetupGuide, setShowSetupGuide] = useState(false);
-
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setLoading(true);
-
     try {
       const response = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
       });
-
       if (response.ok) {
         await refreshProfile();
         navigate('/');
       } else {
         const data = await response.json();
-        if (response.status === 503) {
-          setError("Erreur de connexion à la base de données.");
-          setShowSetupGuide(true);
-        } else {
-          setError(data.error || 'Identifiants incorrects. Veuillez réessayer.');
-        }
+        setError(data.error || 'Identifiants incorrects.');
       }
-    } catch (err: any) {
-      console.error("Login error details:", err);
-      setError("Erreur réseau. Vérifiez votre connexion internet.");
+    } catch (err) {
+      setError("Erreur serveur. Veuillez réessayer.");
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full space-y-8 bg-white p-10 rounded-2xl shadow-xl border border-slate-100">
-        <div className="text-center">
-          <div className="mx-auto h-16 w-16 bg-indigo-100 rounded-full flex items-center justify-center">
-            <PhoneCall className="h-8 w-8 text-indigo-600" />
-          </div>
-          <h2 className="mt-6 text-3xl font-extrabold text-slate-900">
-            SmartBusiness
-          </h2>
-          <p className="mt-2 text-sm text-slate-600">
-            Connectez-vous à votre espace
-          </p>
+    <div className="min-h-screen flex" data-testid="login-page">
+      {/* Left Panel - Branding */}
+      <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 relative overflow-hidden">
+        <div className="absolute inset-0 opacity-10">
+          <div className="absolute top-20 left-20 w-72 h-72 bg-indigo-500 rounded-full blur-3xl" />
+          <div className="absolute bottom-20 right-20 w-96 h-96 bg-purple-500 rounded-full blur-3xl" />
         </div>
-        
-        <div className="mt-8 space-y-6">
-          <form className="space-y-4" onSubmit={handleLogin}>
+        <div className="relative z-10 flex flex-col justify-center px-16">
+          <div className="flex items-center gap-3 mb-8">
+            <div className="w-12 h-12 bg-indigo-600 rounded-xl flex items-center justify-center">
+              <Shield className="w-7 h-7 text-white" />
+            </div>
+            <span className="text-3xl font-bold text-white tracking-tight">SmartBusiness</span>
+          </div>
+          <h1 className="text-4xl font-bold text-white leading-tight mb-4">
+            Votre CRM intelligent<br />
+            <span className="text-indigo-400">pour l'Afrique</span>
+          </h1>
+          <p className="text-slate-400 text-lg max-w-md leading-relaxed">
+            Gérez vos clients, prospects, devis et factures avec une plateforme conçue pour les entreprises africaines.
+          </p>
+          <div className="mt-12 grid grid-cols-3 gap-6">
+            <div className="text-center">
+              <p className="text-3xl font-bold text-white">100%</p>
+              <p className="text-xs text-slate-500 mt-1">Cloud Sécurisé</p>
+            </div>
+            <div className="text-center">
+              <p className="text-3xl font-bold text-white">FCFA</p>
+              <p className="text-xs text-slate-500 mt-1">Devise Locale</p>
+            </div>
+            <div className="text-center">
+              <p className="text-3xl font-bold text-white">24/7</p>
+              <p className="text-xs text-slate-500 mt-1">Disponibilité</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Right Panel - Login Form */}
+      <div className="w-full lg:w-1/2 flex items-center justify-center bg-slate-50 px-6">
+        <div className="w-full max-w-md">
+          {/* Mobile logo */}
+          <div className="lg:hidden text-center mb-10">
+            <div className="w-14 h-14 bg-indigo-600 rounded-xl flex items-center justify-center mx-auto mb-4">
+              <Shield className="w-8 h-8 text-white" />
+            </div>
+            <h2 className="text-2xl font-bold text-slate-900">SmartBusiness</h2>
+          </div>
+
+          <div className="mb-8">
+            <h2 className="text-2xl font-bold text-slate-900">Connexion</h2>
+            <p className="text-slate-500 mt-1">Accédez à votre espace de travail</p>
+          </div>
+
+          <form onSubmit={handleLogin} className="space-y-5" data-testid="login-form">
             {error && (
-              <div className="bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded-lg text-sm">
+              <div className="p-4 bg-red-50 border border-red-200 text-red-600 rounded-xl text-sm flex items-center gap-2" data-testid="login-error">
+                <div className="w-2 h-2 bg-red-500 rounded-full flex-shrink-0" />
                 {error}
               </div>
             )}
 
-            {showSetupGuide && (
-              <div className="bg-amber-50 border border-amber-200 p-4 rounded-lg text-sm text-amber-800 space-y-2">
-                <p className="font-bold">Configuration de la base de données requise :</p>
-                <ol className="list-decimal list-inside space-y-1">
-                  <li>Cliquez sur l'icône ⚙️ (Paramètres) en haut à droite.</li>
-                  <li>Allez dans l'onglet <strong>Secrets</strong>.</li>
-                  <li>Ajoutez ou modifiez <code>DATABASE_URL</code>.</li>
-                  <li>Assurez-vous qu'il ne contient pas "base" comme hôte.</li>
-                </ol>
-                <p className="text-xs italic">L'application redémarrera automatiquement après l'enregistrement.</p>
-              </div>
-            )}
-            <div className="space-y-4">
-              <div>
-                <label htmlFor="email-address" className="block text-sm font-medium text-slate-700">
-                  Adresse email
-                </label>
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">Adresse email</label>
+              <div className="relative">
+                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
                 <input
-                  id="email-address"
-                  name="email"
+                  data-testid="login-email"
                   type="email"
-                  autoComplete="email"
                   required
-                  className="mt-1 appearance-none relative block w-full px-3 py-2 border border-slate-300 placeholder-slate-400 text-slate-900 rounded-lg focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 focus:z-10 sm:text-sm"
-                  placeholder="eden@tbi-center.fr"
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                />
-              </div>
-              <div>
-                <label htmlFor="password" className="block text-sm font-medium text-slate-700">
-                  Mot de passe
-                </label>
-                <input
-                  id="password"
-                  name="password"
-                  type="password"
-                  autoComplete="current-password"
-                  required
-                  className="mt-1 appearance-none relative block w-full px-3 py-2 border border-slate-300 placeholder-slate-400 text-slate-900 rounded-lg focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 focus:z-10 sm:text-sm"
-                  placeholder="••••••••"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={e => setEmail(e.target.value)}
+                  placeholder="votre@email.com"
+                  className="w-full pl-12 pr-4 py-3.5 bg-white border border-slate-200 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all"
                 />
               </div>
             </div>
 
             <div>
-              <button
-                type="submit"
-                disabled={loading}
-                className="group relative w-full flex justify-center py-2.5 px-4 border border-transparent text-sm font-medium rounded-lg text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 transition-colors"
-              >
-                {loading ? 'Connexion en cours...' : 'Se connecter'}
-              </button>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">Mot de passe</label>
+              <div className="relative">
+                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                <input
+                  data-testid="login-password"
+                  type="password"
+                  required
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  placeholder="Votre mot de passe"
+                  className="w-full pl-12 pr-4 py-3.5 bg-white border border-slate-200 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all"
+                />
+              </div>
             </div>
-            <div className="text-center text-sm">
-              <span className="text-slate-500">Pas encore de compte ? </span>
-              <Link to="/register" className="font-medium text-indigo-600 hover:text-indigo-500">
-                Créer un compte
-              </Link>
-            </div>
+
+            <button
+              data-testid="login-submit-btn"
+              type="submit"
+              disabled={loading}
+              className="w-full py-3.5 bg-indigo-600 text-white font-semibold rounded-xl hover:bg-indigo-700 focus:ring-4 focus:ring-indigo-500/30 transition-all disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-indigo-200"
+            >
+              {loading ? (
+                <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              ) : (
+                <>Se connecter <ArrowRight className="w-5 h-5" /></>
+              )}
+            </button>
           </form>
+
+          <p className="text-center text-xs text-slate-400 mt-10">
+            SmartBusiness CRM &copy; {new Date().getFullYear()} &mdash; TBI Center
+          </p>
         </div>
       </div>
     </div>
