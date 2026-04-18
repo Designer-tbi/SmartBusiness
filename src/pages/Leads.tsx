@@ -290,13 +290,6 @@ export default function Leads() {
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2">
                       <button 
-                        onClick={() => handleConvertToOpportunity(lead)}
-                        title="Convertir en Opportunité"
-                        className="p-1.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-all"
-                      >
-                        <Target size={16} />
-                      </button>
-                      <button 
                         onClick={() => handleConvertToCustomer(lead.id)}
                         title="Convertir en Client"
                         className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all"

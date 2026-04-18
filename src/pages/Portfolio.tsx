@@ -181,30 +181,24 @@ export default function Portfolio() {
     item.city?.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const handleConvertToLead = async (item: PortfolioItem) => {
+  const handleConvertToOpportunity = async (item: PortfolioItem) => {
     try {
-      const res = await fetch('/api/leads', {
+      const res = await fetch('/api/opportunities', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          type: 'company',
-          companyName: item.name,
-          email: item.mail || '',
-          phone: item.tel?.split(/[\n/]+/)[0]?.trim() || '',
-          source: 'Portefeuille',
-          status: 'Nouveau',
-          notes: `Converti depuis le portefeuille. ${item.sub_type ? `Type: ${item.sub_type}.` : ''} ${item.address ? `Adresse: ${item.address}` : ''} ${item.city ? `- ${item.city}` : ''}`
+          title: `Opportunité - ${item.name}`,
+          amount: 0,
+          stage: 'Prospection',
+          probability: 10,
+          notes: `Converti depuis le portefeuille.\n${item.sub_type ? `Type: ${item.sub_type}` : ''}\n${item.address ? `Adresse: ${item.address}` : ''} ${item.city ? `- ${item.city}` : ''}\n${item.tel ? `Tél: ${item.tel}` : ''}\n${item.mail ? `Email: ${item.mail}` : ''}\n${item.niu ? `NIU: ${item.niu}` : ''}`.trim()
         }),
       });
       if (res.ok) {
-        alert(`"${item.name}" converti en lead avec succès !`);
-        navigate('/leads');
-      } else {
-        alert("Erreur lors de la conversion.");
-      }
-    } catch (err) {
-      alert("Erreur réseau.");
-    }
+        alert(`"${item.name}" converti en opportunité !`);
+        navigate('/opportunities');
+      } else { alert("Erreur lors de la conversion."); }
+    } catch (err) { alert("Erreur réseau."); }
   };
 
   if (loading && categories.length === 0 && !selectedCategory && !viewAll) {
@@ -624,12 +618,12 @@ export default function Portfolio() {
                     </div>
                     <div className="pt-3 border-t border-slate-100">
                       <button
-                        onClick={() => handleConvertToLead(item)}
-                        data-testid={`convert-lead-${item.id}`}
+                        onClick={() => handleConvertToOpportunity(item)}
+                        data-testid={`convert-opportunity-${item.id}`}
                         className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-indigo-50 text-indigo-700 rounded-lg text-sm font-medium hover:bg-indigo-100 transition-colors"
                       >
                         <UserPlus size={16} />
-                        Convertir en Lead
+                        Convertir en Opportunité
                         <ArrowRight size={14} />
                       </button>
                     </div>

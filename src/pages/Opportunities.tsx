@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
-import { Target, Plus, Search, Trash2, Edit2, Filter, DollarSign, Calendar, TrendingUp, UserCheck } from 'lucide-react';
+import { Target, Plus, Search, Trash2, Edit2, Filter, DollarSign, Calendar, TrendingUp, UserCheck, UserPlus } from 'lucide-react';
 
 export default function Opportunities() {
   const [opportunities, setOpportunities] = useState<any[]>([]);
@@ -142,6 +142,31 @@ export default function Opportunities() {
     } catch (error) {
       console.error("Error deleting opportunity:", error);
     }
+  };
+
+  const handleConvertToLead = async (opp: any) => {
+    if (!window.confirm(`Convertir l'opportunité "${opp.title}" en lead ?`)) return;
+    try {
+      const res = await fetch('/api/leads', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'company',
+          companyName: opp.title,
+          source: 'Opportunité',
+          status: 'Qualifié',
+          notes: `Converti depuis l'opportunité "${opp.title}". Montant: ${Number(opp.amount).toLocaleString()} FCFA.`
+        }),
+      });
+      if (res.ok) {
+        await fetch(`/api/opportunities/${opp.id}`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...opp, stage: 'negotiation', probability: 50 })
+        });
+        fetchData();
+        alert('Lead créé depuis l\'opportunité !');
+      }
+    } catch (error) { console.error("Error:", error); }
   };
 
   const handleConvertToCustomer = async (id: number) => {
@@ -311,13 +336,22 @@ export default function Opportunities() {
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2">
                       {opp.stage !== 'Gagnée' && (
-                        <button 
-                          onClick={() => handleConvertToCustomer(opp.id)}
-                          title="Gagner & Convertir en Client"
-                          className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all"
-                        >
-                          <UserCheck size={16} />
-                        </button>
+                        <>
+                          <button 
+                            onClick={() => handleConvertToLead(opp)}
+                            title="Convertir en Lead"
+                            className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
+                          >
+                            <UserPlus size={16} />
+                          </button>
+                          <button 
+                            onClick={() => handleConvertToCustomer(opp.id)}
+                            title="Gagner & Convertir en Client"
+                            className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all"
+                          >
+                            <UserCheck size={16} />
+                          </button>
+                        </>
                       )}
                       <button 
                         onClick={() => handleEdit(opp)}
