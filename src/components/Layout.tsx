@@ -95,12 +95,20 @@ export default function Layout() {
     { name: 'Appels', href: '/calls', icon: PhoneCall },
   ];
 
-  if (profile?.role === 'admin') {
+  // Rapports visible par tous
+  navItems.push({
+    name: 'Mes Rapports',
+    href: '/reports',
+    icon: BarChart3,
+  });
+
+  if (profile?.role === 'admin' || profile?.role === 'superadmin') {
     navItems.push({ 
       name: 'Administration', 
       icon: Settings,
       children: [
-        { name: 'Rapports', href: '/reports', icon: BarChart3 },
+        { name: 'Rapports équipe', href: '/reports', icon: BarChart3 },
+        { name: 'Activité agents', href: '/user-activity', icon: Activity },
         { name: 'Utilisateurs', href: '/users', icon: UserCircle },
         { name: 'Sessions', href: '/sessions', icon: Monitor },
         { name: 'Super Admin', href: '/super-admin', icon: Settings },

@@ -76,6 +76,8 @@ async function ensureDbInitialized() {
       "ALTER TABLE users ADD COLUMN IF NOT EXISTS first_login_at TIMESTAMP WITH TIME ZONE",
       "ALTER TABLE users ADD COLUMN IF NOT EXISTS deactivated_at TIMESTAMP WITH TIME ZONE",
       "ALTER TABLE users ADD COLUMN IF NOT EXISTS company_name TEXT",
+      "CREATE TABLE IF NOT EXISTS reports (id SERIAL PRIMARY KEY, agent_id TEXT NOT NULL, agent_name TEXT NOT NULL, title TEXT NOT NULL, period_start DATE NOT NULL, period_end DATE NOT NULL, calls_count INTEGER DEFAULT 0, meetings_count INTEGER DEFAULT 0, quotes_count INTEGER DEFAULT 0, quotes_amount NUMERIC DEFAULT 0, new_leads INTEGER DEFAULT 0, new_customers INTEGER DEFAULT 0, invoices_amount NUMERIC DEFAULT 0, summary TEXT, challenges TEXT, next_actions TEXT, status TEXT DEFAULT 'submitted', created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
+      "CREATE TABLE IF NOT EXISTS report_comments (id SERIAL PRIMARY KEY, report_id INTEGER NOT NULL REFERENCES reports(id) ON DELETE CASCADE, author_id TEXT NOT NULL, author_name TEXT NOT NULL, author_role TEXT NOT NULL, content TEXT NOT NULL, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
     ];
     for (const s of schema) { await query(s); }
     // Seed superadmin
@@ -520,10 +522,16 @@ app.put("/api/commissions/:id", authenticateToken, async (req: any, res) => {
 });
 
 // Activities
-app.get("/api/activities", authenticateToken, async (req, res) => {
+app.get("/api/activities", authenticateToken, async (req: any, res) => {
   try {
-    const result = await query('SELECT a.*, c.name as "customerName", l.first_name || \' \' || l.last_name as "leadName", o.title as "opportunityTitle", u.name as "agentName", u.role as "agentRole" FROM activities a LEFT JOIN customers c ON a.customer_id = c.id LEFT JOIN leads l ON a.lead_id = l.id LEFT JOIN opportunities o ON a.opportunity_id = o.id LEFT JOIN users u ON a.agent_id = u.uid ORDER BY a.date DESC');
-    res.json(result.rows.map(r => ({ ...r, customerName: r.customerName || (r.leadName ? `Prospect: ${r.leadName}` : r.opportunityTitle || 'N/A') })));
+    let q = 'SELECT a.*, c.name as "customerName", l.first_name || \' \' || l.last_name as "leadName", o.title as "opportunityTitle", u.name as "agentName", u.role as "agentRole" FROM activities a LEFT JOIN customers c ON a.customer_id = c.id LEFT JOIN leads l ON a.lead_id = l.id LEFT JOIN opportunities o ON a.opportunity_id = o.id LEFT JOIN users u ON a.agent_id = u.uid';
+    // Non-admin users cannot see admin/superadmin activities
+    if (req.user.role !== 'admin' && req.user.role !== 'superadmin') {
+      q += " WHERE (u.role IS NULL OR u.role NOT IN ('admin','superadmin'))";
+    }
+    q += ' ORDER BY a.date DESC';
+    const result = await query(q);
+    res.json(result.rows.map((r: any) => ({ ...r, customerName: r.customerName || (r.leadName ? `Prospect: ${r.leadName}` : r.opportunityTitle || 'N/A') })));
   } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 app.post("/api/activities", authenticateToken, async (req: any, res) => {
@@ -742,6 +750,100 @@ app.delete("/api/documents/:id", authenticateToken, async (req, res) => {
   try {
     await query("DELETE FROM documents WHERE id = $1", [req.params.id]);
     res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: "Server error" }); }
+});
+
+// Reports - Agents submit, Admin reviews
+app.get("/api/reports", authenticateToken, async (req: any, res) => {
+  try {
+    let q = 'SELECT r.*, (SELECT COUNT(*) FROM report_comments rc WHERE rc.report_id = r.id) as "commentsCount" FROM reports r';
+    let params: any[] = [];
+    if (req.user.role !== 'admin' && req.user.role !== 'superadmin') {
+      q += ' WHERE r.agent_id = $1'; params.push(req.user.uid);
+    }
+    q += ' ORDER BY r.created_at DESC';
+    res.json((await query(q, params)).rows);
+  } catch (err) { res.status(500).json({ error: "Server error" }); }
+});
+
+app.get("/api/reports/:id", authenticateToken, async (req: any, res) => {
+  try {
+    const r = await query("SELECT * FROM reports WHERE id = $1", [req.params.id]);
+    if (r.rows.length === 0) return res.status(404).json({ error: "Report not found" });
+    const report = r.rows[0];
+    if (req.user.role !== 'admin' && req.user.role !== 'superadmin' && report.agent_id !== req.user.uid) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+    const comments = await query('SELECT * FROM report_comments WHERE report_id = $1 ORDER BY created_at ASC', [req.params.id]);
+    res.json({ ...report, comments: comments.rows });
+  } catch (err) { res.status(500).json({ error: "Server error" }); }
+});
+
+app.post("/api/reports", authenticateToken, async (req: any, res) => {
+  const { title, periodStart, periodEnd, callsCount, meetingsCount, quotesCount, quotesAmount, newLeads, newCustomers, invoicesAmount, summary, challenges, nextActions } = req.body;
+  if (!title || !periodStart || !periodEnd) return res.status(400).json({ error: "Title and period required" });
+  try {
+    const userR = await query("SELECT name FROM users WHERE uid = $1", [req.user.uid]);
+    const agentName = userR.rows[0]?.name || 'Unknown';
+    const result = await query(
+      'INSERT INTO reports (agent_id, agent_name, title, period_start, period_end, calls_count, meetings_count, quotes_count, quotes_amount, new_leads, new_customers, invoices_amount, summary, challenges, next_actions) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *',
+      [req.user.uid, agentName, title, periodStart, periodEnd, callsCount || 0, meetingsCount || 0, quotesCount || 0, quotesAmount || 0, newLeads || 0, newCustomers || 0, invoicesAmount || 0, summary, challenges, nextActions]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) { res.status(500).json({ error: "Server error" }); }
+});
+
+app.put("/api/reports/:id/status", authenticateToken, async (req: any, res) => {
+  if (req.user.role !== 'admin' && req.user.role !== 'superadmin') return res.status(403).json({ error: "Forbidden" });
+  const { status } = req.body;
+  try {
+    await query("UPDATE reports SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2", [status, req.params.id]);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: "Server error" }); }
+});
+
+app.delete("/api/reports/:id", authenticateToken, async (req: any, res) => {
+  if (req.user.role !== 'admin' && req.user.role !== 'superadmin') return res.status(403).json({ error: "Forbidden" });
+  try { await query("DELETE FROM reports WHERE id = $1", [req.params.id]); res.json({ success: true }); } catch (err) { res.status(500).json({ error: "Server error" }); }
+});
+
+// Report Comments
+app.post("/api/reports/:id/comments", authenticateToken, async (req: any, res) => {
+  const { content } = req.body;
+  if (!content) return res.status(400).json({ error: "Content required" });
+  try {
+    const userR = await query("SELECT name, role FROM users WHERE uid = $1", [req.user.uid]);
+    const u = userR.rows[0];
+    const result = await query(
+      'INSERT INTO report_comments (report_id, author_id, author_name, author_role, content) VALUES ($1,$2,$3,$4,$5) RETURNING *',
+      [req.params.id, req.user.uid, u?.name || 'Unknown', u?.role || 'agent', content]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) { res.status(500).json({ error: "Server error" }); }
+});
+
+// User Activity Tracking (Admin only)
+app.get("/api/admin/user-activity", authenticateToken, async (req: any, res) => {
+  if (req.user.role !== 'admin' && req.user.role !== 'superadmin') return res.status(403).json({ error: "Forbidden" });
+  try {
+    const users = (await query('SELECT uid, name, email, role, account_type, is_active, first_login_at, created_at FROM users ORDER BY created_at DESC')).rows;
+    const activity = await Promise.all(users.map(async (u: any) => {
+      const lastSession = (await query('SELECT logged_in_at, ip_address, user_agent FROM sessions WHERE user_uid = $1 ORDER BY logged_in_at DESC LIMIT 1', [u.uid])).rows[0];
+      const sessionCount = (await query('SELECT COUNT(*) as count FROM sessions WHERE user_uid = $1', [u.uid])).rows[0].count;
+      const recentActions = [];
+      const leads = (await query('SELECT COUNT(*) as c FROM leads WHERE agent_id = $1', [u.uid])).rows[0].c;
+      const customers = (await query('SELECT COUNT(*) as c FROM customers WHERE agent_id = $1', [u.uid])).rows[0].c;
+      const quotes = (await query('SELECT COUNT(*) as c FROM quotes WHERE agent_id = $1', [u.uid])).rows[0].c;
+      const activities = (await query('SELECT COUNT(*) as c FROM activities WHERE agent_id = $1', [u.uid])).rows[0].c;
+      const reports = (await query('SELECT COUNT(*) as c FROM reports WHERE agent_id = $1', [u.uid])).rows[0].c;
+      return {
+        ...u,
+        lastSession: lastSession || null,
+        sessionCount: parseInt(sessionCount),
+        stats: { leads: parseInt(leads), customers: parseInt(customers), quotes: parseInt(quotes), activities: parseInt(activities), reports: parseInt(reports) }
+      };
+    }));
+    res.json(activity);
   } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 
