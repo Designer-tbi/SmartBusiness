@@ -76,6 +76,7 @@ async function ensureDbInitialized() {
       "ALTER TABLE users ADD COLUMN IF NOT EXISTS first_login_at TIMESTAMP WITH TIME ZONE",
       "ALTER TABLE users ADD COLUMN IF NOT EXISTS deactivated_at TIMESTAMP WITH TIME ZONE",
       "ALTER TABLE users ADD COLUMN IF NOT EXISTS company_name TEXT",
+      "ALTER TABLE users ADD COLUMN IF NOT EXISTS zone TEXT DEFAULT 'CG'",
       "CREATE TABLE IF NOT EXISTS reports (id SERIAL PRIMARY KEY, agent_id TEXT NOT NULL, agent_name TEXT NOT NULL, title TEXT NOT NULL, period_start DATE NOT NULL, period_end DATE NOT NULL, calls_count INTEGER DEFAULT 0, meetings_count INTEGER DEFAULT 0, quotes_count INTEGER DEFAULT 0, quotes_amount NUMERIC DEFAULT 0, new_leads INTEGER DEFAULT 0, new_customers INTEGER DEFAULT 0, invoices_amount NUMERIC DEFAULT 0, summary TEXT, challenges TEXT, next_actions TEXT, status TEXT DEFAULT 'submitted', created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
       "CREATE TABLE IF NOT EXISTS report_comments (id SERIAL PRIMARY KEY, report_id INTEGER NOT NULL REFERENCES reports(id) ON DELETE CASCADE, author_id TEXT NOT NULL, author_name TEXT NOT NULL, author_role TEXT NOT NULL, content TEXT NOT NULL, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
     ];
@@ -238,7 +239,7 @@ app.delete("/api/categories/:id", authenticateToken, async (req: any, res) => {
 // Users (Superadmin/Admin)
 app.get("/api/users", authenticateToken, async (req: any, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'superadmin') return res.status(403).json({ error: "Forbidden" });
-  try { res.json((await query('SELECT uid, email, name, role, account_type as "accountType", is_active as "isActive", first_login_at as "firstLoginAt", deactivated_at as "deactivatedAt", company_name as "companyName", created_at as "createdAt" FROM users ORDER BY created_at DESC')).rows.map(u => {
+  try { res.json((await query('SELECT uid, email, name, role, account_type as "accountType", is_active as "isActive", first_login_at as "firstLoginAt", deactivated_at as "deactivatedAt", company_name as "companyName", zone, created_at as "createdAt" FROM users ORDER BY zone, created_at DESC')).rows.map(u => {
     if (u.accountType === 'demo' && u.firstLoginAt) {
       const diffDays = (new Date().getTime() - new Date(u.firstLoginAt).getTime()) / (1000 * 60 * 60 * 24);
       (u as any).demoRemainingDays = Math.max(0, Math.ceil(15 - diffDays));
@@ -248,12 +249,12 @@ app.get("/api/users", authenticateToken, async (req: any, res) => {
 });
 app.post("/api/users", authenticateToken, async (req: any, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'superadmin') return res.status(403).json({ error: "Forbidden" });
-  const { email, password, name, role, accountType, companyName } = req.body;
+  const { email, password, name, role, accountType, companyName, zone } = req.body;
   if (!email || !password || !name || !role) return res.status(400).json({ error: "Missing required fields" });
   try {
     const hashedPassword = await bcrypt.hash(password, 10);
     const uid = Math.random().toString(36).substring(2, 15);
-    res.json((await query('INSERT INTO users (uid, email, password, name, role, account_type, company_name, is_active) VALUES ($1,$2,$3,$4,$5,$6,$7,true) RETURNING uid, email, name, role, account_type as "accountType", company_name as "companyName", is_active as "isActive", created_at as "createdAt"', [uid, email, hashedPassword, name, role, accountType || 'production', companyName || null])).rows[0]);
+    res.json((await query('INSERT INTO users (uid, email, password, name, role, account_type, company_name, zone, is_active) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,true) RETURNING uid, email, name, role, account_type as "accountType", company_name as "companyName", zone, is_active as "isActive", created_at as "createdAt"', [uid, email, hashedPassword, name, role, accountType || 'production', companyName || null, zone || 'CG'])).rows[0]);
   } catch (err) { res.status(400).json({ error: "Email already exists" }); }
 });
 app.put("/api/users/:uid/role", authenticateToken, async (req: any, res) => {
