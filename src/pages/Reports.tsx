@@ -24,7 +24,9 @@ export default function ReportsPage() {
   const [submitting, setSubmitting] = useState(false);
 
   const [form, setForm] = useState({
-    title: '', periodStart: '', periodEnd: '',
+    title: `Rapport du ${new Date().toLocaleDateString('fr-FR')}`, 
+    periodStart: new Date().toISOString().split('T')[0], 
+    periodEnd: new Date().toISOString().split('T')[0],
     callsCount: 0, meetingsCount: 0, quotesCount: 0, quotesAmount: 0,
     newLeads: 0, newCustomers: 0, invoicesAmount: 0,
     summary: '', challenges: '', nextActions: ''

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Search, Folder, Loader2, AlertCircle, ChevronLeft, Building2, Phone, Mail, Globe, MapPin, Hash, Map as MapIcon, List, UserPlus, ArrowRight } from 'lucide-react';
+import { Plus, Search, Folder, Loader2, AlertCircle, ChevronLeft, Building2, Phone, Mail, Globe, MapPin, Hash, Map as MapIcon, List, UserPlus, ArrowRight, Trash2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import MapView from '../components/MapView';
 
@@ -191,7 +191,7 @@ export default function Portfolio() {
           amount: 0,
           stage: 'Prospection',
           probability: 10,
-          notes: `Converti depuis le portefeuille.\n${item.sub_type ? `Type: ${item.sub_type}` : ''}\n${item.address ? `Adresse: ${item.address}` : ''} ${item.city ? `- ${item.city}` : ''}\n${item.tel ? `Tél: ${item.tel}` : ''}\n${item.mail ? `Email: ${item.mail}` : ''}\n${item.niu ? `NIU: ${item.niu}` : ''}`.trim()
+          notes: `Converti depuis le portefeuille.\nTél: ${item.tel || 'N/A'}\nEmail: ${item.mail || 'N/A'}\nAdresse: ${item.address || 'N/A'} - ${item.city || 'N/A'}\nNIU: ${item.niu || 'N/A'}\nType: ${item.sub_type || 'N/A'}`
         }),
       });
       if (res.ok) {
@@ -199,6 +199,23 @@ export default function Portfolio() {
         navigate('/opportunities');
       } else { alert("Erreur lors de la conversion."); }
     } catch (err) { alert("Erreur réseau."); }
+  };
+
+  const handleDeleteItem = async (id: number) => {
+    if (!confirm('Supprimer cet établissement ?')) return;
+    try {
+      await fetch(`/api/portfolio-items/${id}`, { method: 'DELETE' });
+      if (selectedCategory) fetchItems(selectedCategory.id);
+      else if (viewAll) fetchAllItems();
+    } catch (err) { console.error(err); }
+  };
+
+  const handleDeleteCategory = async (id: number) => {
+    if (!confirm('Supprimer cette catégorie et tous ses établissements ?')) return;
+    try {
+      await fetch(`/api/categories/${id}`, { method: 'DELETE' });
+      fetchCategories();
+    } catch (err) { console.error(err); }
   };
 
   if (loading && categories.length === 0 && !selectedCategory && !viewAll) {
@@ -616,15 +633,23 @@ export default function Portfolio() {
                         )}
                       </div>
                     </div>
-                    <div className="pt-3 border-t border-slate-100">
+                    <div className="pt-3 border-t border-slate-100 flex gap-2">
                       <button
                         onClick={() => handleConvertToOpportunity(item)}
                         data-testid={`convert-opportunity-${item.id}`}
-                        className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-indigo-50 text-indigo-700 rounded-lg text-sm font-medium hover:bg-indigo-100 transition-colors"
+                        className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-indigo-50 text-indigo-700 rounded-lg text-sm font-medium hover:bg-indigo-100 transition-colors"
                       >
                         <UserPlus size={16} />
-                        Convertir en Opportunité
+                        Convertir
                         <ArrowRight size={14} />
+                      </button>
+                      <button
+                        onClick={() => handleDeleteItem(item.id)}
+                        data-testid={`delete-item-${item.id}`}
+                        className="p-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-colors"
+                        title="Supprimer"
+                      >
+                        <Trash2 size={16} />
                       </button>
                     </div>
                   </div>

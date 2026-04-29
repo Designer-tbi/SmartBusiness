@@ -147,25 +147,11 @@ export default function Opportunities() {
   const handleConvertToLead = async (opp: any) => {
     if (!window.confirm(`Convertir l'opportunité "${opp.title}" en lead ?`)) return;
     try {
-      const res = await fetch('/api/leads', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'company',
-          companyName: opp.title,
-          source: 'Opportunité',
-          status: 'Qualifié',
-          notes: `Converti depuis l'opportunité "${opp.title}". Montant: ${Number(opp.amount).toLocaleString()} FCFA.`
-        }),
-      });
+      const res = await fetch(`/api/opportunities/${opp.id}/convert-to-lead`, { method: 'POST' });
       if (res.ok) {
-        await fetch(`/api/opportunities/${opp.id}`, {
-          method: 'PUT', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...opp, stage: 'negotiation', probability: 50 })
-        });
         fetchData();
-        alert('Lead créé depuis l\'opportunité !');
-      }
+        alert('Lead créé avec les informations de l\'opportunité !');
+      } else { alert('Erreur lors de la conversion.'); }
     } catch (error) { console.error("Error:", error); }
   };
 

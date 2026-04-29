@@ -37,7 +37,7 @@ const authenticateToken = (req: any, res: any, next: any) => {
 
 // Create Express app
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
 app.use(cookieParser());
 
 // Initialize database tables on first request
@@ -222,6 +222,17 @@ app.post("/api/portfolio-items", authenticateToken, async (req, res) => {
   const { category_id, name, sub_type, address, city, bp, tel, fax, mail, web, niu } = req.body;
   if (!category_id || !name) return res.status(400).json({ error: "Category ID and Name are required" });
   try { res.status(201).json((await query("INSERT INTO portfolio_items (category_id, name, sub_type, address, city, bp, tel, fax, mail, web, niu) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *", [category_id, name, sub_type, address, city, bp, tel, fax, mail, web, niu])).rows[0]); } catch (err) { res.status(500).json({ error: "Server error" }); }
+});
+app.delete("/api/portfolio-items/:id", authenticateToken, async (req, res) => {
+  try { await query("DELETE FROM portfolio_items WHERE id = $1", [req.params.id]); res.json({ success: true }); } catch (err) { res.status(500).json({ error: "Server error" }); }
+});
+app.delete("/api/categories/:id", authenticateToken, async (req: any, res) => {
+  if (req.user.role !== 'admin' && req.user.role !== 'superadmin') return res.status(403).json({ error: "Forbidden" });
+  try {
+    await query("DELETE FROM portfolio_items WHERE category_id = $1", [req.params.id]);
+    await query("DELETE FROM categories WHERE id = $1", [req.params.id]);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 
 // Users (Superadmin/Admin)
@@ -597,6 +608,31 @@ app.get("/api/projects", authenticateToken, async (req, res) => {
 // Debug
 app.get("/api/debug/counts", async (req, res) => {
   try { res.json((await query("SELECT c.name, COUNT(p.id) as count FROM categories c LEFT JOIN portfolio_items p ON c.id = p.category_id GROUP BY c.name")).rows); } catch (err) { res.status(500).json({ error: err instanceof Error ? err.message : String(err) }); }
+});
+
+// Convert Opportunity to Lead (keeping contact info from notes)
+app.post("/api/opportunities/:id/convert-to-lead", authenticateToken, async (req: any, res) => {
+  const { id } = req.params;
+  try {
+    const or2 = await query("SELECT * FROM opportunities WHERE id = $1", [id]);
+    if (or2.rows.length === 0) return res.status(404).json({ error: "Opportunity not found" });
+    const opp = or2.rows[0];
+    // Parse contact info from notes
+    const notes = opp.notes || '';
+    const telMatch = notes.match(/Tél:\s*(.+)/);
+    const emailMatch = notes.match(/Email:\s*(.+)/);
+    const niuMatch = notes.match(/NIU:\s*(.+)/);
+    const adresseMatch = notes.match(/Adresse:\s*(.+)/);
+    const cityMatch = notes.match(/- ([^\n]+)/);
+    const nameFromTitle = opp.title.replace('Opportunité - ', '');
+    const result = await query(
+      'INSERT INTO leads (type, company_name, email, phone, source, status, notes, address, city, agent_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id, type, company_name as "companyName", email, phone, source, status, notes, address, city, created_at as "createdAt"',
+      ['company', nameFromTitle, emailMatch?.[1]?.trim() || null, telMatch?.[1]?.trim()?.split(/[\n/]+/)[0] || null, 'Opportunité', 'Qualifié', `NIU: ${niuMatch?.[1]?.trim() || 'N/A'}\nConverti depuis l'opportunité: ${opp.title}\nMontant estimé: ${opp.amount} FCFA`, adresseMatch?.[1]?.trim()?.split(' -')[0] || null, cityMatch?.[1]?.trim() || null, req.user.uid]
+    );
+    // Update opportunity stage
+    await query("UPDATE opportunities SET stage = 'negotiation', probability = 50, updated_at = CURRENT_TIMESTAMP WHERE id = $1", [id]);
+    res.json(result.rows[0]);
+  } catch (err: any) { console.error(err); res.status(500).json({ error: "Server error" }); }
 });
 
 // CRM Automation
