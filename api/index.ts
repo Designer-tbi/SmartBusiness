@@ -437,6 +437,10 @@ app.post("/api/products", authenticateToken, async (req: any, res) => {
   const { name, type, category, categoryId, catalogId, price, vatRate, vatRateId, stock, unit, description, technicalFileUrl } = req.body;
   try { res.status(201).json((await query("INSERT INTO products (name, type, category, category_id, catalog_id, price, vat_rate, vat_rate_id, stock, unit, description, technical_file_url) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *", [name, type || 'product', category, categoryId, catalogId, price, vatRate || 20, vatRateId, stock || 0, unit, description, technicalFileUrl])).rows[0]); } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
+app.delete("/api/products/:id", authenticateToken, async (req: any, res) => {
+  if (req.user.role !== 'admin' && req.user.role !== 'superadmin') return res.status(403).json({ error: "Forbidden" });
+  try { await query("DELETE FROM products WHERE id = $1", [req.params.id]); res.json({ success: true }); } catch (err) { res.status(500).json({ error: "Server error" }); }
+});
 
 // Quotes
 app.get("/api/quotes", authenticateToken, async (req: any, res) => {

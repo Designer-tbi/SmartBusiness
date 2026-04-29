@@ -96,11 +96,9 @@ export default function ReportsPage() {
           <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-3"><FileText className="w-7 h-7 text-indigo-600" /> Rapports d'activité</h1>
           <p className="text-sm text-slate-500 mt-1">{isAdmin ? 'Consultez les rapports de votre équipe' : 'Soumettez vos rapports d\'activité'}</p>
         </div>
-        {!isAdmin && (
-          <button onClick={() => setShowForm(true)} data-testid="new-report-btn" className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 font-medium text-sm shadow-sm">
-            <Plus className="w-4 h-4" /> Nouveau Rapport
-          </button>
-        )}
+        <button onClick={() => setShowForm(true)} data-testid="new-report-btn" className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 font-medium text-sm shadow-sm">
+          <Plus className="w-4 h-4" /> Nouveau Rapport
+        </button>
       </div>
 
       {/* Reports List */}
