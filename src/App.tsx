@@ -64,7 +64,7 @@ export default function App() {
             <Route path="calls" element={<Calls />} />
             <Route path="customers" element={<Customers />} />
             <Route path="users" element={<ProtectedRoute requiredRole="admin"><Users /></ProtectedRoute>} />
-            <Route path="reports" element={<ProtectedRoute requiredRole="admin"><Reports /></ProtectedRoute>} />
+            <Route path="reports" element={<Reports />} />
             <Route path="settings" element={<ProtectedRoute requiredRole="admin"><Settings /></ProtectedRoute>} />
             
             {/* New Modules */}
