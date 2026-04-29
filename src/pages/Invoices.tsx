@@ -37,8 +37,8 @@ export default function Invoices() {
   };
 
   const filteredInvoices = invoices.filter(i => {
-    const matchesSearch = i.number.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                         i.customerName.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesSearch = (i.number || '').toLowerCase().includes(searchTerm.toLowerCase()) || 
+                         (i.customerName || '').toLowerCase().includes(searchTerm.toLowerCase());
     const matchesStatus = statusFilter === 'all' || i.status === statusFilter;
     return matchesSearch && matchesStatus;
   });

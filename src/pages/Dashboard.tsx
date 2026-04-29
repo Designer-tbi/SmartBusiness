@@ -13,12 +13,12 @@ export default function Dashboard() {
 
     const fetchStats = async () => {
       try {
-        const url = profile.role === 'admin' ? '/api/admin/stats' : '/api/calls';
+        const url = (profile.role === 'admin' || profile.role === 'superadmin') ? '/api/admin/stats' : '/api/calls';
         const response = await fetch(url);
         
         if (response.ok) {
           const data = await response.json();
-          if (profile.role === 'admin') {
+          if (profile.role === 'admin' || profile.role === 'superadmin') {
             setStats(data);
           } else {
             // Basic stats for agents
