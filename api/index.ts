@@ -3,8 +3,20 @@ import pg from "pg";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import cookieParser from "cookie-parser";
+import nodemailer from "nodemailer";
 
 const JWT_SECRET = process.env.JWT_SECRET || "smart-business-secret-key";
+
+// SMTP Email config
+const emailTransporter = nodemailer.createTransport({
+  host: 'ssl0.ovh.net',
+  port: 465,
+  secure: true,
+  auth: {
+    user: 'demo@smart-desk.pro',
+    pass: 'loub@ki2014D'
+  }
+});
 
 // PostgreSQL connection pool (singleton for serverless)
 let pool: pg.Pool | null = null;
@@ -481,6 +493,55 @@ app.put("/api/quotes/:id", authenticateToken, async (req, res) => {
   } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 
+// Send Quote by Email
+app.post("/api/quotes/:id/send-email", authenticateToken, async (req: any, res) => {
+  const { id } = req.params;
+  const { recipientEmail, recipientName, message } = req.body;
+  if (!recipientEmail) return res.status(400).json({ error: "Email du destinataire requis" });
+  try {
+    const qr = await query('SELECT q.*, c.name as "customerName", c.email as "customerEmail" FROM quotes q LEFT JOIN customers c ON q.customer_id = c.id WHERE q.id = $1', [id]);
+    if (qr.rows.length === 0) return res.status(404).json({ error: "Devis non trouvé" });
+    const quote = qr.rows[0];
+    const signUrl = `https://tbi-crm.pro/public/quotes/${id}`;
+    const htmlContent = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <div style="background: #4f46e5; padding: 20px; border-radius: 12px 12px 0 0; text-align: center;">
+          <h1 style="color: white; margin: 0; font-size: 24px;">SmartBusiness</h1>
+          <p style="color: #c7d2fe; margin: 5px 0 0;">Devis N° ${quote.number}</p>
+        </div>
+        <div style="background: #ffffff; padding: 30px; border: 1px solid #e2e8f0; border-top: none;">
+          <p style="color: #334155; font-size: 16px;">Bonjour ${recipientName || 'Cher client'},</p>
+          <p style="color: #64748b; line-height: 1.6;">${message || 'Veuillez trouver ci-joint votre devis. Vous pouvez le consulter et le signer électroniquement en cliquant sur le bouton ci-dessous.'}</p>
+          <div style="margin: 30px 0; padding: 20px; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0;">
+            <p style="margin: 0 0 5px; color: #64748b; font-size: 14px;">Montant du devis :</p>
+            <p style="margin: 0; color: #1e293b; font-size: 28px; font-weight: bold;">${Number(quote.amount).toLocaleString()} FCFA</p>
+            <p style="margin: 10px 0 0; color: #64748b; font-size: 13px;">Valable jusqu'au : ${quote.expiry_date ? new Date(quote.expiry_date).toLocaleDateString('fr-FR') : 'Non spécifié'}</p>
+          </div>
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="${signUrl}" style="display: inline-block; background: #4f46e5; color: white; padding: 14px 32px; border-radius: 8px; text-decoration: none; font-weight: bold; font-size: 16px;">Consulter et Signer le Devis</a>
+          </div>
+          <p style="color: #94a3b8; font-size: 12px; text-align: center;">Si le bouton ne fonctionne pas, copiez ce lien : ${signUrl}</p>
+        </div>
+        <div style="background: #f8fafc; padding: 15px; border-radius: 0 0 12px 12px; text-align: center; border: 1px solid #e2e8f0; border-top: none;">
+          <p style="color: #94a3b8; font-size: 12px; margin: 0;">SmartBusiness CRM - TBI Center</p>
+        </div>
+      </div>
+    `;
+    await emailTransporter.sendMail({
+      from: '"SmartBusiness" <demo@smart-desk.pro>',
+      to: recipientEmail,
+      subject: `Devis ${quote.number} - Signature requise`,
+      html: htmlContent
+    });
+    // Update quote status to "Envoyé"
+    await query("UPDATE quotes SET status = 'Envoyé', updated_at = CURRENT_TIMESTAMP WHERE id = $1", [id]);
+    res.json({ success: true, message: "Email envoyé avec succès" });
+  } catch (err: any) {
+    console.error("Email send error:", err);
+    res.status(500).json({ error: "Erreur d'envoi: " + err.message });
+  }
+});
+
 // Public Quotes (no auth)
 app.get("/api/public/quotes/:id", async (req, res) => {
   const { id } = req.params;
@@ -494,7 +555,10 @@ app.get("/api/public/quotes/:id", async (req, res) => {
 });
 app.post("/api/public/quotes/:id/sign", async (req, res) => {
   const { id } = req.params; const { signature, signedBy } = req.body;
-  try { await query("UPDATE quotes SET signature=$1, signed_by=$2, signature_date=CURRENT_TIMESTAMP, status='Accepté' WHERE id=$3", [signature, signedBy, id]); res.json({ success: true }); } catch (err) { res.status(500).json({ error: "Server error" }); }
+  try {
+    await query("UPDATE quotes SET signature=$1, signed_by=$2, signature_date=CURRENT_TIMESTAMP, status='Signé' WHERE id=$3", [signature, signedBy, id]);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 
 // Invoices

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { FileText, Plus, Search, Trash2, Edit2, Filter, Calendar, X, Save, PlusCircle, MinusCircle, Send, Share2, AlertCircle, Percent } from 'lucide-react';
+import { FileText, Plus, Search, Trash2, Edit2, Filter, Calendar, X, Save, PlusCircle, MinusCircle, Send, Share2, AlertCircle, Percent, Mail } from 'lucide-react';
 import { format } from 'date-fns';
 
 export default function Quotes() {
@@ -122,10 +122,36 @@ export default function Quotes() {
     alert("Lien de signature copié !");
   };
 
+  const [emailModal, setEmailModal] = useState<{ quoteId: number; customerName: string; customerEmail: string } | null>(null);
+  const [emailForm, setEmailForm] = useState({ email: '', name: '', message: '' });
+  const [sendingEmail, setSendingEmail] = useState(false);
+
+  const handleSendEmail = async () => {
+    if (!emailModal || !emailForm.email) return;
+    setSendingEmail(true);
+    try {
+      const res = await fetch(`/api/quotes/${emailModal.quoteId}/send-email`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recipientEmail: emailForm.email, recipientName: emailForm.name, message: emailForm.message })
+      });
+      if (res.ok) {
+        alert('Devis envoyé par email !');
+        setEmailModal(null);
+        setEmailForm({ email: '', name: '', message: '' });
+        fetchQuotes();
+      } else {
+        const d = await res.json();
+        alert('Erreur: ' + (d.error || 'Envoi échoué'));
+      }
+    } catch (err) { alert('Erreur réseau'); }
+    finally { setSendingEmail(false); }
+  };
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'Brouillon': return 'bg-slate-100 text-slate-800';
       case 'Envoyé': return 'bg-blue-100 text-blue-800';
+      case 'Signé': return 'bg-emerald-100 text-emerald-800';
       case 'Accepté': return 'bg-emerald-100 text-emerald-800';
       case 'Refusé': return 'bg-red-100 text-red-800';
       case 'Expiré': return 'bg-amber-100 text-amber-800';
@@ -189,6 +215,7 @@ export default function Quotes() {
                 <td className="px-4 py-4"><span className={`text-xs px-2.5 py-1 rounded-full font-medium ${getStatusColor(q.status)}`}>{q.status}</span></td>
                 <td className="px-4 py-4">
                   <div className="flex items-center justify-end gap-1">
+                    <button onClick={() => setEmailModal({ quoteId: q.id, customerName: q.customerName || '', customerEmail: '' })} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all" title="Envoyer par email" data-testid={`email-quote-${q.id}`}><Mail size={16} /></button>
                     <button onClick={() => handleShareLink(q.id)} className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all" title="Lien de signature" data-testid={`share-quote-${q.id}`}><Share2 size={16} /></button>
                     <button className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all" title="Supprimer"><Trash2 size={16} /></button>
                   </div>
@@ -375,6 +402,41 @@ export default function Quotes() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Email Send Modal */}
+      {emailModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md" data-testid="email-modal">
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center">
+              <div>
+                <h3 className="text-lg font-bold text-slate-800">Envoyer le devis</h3>
+                <p className="text-sm text-slate-500">Le destinataire recevra un lien de signature</p>
+              </div>
+              <button onClick={() => setEmailModal(null)} className="p-1.5 hover:bg-slate-100 rounded-lg"><X size={20} className="text-slate-400" /></button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Email du destinataire *</label>
+                <input type="email" required value={emailForm.email} onChange={e => setEmailForm({...emailForm, email: e.target.value})} placeholder="client@exemple.com" className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Nom du destinataire</label>
+                <input type="text" value={emailForm.name} onChange={e => setEmailForm({...emailForm, name: e.target.value})} placeholder="Jean Dupont" className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 outline-none" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Message personnalisé</label>
+                <textarea rows={3} value={emailForm.message} onChange={e => setEmailForm({...emailForm, message: e.target.value})} placeholder="Message optionnel..." className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 outline-none resize-none" />
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button type="button" onClick={() => setEmailModal(null)} className="flex-1 px-4 py-3 border border-slate-200 rounded-xl text-slate-600 font-medium hover:bg-slate-50">Annuler</button>
+                <button onClick={handleSendEmail} disabled={sendingEmail || !emailForm.email} className="flex-1 px-4 py-3 bg-indigo-600 text-white rounded-xl font-medium hover:bg-indigo-700 flex items-center justify-center gap-2 disabled:opacity-50 shadow-sm">
+                  <Send size={18} /> {sendingEmail ? 'Envoi...' : 'Envoyer'}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
