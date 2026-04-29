@@ -64,21 +64,21 @@ export default function Invoices() {
             <CheckCircle2 size={20} className="text-emerald-600" />
             <span className="text-sm font-medium">Encaissé</span>
           </div>
-          <div className="text-2xl font-bold text-slate-900">1,500,000 FCFA</div>
+          <div className="text-2xl font-bold text-slate-900">{invoices.filter(i => i.status === 'Payée').reduce((a, i) => a + Number(i.amount || 0), 0).toLocaleString()} FCFA</div>
         </div>
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
           <div className="flex items-center gap-3 text-slate-500 mb-2">
             <Clock size={20} className="text-blue-600" />
             <span className="text-sm font-medium">En attente</span>
           </div>
-          <div className="text-2xl font-bold text-slate-900">450,000 FCFA</div>
+          <div className="text-2xl font-bold text-slate-900">{invoices.filter(i => i.status === 'En attente').reduce((a, i) => a + Number(i.amount || 0), 0).toLocaleString()} FCFA</div>
         </div>
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
           <div className="flex items-center gap-3 text-slate-500 mb-2">
             <Clock size={20} className="text-red-600" />
             <span className="text-sm font-medium">En retard</span>
           </div>
-          <div className="text-2xl font-bold text-slate-900">8,900,000 FCFA</div>
+          <div className="text-2xl font-bold text-slate-900">{invoices.filter(i => i.status === 'En retard').reduce((a, i) => a + Number(i.amount || 0), 0).toLocaleString()} FCFA</div>
         </div>
       </div>
 
