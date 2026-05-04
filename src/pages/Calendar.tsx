@@ -130,7 +130,8 @@ export default function Calendar() {
       leadId: leadId ? parseInt(leadId) : null,
       opportunityId: opportunityId ? parseInt(opportunityId) : null,
       status,
-      date,
+      // Convert local datetime-local string ("2026-05-04T15:00") to proper ISO with user's TZ
+      date: date ? new Date(date).toISOString() : new Date().toISOString(),
       notes
     };
 

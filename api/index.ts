@@ -560,10 +560,12 @@ const COMMISSION_RATE = 20; // Taux par défaut: 20%
 // Helper: create scheduled activity for an agent
 async function createActivity(opts: { type: string; subject: string; agentId: string | null; customerId?: number | null; leadId?: number | null; opportunityId?: number | null; daysFromNow?: number; notes?: string; status?: string }) {
   if (!opts.agentId) return;
-  const date = new Date(); date.setDate(date.getDate() + (opts.daysFromNow ?? 0));
+  // Build a date at noon UTC to avoid timezone-related day shifts
+  const now = new Date();
+  const target = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + (opts.daysFromNow ?? 0), 12, 0, 0));
   try {
     await query("INSERT INTO activities (type, subject, customer_id, lead_id, opportunity_id, agent_id, status, date, notes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
-      [opts.type, opts.subject, opts.customerId || null, opts.leadId || null, opts.opportunityId || null, opts.agentId, opts.status || 'À faire', date.toISOString(), opts.notes || null]);
+      [opts.type, opts.subject, opts.customerId || null, opts.leadId || null, opts.opportunityId || null, opts.agentId, opts.status || 'À faire', target.toISOString(), opts.notes || null]);
   } catch (e) { console.error("Auto activity create failed:", e); }
 }
 

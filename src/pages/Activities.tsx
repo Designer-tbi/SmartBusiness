@@ -105,7 +105,8 @@ export default function Activities() {
       leadId: leadId ? parseInt(leadId) : null,
       opportunityId: opportunityId ? parseInt(opportunityId) : null,
       status,
-      date,
+      // Convert local datetime-local to ISO with user's TZ to avoid day shift
+      date: date ? new Date(date).toISOString() : new Date().toISOString(),
       notes
     };
 
