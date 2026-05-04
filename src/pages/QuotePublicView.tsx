@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams } from 'react-router-dom';
-import { FileText, Check, X, Download, Printer, Mail, ShieldCheck } from 'lucide-react';
+import { FileText, Check, X, Download, Printer, Mail, ShieldCheck, CreditCard, Lock, CheckCircle2 } from 'lucide-react';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import SignatureCanvas from 'react-signature-canvas';
+import { PayPalScriptProvider, PayPalButtons } from '@paypal/react-paypal-js';
 
 export default function QuotePublicView() {
   const { id } = useParams<{ id: string }>();
@@ -12,18 +13,23 @@ export default function QuotePublicView() {
   const [error, setError] = useState<string | null>(null);
   const [signing, setSigning] = useState(false);
   const [signedBy, setSignedBy] = useState('');
+  const [paypalConfig, setPaypalConfig] = useState<{ clientId: string; mode: string } | null>(null);
+  const [processingPayment, setProcessingPayment] = useState(false);
   const sigPad = useRef<any>(null);
 
   useEffect(() => {
     const fetchQuote = async () => {
       try {
-        const response = await fetch(`/api/public/quotes/${id}`);
-        if (response.ok) {
-          const data = await response.json();
-          setQuote(data);
+        const [qRes, cfgRes] = await Promise.all([
+          fetch(`/api/public/quotes/${id}`),
+          fetch('/api/public/paypal/config')
+        ]);
+        if (qRes.ok) {
+          setQuote(await qRes.json());
         } else {
           setError("Devis introuvable ou expiré.");
         }
+        if (cfgRes.ok) setPaypalConfig(await cfgRes.json());
       } catch (err) {
         setError("Une erreur est survenue lors de la récupération du devis.");
       } finally {
@@ -32,6 +38,37 @@ export default function QuotePublicView() {
     };
     fetchQuote();
   }, [id]);
+
+  const isPaid = quote?.payment_status === 'PAID';
+
+  const handlePayPalCreateOrder = async () => {
+    setProcessingPayment(true);
+    try {
+      const r = await fetch(`/api/public/quotes/${id}/paypal/create-order`, { method: 'POST' });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || 'Erreur création commande');
+      return data.id;
+    } catch (e: any) {
+      alert('Erreur: ' + e.message);
+      setProcessingPayment(false);
+      throw e;
+    }
+  };
+
+  const handlePayPalApprove = async (data: any) => {
+    try {
+      const r = await fetch(`/api/public/quotes/${id}/paypal/capture/${data.orderID}`, { method: 'POST' });
+      const result = await r.json();
+      if (!r.ok) throw new Error(result.error || 'Capture échouée');
+      // Update local state to reflect payment
+      setQuote((prev: any) => ({ ...prev, payment_status: 'PAID', payment_id: result.transactionId, payment_amount: result.amount, payment_currency: result.currency }));
+      alert(`✅ Paiement reçu (${result.amount} ${result.currency}) ! Vous pouvez maintenant signer le devis.`);
+    } catch (e: any) {
+      alert('Erreur de capture: ' + e.message);
+    } finally {
+      setProcessingPayment(false);
+    }
+  };
 
   const handleClear = () => {
     sigPad.current?.clear();
@@ -164,7 +201,53 @@ export default function QuotePublicView() {
           </div>
         </div>
 
-        {/* Signature Section */}
+        {/* Payment Section (BEFORE signature) */}
+        {!quote.signature && quote.status !== 'Refusé' && (
+          <div className="p-8 border-t border-slate-100">
+            {isPaid ? (
+              <div className="flex items-center justify-center gap-3 p-5 bg-emerald-50 rounded-xl border border-emerald-200 mb-6">
+                <CheckCircle2 className="text-emerald-600" size={28} />
+                <div>
+                  <p className="font-bold text-emerald-800">Paiement reçu</p>
+                  <p className="text-xs text-emerald-700">
+                    {quote.payment_amount} {quote.payment_currency} encaissé via PayPal · Réf. {quote.payment_id?.substring(0, 12)}…
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="flex items-center justify-center gap-2 text-slate-700">
+                  <CreditCard size={20} />
+                  <h3 className="font-bold text-lg">Étape 1 : Régler ce devis</h3>
+                </div>
+                <p className="text-center text-sm text-slate-500 max-w-md mx-auto">
+                  Paiement sécurisé par PayPal. Carte bancaire (Visa, Mastercard, etc.) ou compte PayPal acceptés.
+                  Le montant en FCFA sera converti en EUR au taux fixe (1 EUR = 655,957 XAF).
+                </p>
+                {!paypalConfig?.clientId ? (
+                  <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl text-amber-800 text-sm text-center">
+                    Le module de paiement n'est pas encore configuré. Veuillez contacter votre commercial.
+                  </div>
+                ) : (
+                  <div className="max-w-md mx-auto">
+                    <PayPalScriptProvider options={{ clientId: paypalConfig.clientId, currency: 'EUR', intent: 'capture' }}>
+                      <PayPalButtons
+                        style={{ layout: 'vertical', shape: 'rect', color: 'gold', label: 'pay' }}
+                        createOrder={handlePayPalCreateOrder}
+                        onApprove={handlePayPalApprove}
+                        onError={(err) => { alert('Erreur PayPal: ' + (err as any).message); setProcessingPayment(false); }}
+                        onCancel={() => setProcessingPayment(false)}
+                        disabled={processingPayment}
+                      />
+                    </PayPalScriptProvider>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Signature Section (LOCKED until payment) */}
         <div className="p-8 border-t border-slate-100">
           {quote.signature ? (
             <div className="flex flex-col items-center justify-center p-6 bg-emerald-50 rounded-xl border border-emerald-100">
@@ -177,8 +260,18 @@ export default function QuotePublicView() {
             <div className="text-center p-6 bg-red-50 rounded-xl border border-red-100">
               <p className="text-red-700 font-bold">Ce devis a été refusé.</p>
             </div>
+          ) : !isPaid ? (
+            <div className="text-center p-6 bg-slate-100 rounded-xl border border-slate-200">
+              <Lock className="mx-auto text-slate-400 mb-2" size={32} />
+              <p className="text-slate-600 font-medium">Étape 2 : Signature électronique</p>
+              <p className="text-slate-400 text-xs mt-1">Veuillez d'abord effectuer le paiement pour débloquer la signature.</p>
+            </div>
           ) : (
             <div className="space-y-6">
+              <div className="flex items-center justify-center gap-2 text-slate-700 mb-2">
+                <ShieldCheck size={20} className="text-emerald-600" />
+                <h3 className="font-bold text-lg">Étape 2 : Signer le devis</h3>
+              </div>
               {!signing ? (
                 <div className="flex flex-col sm:flex-row gap-4 justify-center">
                   <button 

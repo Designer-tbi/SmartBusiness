@@ -90,6 +90,12 @@ async function ensureDbInitialized() {
       "ALTER TABLE users ADD COLUMN IF NOT EXISTS company_name TEXT",
       "ALTER TABLE users ADD COLUMN IF NOT EXISTS zone TEXT DEFAULT 'CG'",
       "ALTER TABLE products ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'XAF'",
+      "ALTER TABLE quotes ADD COLUMN IF NOT EXISTS payment_status TEXT DEFAULT 'UNPAID'",
+      "ALTER TABLE quotes ADD COLUMN IF NOT EXISTS payment_id TEXT",
+      "ALTER TABLE quotes ADD COLUMN IF NOT EXISTS payment_method TEXT",
+      "ALTER TABLE quotes ADD COLUMN IF NOT EXISTS payment_date TIMESTAMP WITH TIME ZONE",
+      "ALTER TABLE quotes ADD COLUMN IF NOT EXISTS payment_amount NUMERIC",
+      "ALTER TABLE quotes ADD COLUMN IF NOT EXISTS payment_currency TEXT",
       "CREATE TABLE IF NOT EXISTS reports (id SERIAL PRIMARY KEY, agent_id TEXT NOT NULL, agent_name TEXT NOT NULL, title TEXT NOT NULL, period_start DATE NOT NULL, period_end DATE NOT NULL, calls_count INTEGER DEFAULT 0, meetings_count INTEGER DEFAULT 0, quotes_count INTEGER DEFAULT 0, quotes_amount NUMERIC DEFAULT 0, new_leads INTEGER DEFAULT 0, new_customers INTEGER DEFAULT 0, invoices_amount NUMERIC DEFAULT 0, summary TEXT, challenges TEXT, next_actions TEXT, status TEXT DEFAULT 'submitted', created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
       "CREATE TABLE IF NOT EXISTS report_comments (id SERIAL PRIMARY KEY, report_id INTEGER NOT NULL REFERENCES reports(id) ON DELETE CASCADE, author_id TEXT NOT NULL, author_name TEXT NOT NULL, author_role TEXT NOT NULL, content TEXT NOT NULL, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
     ];
@@ -873,9 +879,123 @@ app.get("/api/public/invoices/:id", async (req, res) => {
     res.json({ ...inv, dueDate: inv.due_date, paidAt: inv.paid_at, items });
   } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
+
+// =====================================================================
+// PAYPAL INTEGRATION (REST API direct — no SDK, serverless-friendly)
+// =====================================================================
+const PAYPAL_BASE = process.env.PAYPAL_MODE === 'live'
+  ? 'https://api-m.paypal.com'
+  : 'https://api-m.sandbox.paypal.com';
+
+async function getPayPalAccessToken(): Promise<string> {
+  const id = process.env.PAYPAL_CLIENT_ID;
+  const secret = process.env.PAYPAL_CLIENT_SECRET;
+  if (!id || !secret) throw new Error('PayPal credentials not configured');
+  const auth = Buffer.from(`${id}:${secret}`).toString('base64');
+  const r = await fetch(`${PAYPAL_BASE}/v1/oauth2/token`, {
+    method: 'POST',
+    headers: { Authorization: `Basic ${auth}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'grant_type=client_credentials'
+  });
+  if (!r.ok) throw new Error('PayPal auth failed: ' + r.status);
+  const data: any = await r.json();
+  return data.access_token;
+}
+
+// Convert XAF/XOF/CDF to EUR (PayPal supported currency)
+function convertToPayPalCurrency(amount: number, currency: string): { value: string, currency: string } {
+  const rates: Record<string, number> = {
+    XAF: 655.957, // CEMAC zone — fixed peg to EUR
+    XOF: 655.957, // UEMOA zone — fixed peg to EUR
+    CDF: 2900,    // approx CDF/EUR
+    EUR: 1,
+    USD: 1.08,    // approx EUR/USD inverse
+  };
+  if (currency === 'EUR' || currency === 'USD') {
+    return { value: amount.toFixed(2), currency };
+  }
+  const rate = rates[currency] || 655.957;
+  const eurAmount = amount / rate;
+  return { value: eurAmount.toFixed(2), currency: 'EUR' };
+}
+
+// Public — Create PayPal order for a quote
+app.post("/api/public/quotes/:id/paypal/create-order", async (req, res) => {
+  const { id } = req.params;
+  try {
+    const qr = await query("SELECT * FROM quotes WHERE id = $1", [id]);
+    if (qr.rows.length === 0) return res.status(404).json({ error: "Devis introuvable" });
+    const quote = qr.rows[0];
+    if (quote.payment_status === 'PAID') return res.status(400).json({ error: "Devis déjà payé" });
+
+    const converted = convertToPayPalCurrency(Number(quote.amount), 'XAF');
+    const token = await getPayPalAccessToken();
+    const orderRes = await fetch(`${PAYPAL_BASE}/v2/checkout/orders`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        intent: 'CAPTURE',
+        purchase_units: [{
+          reference_id: `QUOTE-${id}`,
+          description: `Devis ${quote.number}`,
+          amount: { currency_code: converted.currency, value: converted.value }
+        }]
+      })
+    });
+    const order: any = await orderRes.json();
+    if (!orderRes.ok) {
+      console.error('PayPal create-order error:', order);
+      return res.status(500).json({ error: 'PayPal error: ' + (order.message || JSON.stringify(order)) });
+    }
+    res.json({ id: order.id, originalAmount: quote.amount, originalCurrency: 'XAF', paidAmount: converted.value, paidCurrency: converted.currency });
+  } catch (err: any) {
+    console.error('PayPal create-order exception:', err);
+    res.status(500).json({ error: err.message || 'Server error' });
+  }
+});
+
+// Public — Capture PayPal order (after user approves payment)
+app.post("/api/public/quotes/:id/paypal/capture/:orderId", async (req, res) => {
+  const { id, orderId } = req.params;
+  try {
+    const token = await getPayPalAccessToken();
+    const captureRes = await fetch(`${PAYPAL_BASE}/v2/checkout/orders/${orderId}/capture`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
+    });
+    const capture: any = await captureRes.json();
+    if (!captureRes.ok || capture.status !== 'COMPLETED') {
+      console.error('PayPal capture error:', capture);
+      return res.status(500).json({ error: 'Capture échouée: ' + (capture.message || capture.status) });
+    }
+    const transactionId = capture.purchase_units?.[0]?.payments?.captures?.[0]?.id || orderId;
+    const amount = capture.purchase_units?.[0]?.payments?.captures?.[0]?.amount?.value;
+    const currency = capture.purchase_units?.[0]?.payments?.captures?.[0]?.amount?.currency_code;
+    await query("UPDATE quotes SET payment_status='PAID', payment_id=$1, payment_method='PAYPAL', payment_date=CURRENT_TIMESTAMP, payment_amount=$2, payment_currency=$3, updated_at=CURRENT_TIMESTAMP WHERE id=$4",
+      [transactionId, amount, currency, id]);
+    res.json({ success: true, transactionId, amount, currency });
+  } catch (err: any) {
+    console.error('PayPal capture exception:', err);
+    res.status(500).json({ error: err.message || 'Server error' });
+  }
+});
+
+// Expose PayPal client ID to frontend (public, safe — secret stays server-side)
+app.get("/api/public/paypal/config", (req, res) => {
+  res.json({
+    clientId: process.env.PAYPAL_CLIENT_ID || '',
+    mode: process.env.PAYPAL_MODE === 'live' ? 'live' : 'sandbox'
+  });
+});
 app.post("/api/public/quotes/:id/sign", async (req, res) => {
   const { id } = req.params; const { signature, signedBy } = req.body;
   try {
+    // SECURITY: signature requires payment first
+    const qr = await query("SELECT payment_status FROM quotes WHERE id = $1", [id]);
+    if (qr.rows.length === 0) return res.status(404).json({ error: "Devis introuvable" });
+    if (qr.rows[0].payment_status !== 'PAID') {
+      return res.status(403).json({ error: "Le paiement doit être effectué avant la signature." });
+    }
     await query("UPDATE quotes SET signature=$1, signed_by=$2, signature_date=CURRENT_TIMESTAMP, status='Signé' WHERE id=$3", [signature, signedBy, id]);
     // AUTO: full chain — invoice + opportunity sync
     const invoiceId = await autoCreateInvoiceFromQuote(parseInt(id));
