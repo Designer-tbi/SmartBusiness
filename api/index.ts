@@ -783,12 +783,20 @@ app.put("/api/quotes/:id", authenticateToken, async (req, res) => {
   } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 
-app.delete("/api/quotes/:id", authenticateToken, async (req, res) => {
+app.delete("/api/quotes/:id", authenticateToken, async (req: any, res) => {
+  const { id } = req.params;
   try {
-    await query("DELETE FROM quote_items WHERE quote_id = $1", [req.params.id]);
-    await query("DELETE FROM quotes WHERE id = $1", [req.params.id]);
+    // CASCADE manuel: détacher invoices/documents puis supprimer items + quote
+    await query("UPDATE invoices SET quote_id = NULL WHERE quote_id = $1", [id]);
+    await query("UPDATE documents SET quote_id = NULL WHERE quote_id = $1", [id]);
+    await query("DELETE FROM quote_items WHERE quote_id = $1", [id]);
+    const r = await query("DELETE FROM quotes WHERE id = $1", [id]);
+    if (r.rowCount === 0) return res.status(404).json({ error: "Devis introuvable" });
     res.json({ success: true });
-  } catch (err) { res.status(500).json({ error: "Server error" }); }
+  } catch (err: any) {
+    console.error("Delete quote error:", err);
+    res.status(500).json({ error: "Erreur de suppression: " + (err.message || 'inconnue') });
+  }
 });
 
 // Convert signed quote to invoice (uses helper — idempotent)
@@ -1043,8 +1051,19 @@ app.put("/api/invoices/:id", authenticateToken, async (req: any, res) => {
     res.json({ success: true, commissionId });
   } catch (err: any) { console.error(err); res.status(500).json({ error: "Server error" }); }
 });
-app.delete("/api/invoices/:id", authenticateToken, async (req, res) => {
-  try { await query("DELETE FROM invoices WHERE id = $1", [req.params.id]); res.json({ success: true }); } catch (err) { res.status(500).json({ error: "Server error" }); }
+app.delete("/api/invoices/:id", authenticateToken, async (req: any, res) => {
+  const { id } = req.params;
+  try {
+    // CASCADE manuel: supprimer commissions liées, détacher documents, puis facture
+    await query("DELETE FROM commissions WHERE invoice_id = $1", [id]);
+    await query("UPDATE documents SET invoice_id = NULL WHERE invoice_id = $1", [id]);
+    const r = await query("DELETE FROM invoices WHERE id = $1", [id]);
+    if (r.rowCount === 0) return res.status(404).json({ error: "Facture introuvable" });
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error("Delete invoice error:", err);
+    res.status(500).json({ error: "Erreur de suppression: " + (err.message || 'inconnue') });
+  }
 });
 
 // Commissions

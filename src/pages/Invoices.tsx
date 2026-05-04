@@ -28,8 +28,10 @@ export default function Invoices() {
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm('Supprimer cette facture ?')) return;
-    await fetch(`/api/invoices/${id}`, { method: 'DELETE' }); fetchInvoices();
+    if (!confirm('Supprimer cette facture ? Les commissions liées seront aussi supprimées.')) return;
+    const r = await fetch(`/api/invoices/${id}`, { method: 'DELETE' });
+    if (r.ok) { fetchInvoices(); }
+    else { const d = await r.json().catch(() => ({})); alert('❌ ' + (d.error || 'Suppression échouée')); }
   };
 
   const handleMarkPaid = async (id: number) => {

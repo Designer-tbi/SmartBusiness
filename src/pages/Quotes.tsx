@@ -229,9 +229,11 @@ export default function Quotes() {
                       }} className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all" title="Convertir en Facture"><FileText size={16} /></button>
                     )}
                     <button onClick={async () => {
-                      if (!confirm('Supprimer ce devis ?')) return;
-                      await fetch(`/api/quotes/${q.id}`, { method: 'DELETE' }); fetchQuotes();
-                    }} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all" title="Supprimer"><Trash2 size={16} /></button>
+                      if (!confirm('Supprimer ce devis ? Les factures liées seront détachées (non supprimées).')) return;
+                      const r = await fetch(`/api/quotes/${q.id}`, { method: 'DELETE' });
+                      if (r.ok) { fetchQuotes(); }
+                      else { const d = await r.json().catch(() => ({})); alert('❌ ' + (d.error || 'Suppression échouée')); }
+                    }} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all" title="Supprimer" data-testid={`delete-quote-${q.id}`}><Trash2 size={16} /></button>
                   </div>
                 </td>
               </tr>
