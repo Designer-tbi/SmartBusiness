@@ -457,7 +457,7 @@ app.delete("/api/products/:id", authenticateToken, async (req: any, res) => {
 // Quotes
 app.get("/api/quotes", authenticateToken, async (req: any, res) => {
   try {
-    let q = 'SELECT q.*, c.name as "customerName", l.first_name || \' \' || l.last_name as "leadName", u.name as "agentName" FROM quotes q LEFT JOIN customers c ON q.customer_id = c.id LEFT JOIN leads l ON q.lead_id = l.id LEFT JOIN users u ON q.agent_id = u.uid';
+    let q = 'SELECT q.*, c.name as "customerName", c.email as "customerEmail", l.first_name || \' \' || l.last_name as "leadName", l.email as "leadEmail", u.name as "agentName" FROM quotes q LEFT JOIN customers c ON q.customer_id = c.id LEFT JOIN leads l ON q.lead_id = l.id LEFT JOIN users u ON q.agent_id = u.uid';
     let params: any[] = [];
     if (req.user.role !== 'admin' && req.user.role !== 'superadmin') { q += ' WHERE q.agent_id = $1'; params.push(req.user.uid); }
     q += ' ORDER BY q.date DESC';
@@ -491,6 +491,32 @@ app.put("/api/quotes/:id", authenticateToken, async (req, res) => {
     if (items) { await query("DELETE FROM quote_items WHERE quote_id = $1", [id]); for (const item of items) { await query("INSERT INTO quote_items (quote_id, product_id, description, quantity, unit_price, total_price) VALUES ($1,$2,$3,$4,$5,$6)", [id, item.productId === "" ? null : item.productId, item.description, item.quantity, item.unitPrice, item.totalPrice]); } }
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: "Server error" }); }
+});
+
+app.delete("/api/quotes/:id", authenticateToken, async (req, res) => {
+  try {
+    await query("DELETE FROM quote_items WHERE quote_id = $1", [req.params.id]);
+    await query("DELETE FROM quotes WHERE id = $1", [req.params.id]);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: "Server error" }); }
+});
+
+// Convert signed quote to invoice
+app.post("/api/quotes/:id/convert-to-invoice", authenticateToken, async (req: any, res) => {
+  const { id } = req.params;
+  try {
+    const qr = await query("SELECT * FROM quotes WHERE id = $1", [id]);
+    if (qr.rows.length === 0) return res.status(404).json({ error: "Quote not found" });
+    const quote = qr.rows[0];
+    const invoiceNumber = `F-${new Date().getFullYear()}-${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`;
+    const dueDate = new Date(); dueDate.setDate(dueDate.getDate() + 30);
+    const result = await query(
+      "INSERT INTO invoices (number, customer_id, quote_id, agent_id, amount, status, date, due_date) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id",
+      [invoiceNumber, quote.customer_id, parseInt(id), quote.agent_id || req.user.uid, quote.amount, 'En attente', new Date().toISOString().split('T')[0], dueDate.toISOString().split('T')[0]]
+    );
+    await query("UPDATE quotes SET status = 'Facturé', updated_at = CURRENT_TIMESTAMP WHERE id = $1", [id]);
+    res.json({ success: true, invoiceId: result.rows[0].id, invoiceNumber });
+  } catch (err: any) { console.error(err); res.status(500).json({ error: "Server error" }); }
 });
 
 // Send Quote by Email
@@ -573,7 +599,11 @@ app.get("/api/invoices", authenticateToken, async (req: any, res) => {
 });
 app.post("/api/invoices", authenticateToken, async (req: any, res) => {
   const { number, customerId, quoteId, amount, status, date, dueDate } = req.body;
-  try { res.status(201).json({ id: (await query("INSERT INTO invoices (number, customer_id, quote_id, agent_id, amount, status, date, due_date) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id", [number, customerId === "" ? null : customerId, quoteId === "" ? null : quoteId, req.user.uid, amount, status || 'En attente', date, dueDate])).rows[0].id }); } catch (err) { res.status(500).json({ error: "Server error" }); }
+  const invoiceNum = number || `F-${new Date().getFullYear()}-${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`;
+  try { res.status(201).json({ id: (await query("INSERT INTO invoices (number, customer_id, quote_id, agent_id, amount, status, date, due_date) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id", [invoiceNum, customerId === "" ? null : customerId, quoteId === "" ? null : quoteId, req.user.uid, amount || 0, status || 'En attente', date || new Date().toISOString().split('T')[0], dueDate])).rows[0].id }); } catch (err: any) { console.error(err); res.status(500).json({ error: "Server error: " + err.message }); }
+});
+app.delete("/api/invoices/:id", authenticateToken, async (req, res) => {
+  try { await query("DELETE FROM invoices WHERE id = $1", [req.params.id]); res.json({ success: true }); } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 
 // Commissions
@@ -672,6 +702,17 @@ app.delete("/api/objectives/:id", authenticateToken, async (req: any, res) => {
 // Projects
 app.get("/api/projects", authenticateToken, async (req, res) => {
   try { res.json((await query('SELECT p.*, c.name as "customerName" FROM projects p LEFT JOIN customers c ON p.customer_id = c.id ORDER BY p.created_at DESC')).rows.map(r => ({ ...r, startDate: r.start_date, endDate: r.end_date }))); } catch (err) { res.status(500).json({ error: "Server error" }); }
+});
+app.post("/api/projects", authenticateToken, async (req: any, res) => {
+  const { name, customerId, status, startDate, endDate, description } = req.body;
+  if (!name) return res.status(400).json({ error: "Name required" });
+  try {
+    const result = await query('INSERT INTO projects (name, customer_id, status, start_date, end_date, description) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *', [name, customerId || null, status || 'En cours', startDate || null, endDate || null, description || null]);
+    res.status(201).json(result.rows[0]);
+  } catch (err) { res.status(500).json({ error: "Server error" }); }
+});
+app.delete("/api/projects/:id", authenticateToken, async (req, res) => {
+  try { await query("DELETE FROM projects WHERE id = $1", [req.params.id]); res.json({ success: true }); } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 
 // Debug

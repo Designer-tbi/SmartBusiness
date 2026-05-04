@@ -215,9 +215,22 @@ export default function Quotes() {
                 <td className="px-4 py-4"><span className={`text-xs px-2.5 py-1 rounded-full font-medium ${getStatusColor(q.status)}`}>{q.status}</span></td>
                 <td className="px-4 py-4">
                   <div className="flex items-center justify-end gap-1">
-                    <button onClick={() => setEmailModal({ quoteId: q.id, customerName: q.customerName || '', customerEmail: '' })} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all" title="Envoyer par email" data-testid={`email-quote-${q.id}`}><Mail size={16} /></button>
+                    <button onClick={() => {
+                      const email = q.customerEmail || q.leadEmail || '';
+                      setEmailForm({ email, name: q.customerName || '', message: '' });
+                      setEmailModal({ quoteId: q.id, customerName: q.customerName || '', customerEmail: email });
+                    }} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all" title="Envoyer par email" data-testid={`email-quote-${q.id}`}><Mail size={16} /></button>
                     <button onClick={() => handleShareLink(q.id)} className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all" title="Lien de signature" data-testid={`share-quote-${q.id}`}><Share2 size={16} /></button>
-                    <button className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all" title="Supprimer"><Trash2 size={16} /></button>
+                    {(q.status === 'Signé' || q.status === 'Accepté') && (
+                      <button onClick={async () => {
+                        const r = await fetch(`/api/quotes/${q.id}/convert-to-invoice`, { method: 'POST' });
+                        if (r.ok) { alert('Facture créée !'); fetchQuotes(); } else { alert('Erreur'); }
+                      }} className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all" title="Convertir en Facture"><FileText size={16} /></button>
+                    )}
+                    <button onClick={async () => {
+                      if (!confirm('Supprimer ce devis ?')) return;
+                      await fetch(`/api/quotes/${q.id}`, { method: 'DELETE' }); fetchQuotes();
+                    }} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all" title="Supprimer"><Trash2 size={16} /></button>
                   </div>
                 </td>
               </tr>
@@ -278,13 +291,13 @@ export default function Quotes() {
                     </div>
                     {recipientType === 'customer' ? (
                       <select required value={formData.customerId} onChange={e => setFormData({ ...formData, customerId: e.target.value, leadId: '' })}
-                        className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none">
+                        className="w-full px-4 py-3 bg-white text-slate-900 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none">
                         <option value="">Choisir un client...</option>
                         {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                       </select>
                     ) : (
                       <select required value={formData.leadId} onChange={e => setFormData({ ...formData, leadId: e.target.value, customerId: '' })}
-                        className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none">
+                        className="w-full px-4 py-3 bg-white text-slate-900 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none">
                         <option value="">Choisir un prospect...</option>
                         {leads.filter(l => l.status !== 'Converti').map(l => (
                           <option key={l.id} value={l.id}>{l.type === 'company' ? l.companyName : `${l.firstName || ''} ${l.lastName || ''}`.trim() || `Prospect #${l.id}`}</option>
