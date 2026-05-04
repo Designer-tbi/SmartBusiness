@@ -13,6 +13,32 @@
 - `admin` — full access except deactivating superadmin
 - `agent` — sees only own data (customers, leads, quotes, invoices, commissions, objectives)
 
+### CRM Automation Chain — FULL SYNC (Feb 2026)
+**Pipeline auto-synchronisé sur tous les modules :**
+
+| Évènement | Conséquence automatique |
+|---|---|
+| Lead → statut **Qualifié** | ➜ Opportunité créée (stage='Découverte', proba=20%) + Activité "Qualifier" J+1 |
+| Lead → statut **Converti** | ➜ Client créé (héritage email/tel/adresse) + Opportunités liées rattachées + Activité "Onboarding" J+2 |
+| Client créé manuellement | ➜ Activité "Onboarding" RDV J+2 |
+| Devis **Signé** (admin ou public) | ➜ Lead converti (si applicable) ➜ Facture créée ➜ Opportunité = "Gagné" (proba=100%) ➜ Activité "Préparer mise en œuvre" J+1 |
+| Devis **Refusé** | ➜ Opportunité = "Perdu" + Activité "Relance commerciale" J+7 |
+| Facture **Payée** | ➜ Commission 20% créée pour l'agent |
+| Facture en attente après due_date | ➜ Statut auto = "En retard" (calculé sur GET /api/invoices) |
+| Objectif atteint (current ≥ target) | ➜ Statut auto = "Atteint" |
+| Objectif expiré (end_date passé, non atteint) | ➜ Statut auto = "Échoué" |
+
+**Helpers centralisés** (`/app/api/index.ts`) :
+- `autoCreateInvoiceFromQuote(quoteId)` — idempotent
+- `autoCreateCommissionFromInvoice(invoiceId)` — idempotent
+- `autoConvertLeadToCustomer(leadId)` — crée client + active onboarding
+- `autoCreateOpportunityFromLead(leadId, agentId)` — idempotent
+- `autoSyncOpportunityFromQuote(quoteId, status)` — gère gagné/perdu
+- `createActivity(opts)` — programme activités automatiques
+
+**Constantes globales** :
+- `COMMISSION_RATE = 20` (taux unique modifiable)
+
 ## Implemented (Feb 2026)
 ### CRM Automation Chain — NEW
 - **Devis Signé** (PUT admin ou public sign) → **Facture créée automatiquement** (statut "En attente")

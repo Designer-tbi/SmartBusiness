@@ -431,7 +431,12 @@ app.get("/api/customers", authenticateToken, async (req: any, res) => {
 app.post("/api/customers", authenticateToken, async (req: any, res) => {
   const { type, firstName, lastName, companyName, email, phone, address, city, industry } = req.body;
   const name = type === 'company' ? companyName : `${firstName} ${lastName}`;
-  try { res.status(201).json((await query('INSERT INTO customers (type, first_name, last_name, company_name, name, email, phone, address, city, industry, agent_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id, type, first_name as "firstName", last_name as "lastName", company_name as "companyName", name, email, phone, address, city, industry, created_at as "createdAt"', [type || 'individual', firstName, lastName, companyName, name, email, phone, address, city, industry, req.user.uid])).rows[0]); } catch (err) { res.status(500).json({ error: "Server error" }); }
+  try {
+    const created = (await query('INSERT INTO customers (type, first_name, last_name, company_name, name, email, phone, address, city, industry, agent_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id, type, first_name as "firstName", last_name as "lastName", company_name as "companyName", name, email, phone, address, city, industry, created_at as "createdAt"', [type || 'individual', firstName, lastName, companyName, name, email, phone, address, city, industry, req.user.uid])).rows[0];
+    // AUTO: schedule onboarding RDV
+    await createActivity({ type: 'RDV', subject: `Onboarding: ${name}`, agentId: req.user.uid, customerId: created.id, daysFromNow: 2, notes: 'Premier RDV de prise en main avec le nouveau client.' });
+    res.status(201).json(created);
+  } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 app.put("/api/customers/:id", authenticateToken, async (req, res) => {
   const { id } = req.params; const { type, firstName, lastName, companyName, email, phone, address, city, industry } = req.body;
@@ -465,12 +470,23 @@ app.post("/api/leads", authenticateToken, async (req: any, res) => {
     res.status(201).json(result.rows[0]);
   } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
-app.put("/api/leads/:id", authenticateToken, async (req, res) => {
+app.put("/api/leads/:id", authenticateToken, async (req: any, res) => {
   const { id } = req.params; const { type, firstName, lastName, companyName, email, phone, source, status, notes, address, city } = req.body;
   try {
-    const result = await query('UPDATE leads SET type=$1, first_name=$2, last_name=$3, company_name=$4, email=$5, phone=$6, source=$7, status=$8, notes=$9, address=$10, city=$11, updated_at=CURRENT_TIMESTAMP WHERE id=$12 RETURNING id, type, first_name as "firstName", last_name as "lastName", company_name as "companyName", email, phone, source, status, notes, address, city, updated_at as "updatedAt"', [type, firstName, lastName, companyName, email, phone, source, status, notes, address, city, id]);
+    const result = await query('UPDATE leads SET type=$1, first_name=$2, last_name=$3, company_name=$4, email=$5, phone=$6, source=$7, status=$8, notes=$9, address=$10, city=$11, updated_at=CURRENT_TIMESTAMP WHERE id=$12 RETURNING id, type, first_name as "firstName", last_name as "lastName", company_name as "companyName", email, phone, source, status, notes, address, city, agent_id as "agentId", updated_at as "updatedAt"', [type, firstName, lastName, companyName, email, phone, source, status, notes, address, city, id]);
     if (result.rows.length === 0) return res.status(404).json({ error: "Lead not found" });
-    res.json(result.rows[0]);
+    const lead = result.rows[0];
+    let opportunityId: number | null = null;
+    // AUTO: status='Qualifié' → create opportunity
+    if (status === 'Qualifié') {
+      opportunityId = await autoCreateOpportunityFromLead(parseInt(id), lead.agentId || req.user.uid);
+    }
+    // AUTO: status='Converti' → create customer (and link opportunity)
+    let customerId: number | null = null;
+    if (status === 'Converti') {
+      customerId = await autoConvertLeadToCustomer(parseInt(id));
+    }
+    res.json({ ...lead, autoOpportunityId: opportunityId, autoCustomerId: customerId });
   } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 app.delete("/api/leads/:id", authenticateToken, async (req, res) => {
@@ -541,6 +557,16 @@ app.post("/api/catalogues", authenticateToken, async (req: any, res) => {
 // =====================================================================
 const COMMISSION_RATE = 20; // Taux par défaut: 20%
 
+// Helper: create scheduled activity for an agent
+async function createActivity(opts: { type: string; subject: string; agentId: string | null; customerId?: number | null; leadId?: number | null; opportunityId?: number | null; daysFromNow?: number; notes?: string; status?: string }) {
+  if (!opts.agentId) return;
+  const date = new Date(); date.setDate(date.getDate() + (opts.daysFromNow ?? 0));
+  try {
+    await query("INSERT INTO activities (type, subject, customer_id, lead_id, opportunity_id, agent_id, status, date, notes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+      [opts.type, opts.subject, opts.customerId || null, opts.leadId || null, opts.opportunityId || null, opts.agentId, opts.status || 'À faire', date.toISOString(), opts.notes || null]);
+  } catch (e) { console.error("Auto activity create failed:", e); }
+}
+
 // Auto-create invoice from a signed quote (idempotent: skip if quote already has an invoice)
 async function autoCreateInvoiceFromQuote(quoteId: number) {
   const existing = await query("SELECT id FROM invoices WHERE quote_id = $1", [quoteId]);
@@ -548,18 +574,24 @@ async function autoCreateInvoiceFromQuote(quoteId: number) {
   const qr = await query("SELECT * FROM quotes WHERE id = $1", [quoteId]);
   if (qr.rows.length === 0) return null;
   const quote = qr.rows[0];
-  if (!quote.customer_id) return null; // need a customer to invoice
+  let customerId = quote.customer_id;
+  // If quote was issued to a Lead, auto-convert lead to customer first
+  if (!customerId && quote.lead_id) {
+    customerId = await autoConvertLeadToCustomer(quote.lead_id);
+    if (customerId) await query("UPDATE quotes SET customer_id = $1, lead_id = NULL WHERE id = $2", [customerId, quoteId]);
+  }
+  if (!customerId) return null;
   const invoiceNumber = `F-${new Date().getFullYear()}-${Date.now().toString().slice(-5)}`;
   const dueDate = new Date(); dueDate.setDate(dueDate.getDate() + 30);
   const r = await query(
     "INSERT INTO invoices (number, customer_id, quote_id, agent_id, amount, status, date, due_date) VALUES ($1,$2,$3,$4,$5,'En attente',$6,$7) RETURNING id",
-    [invoiceNumber, quote.customer_id, quoteId, quote.agent_id, quote.amount, new Date().toISOString().split('T')[0], dueDate.toISOString().split('T')[0]]
+    [invoiceNumber, customerId, quoteId, quote.agent_id, quote.amount, new Date().toISOString().split('T')[0], dueDate.toISOString().split('T')[0]]
   );
   await query("UPDATE quotes SET status = 'Facturé', updated_at = CURRENT_TIMESTAMP WHERE id = $1", [quoteId]);
   return r.rows[0].id;
 }
 
-// Auto-create commission when an invoice is paid (idempotent: skip if commission exists)
+// Auto-create commission when an invoice is paid (idempotent)
 async function autoCreateCommissionFromInvoice(invoiceId: number) {
   const existing = await query("SELECT id FROM commissions WHERE invoice_id = $1", [invoiceId]);
   if (existing.rows.length > 0) return existing.rows[0].id;
@@ -573,6 +605,62 @@ async function autoCreateCommissionFromInvoice(invoiceId: number) {
     [inv.agent_id, invoiceId, amount, COMMISSION_RATE, new Date().toISOString().split('T')[0]]
   );
   return r.rows[0].id;
+}
+
+// Auto-convert lead to customer (returns customerId)
+async function autoConvertLeadToCustomer(leadId: number): Promise<number | null> {
+  const lr = await query("SELECT * FROM leads WHERE id = $1", [leadId]);
+  if (lr.rows.length === 0) return null;
+  const lead = lr.rows[0];
+  const name = lead.type === 'company' ? lead.company_name : `${lead.first_name || ''} ${lead.last_name || ''}`.trim();
+  const cr = await query(
+    "INSERT INTO customers (type, first_name, last_name, company_name, name, email, phone, address, city, industry, agent_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'Non spécifié',$10) RETURNING id",
+    [lead.type, lead.first_name, lead.last_name, lead.company_name, name, lead.email, lead.phone, lead.address, lead.city, lead.agent_id]
+  );
+  const customerId = cr.rows[0].id;
+  await query("UPDATE leads SET status='Converti', updated_at=CURRENT_TIMESTAMP WHERE id=$1", [leadId]);
+  await query("UPDATE opportunities SET customer_id=$1, lead_id=NULL WHERE lead_id=$2", [customerId, leadId]);
+  // Welcome activity for the agent
+  await createActivity({ type: 'RDV', subject: `Onboarding nouveau client: ${name}`, agentId: lead.agent_id, customerId, daysFromNow: 2, notes: `Client converti depuis le prospect #${leadId}` });
+  return customerId;
+}
+
+// Auto-create opportunity from qualified lead (idempotent: skip if opportunity already linked)
+async function autoCreateOpportunityFromLead(leadId: number, agentId: string | null): Promise<number | null> {
+  const existing = await query("SELECT id FROM opportunities WHERE lead_id = $1", [leadId]);
+  if (existing.rows.length > 0) return existing.rows[0].id;
+  const lr = await query("SELECT * FROM leads WHERE id = $1", [leadId]);
+  if (lr.rows.length === 0) return null;
+  const lead = lr.rows[0];
+  const name = lead.type === 'company' ? lead.company_name : `${lead.first_name || ''} ${lead.last_name || ''}`.trim();
+  const closeDate = new Date(); closeDate.setMonth(closeDate.getMonth() + 2);
+  const r = await query(
+    "INSERT INTO opportunities (lead_id, title, amount, stage, probability, expected_close_date) VALUES ($1,$2,$3,'Découverte',20,$4) RETURNING id",
+    [leadId, `Opportunité - ${name}`, 0, closeDate.toISOString().split('T')[0]]
+  );
+  const oppId = r.rows[0].id;
+  await createActivity({ type: 'Appel', subject: `Qualifier l'opportunité: ${name}`, agentId, leadId, opportunityId: oppId, daysFromNow: 1 });
+  return oppId;
+}
+
+// Auto-update opportunity when quote signed/refused
+async function autoSyncOpportunityFromQuote(quoteId: number, quoteStatus: string) {
+  const qr = await query("SELECT customer_id, lead_id, agent_id FROM quotes WHERE id = $1", [quoteId]);
+  if (qr.rows.length === 0) return;
+  const q = qr.rows[0];
+  // Find linked opportunity by customer_id or lead_id
+  let oppRes;
+  if (q.customer_id) oppRes = await query("SELECT id FROM opportunities WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 1", [q.customer_id]);
+  else if (q.lead_id) oppRes = await query("SELECT id FROM opportunities WHERE lead_id = $1 ORDER BY created_at DESC LIMIT 1", [q.lead_id]);
+  if (!oppRes || oppRes.rows.length === 0) return;
+  const oppId = oppRes.rows[0].id;
+  if (quoteStatus === 'Signé' || quoteStatus === 'Accepté') {
+    await query("UPDATE opportunities SET stage='Gagné', probability=100, updated_at=CURRENT_TIMESTAMP WHERE id=$1", [oppId]);
+    await createActivity({ type: 'Tâche', subject: `Devis signé — préparer la mise en œuvre`, agentId: q.agent_id, customerId: q.customer_id, opportunityId: oppId, daysFromNow: 1, status: 'À faire' });
+  } else if (quoteStatus === 'Refusé') {
+    await query("UPDATE opportunities SET stage='Perdu', probability=0, updated_at=CURRENT_TIMESTAMP WHERE id=$1", [oppId]);
+    await createActivity({ type: 'Appel', subject: `Relance commerciale après refus de devis`, agentId: q.agent_id, customerId: q.customer_id, opportunityId: oppId, daysFromNow: 7, status: 'À faire', notes: 'Comprendre le refus et proposer une alternative.' });
+  }
 }
 
 // Products
@@ -653,10 +741,13 @@ app.put("/api/quotes/:id", authenticateToken, async (req, res) => {
   try {
     await query("UPDATE quotes SET amount=$1, status=$2, date=$3, expiry_date=$4, notes=$5, updated_at=CURRENT_TIMESTAMP WHERE id=$6", [amount, status, date, expiryDate, notes, id]);
     if (items) { await query("DELETE FROM quote_items WHERE quote_id = $1", [id]); for (const item of items) { await query("INSERT INTO quote_items (quote_id, product_id, description, quantity, unit_price, total_price) VALUES ($1,$2,$3,$4,$5,$6)", [id, item.productId === "" ? null : item.productId, item.description, item.quantity, item.unitPrice, item.totalPrice]); } }
-    // AUTO: create invoice if status becomes 'Signé' or 'Accepté'
+    // AUTO: sync linked opportunity + invoice on Signé/Refusé
     let invoiceId = null;
     if (status === 'Signé' || status === 'Accepté') {
       invoiceId = await autoCreateInvoiceFromQuote(parseInt(id));
+      await autoSyncOpportunityFromQuote(parseInt(id), status);
+    } else if (status === 'Refusé') {
+      await autoSyncOpportunityFromQuote(parseInt(id), status);
     }
     res.json({ success: true, invoiceId });
   } catch (err) { res.status(500).json({ error: "Server error" }); }
@@ -745,8 +836,9 @@ app.post("/api/public/quotes/:id/sign", async (req, res) => {
   const { id } = req.params; const { signature, signedBy } = req.body;
   try {
     await query("UPDATE quotes SET signature=$1, signed_by=$2, signature_date=CURRENT_TIMESTAMP, status='Signé' WHERE id=$3", [signature, signedBy, id]);
-    // AUTO: create invoice on signature
+    // AUTO: full chain — invoice + opportunity sync
     const invoiceId = await autoCreateInvoiceFromQuote(parseInt(id));
+    await autoSyncOpportunityFromQuote(parseInt(id), 'Signé');
     res.json({ success: true, invoiceId });
   } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
@@ -754,6 +846,8 @@ app.post("/api/public/quotes/:id/sign", async (req, res) => {
 // Invoices
 app.get("/api/invoices", authenticateToken, async (req: any, res) => {
   try {
+    // AUTO: mark unpaid invoices past due_date as 'En retard'
+    await query("UPDATE invoices SET status = 'En retard', updated_at = CURRENT_TIMESTAMP WHERE status = 'En attente' AND due_date IS NOT NULL AND due_date < CURRENT_DATE");
     let q = 'SELECT i.*, c.name as "customerName", u.name as "agentName" FROM invoices i LEFT JOIN customers c ON i.customer_id = c.id LEFT JOIN users u ON i.agent_id = u.uid';
     let params: any[] = [];
     if (req.user.role !== 'admin' && req.user.role !== 'superadmin') { q += ' WHERE i.agent_id = $1'; params.push(req.user.uid); }
@@ -861,7 +955,18 @@ app.get("/api/objectives/stats", authenticateToken, async (req: any, res) => {
       else if (type === 'calls') { currentValue = (await query("SELECT COUNT(*) as count FROM activities WHERE agent_id=$1 AND type='Appel' AND date BETWEEN $2 AND $3", [agent_id, start_date, end_date])).rows[0].count || 0; }
       else if (type === 'meetings') { currentValue = (await query("SELECT COUNT(*) as count FROM activities WHERE agent_id=$1 AND type='RDV' AND date BETWEEN $2 AND $3", [agent_id, start_date, end_date])).rows[0].count || 0; }
       else if (type === 'quotes') { currentValue = (await query("SELECT COUNT(*) as count FROM quotes WHERE agent_id=$1 AND date BETWEEN $2 AND $3", [agent_id, start_date, end_date])).rows[0].count || 0; }
-      return { ...obj, currentValue };
+      // AUTO: update status if target reached or expired
+      const numCurrent = Number(currentValue);
+      const numTarget = Number(obj.target_value);
+      let newStatus = obj.status;
+      if (numCurrent >= numTarget && obj.status !== 'Atteint') {
+        newStatus = 'Atteint';
+        await query("UPDATE objectives SET status='Atteint', updated_at=CURRENT_TIMESTAMP WHERE id=$1", [obj.id]);
+      } else if (new Date(end_date) < new Date() && numCurrent < numTarget && obj.status === 'En cours') {
+        newStatus = 'Échoué';
+        await query("UPDATE objectives SET status='Échoué', updated_at=CURRENT_TIMESTAMP WHERE id=$1", [obj.id]);
+      }
+      return { ...obj, currentValue: numCurrent, status: newStatus };
     }));
     res.json(stats);
   } catch (err) { res.status(500).json({ error: "Server error" }); }
