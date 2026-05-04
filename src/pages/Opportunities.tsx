@@ -2,8 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { Target, Plus, Search, Trash2, Edit2, Filter, DollarSign, Calendar, TrendingUp, UserCheck, UserPlus } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
+import { formatCurrency, getCurrencyLabel } from '../lib/countryConfig';
 
 export default function Opportunities() {
+  const { profile } = useAuth();
+  const userZone = (profile as any)?.zone;
   const [opportunities, setOpportunities] = useState<any[]>([]);
   const [customers, setCustomers] = useState<any[]>([]);
   const [leads, setLeads] = useState<any[]>([]);
@@ -217,14 +221,14 @@ export default function Opportunities() {
             <DollarSign size={20} className="text-indigo-600" />
             <span className="text-sm font-medium">Valeur Totale</span>
           </div>
-          <div className="text-2xl font-bold text-slate-900">{totalValue.toLocaleString()} FCFA</div>
+          <div className="text-2xl font-bold text-slate-900">{formatCurrency(totalValue, userZone)}</div>
         </div>
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
           <div className="flex items-center gap-3 text-slate-500 mb-2">
             <TrendingUp size={20} className="text-emerald-600" />
             <span className="text-sm font-medium">Valeur Pondérée</span>
           </div>
-          <div className="text-2xl font-bold text-slate-900">{weightedValue.toLocaleString()} FCFA</div>
+          <div className="text-2xl font-bold text-slate-900">{formatCurrency(weightedValue, userZone)}</div>
         </div>
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
           <div className="flex items-center gap-3 text-slate-500 mb-2">
@@ -295,7 +299,7 @@ export default function Opportunities() {
                     )}
                   </td>
                   <td className="px-6 py-4">
-                    <div className="font-semibold text-slate-900">{opp.amount.toLocaleString()} FCFA</div>
+                    <div className="font-semibold text-slate-900">{formatCurrency(opp.amount, userZone)}</div>
                   </td>
                   <td className="px-6 py-4">
                     <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${getStageColor(opp.stage)}`}>
@@ -440,7 +444,7 @@ export default function Opportunities() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Montant (FCFA)</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Montant ({getCurrencyLabel(userZone)})</label>
                   <input
                     type="number"
                     required

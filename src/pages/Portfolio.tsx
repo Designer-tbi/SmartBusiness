@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import MapView from '../components/MapView';
 import { useAuth } from '../contexts/AuthContext';
 import { getZoneConfig } from '../lib/countryConfig';
+import PhoneInput from '../components/PhoneInput';
 
 interface Category {
   id: number;
@@ -465,11 +466,10 @@ export default function Portfolio() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1.5">Téléphone</label>
-                <input
-                  type="text"
+                <PhoneInput
                   value={newItem.tel}
-                  onChange={(e) => setNewItem({...newItem, tel: e.target.value})}
-                  className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+                  onChange={(v) => setNewItem({...newItem, tel: v})}
+                  zone={(profile as any)?.zone}
                 />
               </div>
               <div>

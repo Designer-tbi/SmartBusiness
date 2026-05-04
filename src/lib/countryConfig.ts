@@ -82,3 +82,20 @@ export function getZoneConfig(zone?: string | null): ZoneConfig {
   if (!zone) return ZONE_CONFIG.CG;
   return ZONE_CONFIG[zone as ZoneCode] || ZONE_CONFIG.CG;
 }
+
+// Format an amount with the user's currency (e.g. "150 000 FCFA")
+export function formatCurrency(amount: number | string | null | undefined, zone?: string | null): string {
+  const cfg = getZoneConfig(zone);
+  const num = Number(amount || 0);
+  const formatted = num.toLocaleString('fr-FR');
+  // Display labels: XAF/XOF -> "FCFA", CDF -> "FC", EUR -> "€", USD -> "$"
+  const label: Record<string, string> = { XAF: 'FCFA', XOF: 'FCFA', CDF: 'FC', EUR: '€', USD: '$' };
+  return `${formatted} ${label[cfg.currency] || cfg.currency}`;
+}
+
+// Get the currency display label only (e.g. "FCFA", "FC", "€")
+export function getCurrencyLabel(zone?: string | null): string {
+  const cfg = getZoneConfig(zone);
+  const label: Record<string, string> = { XAF: 'FCFA', XOF: 'FCFA', CDF: 'FC', EUR: '€', USD: '$' };
+  return label[cfg.currency] || cfg.currency;
+}

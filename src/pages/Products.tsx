@@ -63,7 +63,7 @@ export default function Products() {
         </div>
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
           <div className="flex items-center gap-3 text-slate-500 mb-2"><Tag size={20} className="text-emerald-600" /><span className="text-sm font-medium">Valeur Stock</span></div>
-          <div className="text-2xl font-bold text-slate-900">{totalValue.toLocaleString()} FCFA</div>
+          <div className="text-2xl font-bold text-slate-900">{Number(totalValue || 0).toLocaleString('fr-FR')}</div>
         </div>
       </div>
 

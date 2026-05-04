@@ -3,6 +3,7 @@ import { format } from 'date-fns';
 import { Users, Plus, Building2, User, Search, Trash2, Edit2 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { getZoneConfig } from '../lib/countryConfig';
+import PhoneInput from '../components/PhoneInput';
 
 export default function Customers() {
   const { profile } = useAuth();
@@ -375,21 +376,7 @@ export default function Customers() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1.5">Téléphone *</label>
-                  <div className="flex gap-2">
-                    <select className="w-28 px-2 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 outline-none text-sm">
-                      <option value="+242">+242 CG</option>
-                      <option value="+237">+237 CM</option>
-                      <option value="+241">+241 GA</option>
-                      <option value="+235">+235 TD</option>
-                      <option value="+236">+236 CF</option>
-                      <option value="+240">+240 GQ</option>
-                      <option value="+225">+225 CI</option>
-                      <option value="+221">+221 SN</option>
-                      <option value="+33">+33 FR</option>
-                      <option value="+1">+1 US</option>
-                    </select>
-                    <input type="tel" required value={phone} onChange={(e) => setPhone(e.target.value)} className="flex-1 px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all" placeholder="06 XXX XX XX" />
-                  </div>
+                  <PhoneInput value={phone} onChange={setPhone} required zone={(profile as any)?.zone} />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1.5">Email</label>

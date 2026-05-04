@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Receipt, Plus, Search, Trash2, Filter, DollarSign, CheckCircle2, Clock, X, Save, Eye, FileText, User, Calendar as CalIcon } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
-import { getZoneConfig } from '../lib/countryConfig';
+import { getZoneConfig, formatCurrency } from '../lib/countryConfig';
 
 export default function Invoices() {
   const { profile } = useAuth();
@@ -87,9 +87,9 @@ export default function Invoices() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm"><div className="flex items-center gap-3 text-slate-500 mb-2"><CheckCircle2 size={20} className="text-emerald-600" /><span className="text-sm font-medium">Encaissé</span></div><div className="text-2xl font-bold text-slate-900">{paid.toLocaleString()} FCFA</div></div>
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm"><div className="flex items-center gap-3 text-slate-500 mb-2"><Clock size={20} className="text-blue-600" /><span className="text-sm font-medium">En attente</span></div><div className="text-2xl font-bold text-slate-900">{pending.toLocaleString()} FCFA</div></div>
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm"><div className="flex items-center gap-3 text-slate-500 mb-2"><Clock size={20} className="text-red-600" /><span className="text-sm font-medium">En retard</span></div><div className="text-2xl font-bold text-slate-900">{overdue.toLocaleString()} FCFA</div></div>
+        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm"><div className="flex items-center gap-3 text-slate-500 mb-2"><CheckCircle2 size={20} className="text-emerald-600" /><span className="text-sm font-medium">Encaissé</span></div><div className="text-2xl font-bold text-slate-900">{formatCurrency(paid, (profile as any)?.zone)}</div></div>
+        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm"><div className="flex items-center gap-3 text-slate-500 mb-2"><Clock size={20} className="text-blue-600" /><span className="text-sm font-medium">En attente</span></div><div className="text-2xl font-bold text-slate-900">{formatCurrency(pending, (profile as any)?.zone)}</div></div>
+        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm"><div className="flex items-center gap-3 text-slate-500 mb-2"><Clock size={20} className="text-red-600" /><span className="text-sm font-medium">En retard</span></div><div className="text-2xl font-bold text-slate-900">{formatCurrency(overdue, (profile as any)?.zone)}</div></div>
       </div>
 
       <div className="flex flex-col md:flex-row items-center gap-4 bg-white p-4 rounded-xl shadow-sm border border-slate-200">
@@ -105,7 +105,7 @@ export default function Invoices() {
               <tr key={i.id} className="hover:bg-slate-50/50" data-testid={`invoice-row-${i.id}`}>
                 <td className="px-6 py-3 font-medium text-slate-800">{i.number}</td>
                 <td className="px-4 py-3 text-slate-600">{i.customerName || 'N/A'}</td>
-                <td className="px-4 py-3 font-bold text-slate-800">{Number(i.amount).toLocaleString()} FCFA</td>
+                <td className="px-4 py-3 font-bold text-slate-800">{formatCurrency(i.amount, (profile as any)?.zone)}</td>
                 <td className="px-4 py-3 text-slate-500 hidden md:table-cell">{i.date ? new Date(i.date).toLocaleDateString('fr-FR') : '-'}</td>
                 <td className="px-4 py-3"><span className={`text-xs px-2.5 py-1 rounded-full font-medium ${i.status === 'Payée' ? 'bg-emerald-100 text-emerald-700' : i.status === 'En retard' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>{i.status}</span></td>
                 <td className="px-4 py-3 text-right">
