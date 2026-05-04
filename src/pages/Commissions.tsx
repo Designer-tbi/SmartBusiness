@@ -18,7 +18,7 @@ export default function Commissions() {
     agentId: '',
     invoiceId: '',
     amount: '',
-    rate: '10',
+    rate: '20',
     status: 'En attente',
     date: format(new Date(), 'yyyy-MM-dd')
   });
@@ -73,7 +73,7 @@ export default function Commissions() {
           agentId: '',
           invoiceId: '',
           amount: '',
-          rate: '10',
+          rate: '20',
           status: 'En attente',
           date: format(new Date(), 'yyyy-MM-dd')
         });

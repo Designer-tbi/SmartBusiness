@@ -32,6 +32,18 @@ export default function Invoices() {
     await fetch(`/api/invoices/${id}`, { method: 'DELETE' }); fetchInvoices();
   };
 
+  const handleMarkPaid = async (id: number) => {
+    if (!confirm('Marquer cette facture comme payée ? Une commission de 20% sera créée automatiquement.')) return;
+    const r = await fetch(`/api/invoices/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'Payée' }) });
+    if (r.ok) {
+      const d = await r.json();
+      alert(d.commissionId ? '✅ Facture payée + commission 20% créée' : '✅ Facture marquée comme payée');
+      fetchInvoices();
+    } else {
+      alert('Erreur');
+    }
+  };
+
   const filteredInvoices = invoices.filter(i => {
     const matchesSearch = (i.number || '').toLowerCase().includes(searchTerm.toLowerCase()) || (i.customerName || '').toLowerCase().includes(searchTerm.toLowerCase());
     const matchesStatus = statusFilter === 'all' || i.status === statusFilter;
@@ -73,7 +85,14 @@ export default function Invoices() {
                 <td className="px-4 py-3 font-bold text-slate-800">{Number(i.amount).toLocaleString()} FCFA</td>
                 <td className="px-4 py-3 text-slate-500 hidden md:table-cell">{i.date ? new Date(i.date).toLocaleDateString('fr-FR') : '-'}</td>
                 <td className="px-4 py-3"><span className={`text-xs px-2.5 py-1 rounded-full font-medium ${i.status === 'Payée' ? 'bg-emerald-100 text-emerald-700' : i.status === 'En retard' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>{i.status}</span></td>
-                <td className="px-4 py-3 text-right"><button onClick={() => handleDelete(i.id)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg"><Trash2 size={16} /></button></td>
+                <td className="px-4 py-3 text-right">
+                  <div className="flex items-center justify-end gap-1">
+                    {i.status !== 'Payée' && (
+                      <button onClick={() => handleMarkPaid(i.id)} title="Marquer comme payée (commission 20%)" className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg" data-testid={`mark-paid-${i.id}`}><CheckCircle2 size={16} /></button>
+                    )}
+                    <button onClick={() => handleDelete(i.id)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg"><Trash2 size={16} /></button>
+                  </div>
+                </td>
               </tr>
             ))}
             {filteredInvoices.length === 0 && <tr><td colSpan={6} className="text-center py-12 text-slate-400">Aucune facture</td></tr>}

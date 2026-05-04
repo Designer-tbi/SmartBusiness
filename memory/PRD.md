@@ -14,6 +14,14 @@
 - `agent` — sees only own data (customers, leads, quotes, invoices, commissions, objectives)
 
 ## Implemented (Feb 2026)
+### CRM Automation Chain — NEW
+- **Devis Signé** (PUT admin ou public sign) → **Facture créée automatiquement** (statut "En attente")
+- **Facture marquée Payée** (PUT `/api/invoices/:id`) → **Commission 20% créée automatiquement**
+- Idempotent : pas de doublon si invoice/commission existe déjà
+- Helpers centralisés : `autoCreateInvoiceFromQuote()`, `autoCreateCommissionFromInvoice()`
+- Constante `COMMISSION_RATE = 20` (modifiable globalement)
+- Bouton "✓ Marquer comme payée" sur chaque facture déclenche auto-commission
+
 ### Foundation
 - Vercel serverless deployment via `api/index.ts`
 - Auto DB init + admin seeding (eden@tbi-center.fr / loub@ki2014D)

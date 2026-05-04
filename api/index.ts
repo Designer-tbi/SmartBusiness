@@ -536,6 +536,45 @@ app.post("/api/catalogues", authenticateToken, async (req: any, res) => {
   try { res.status(201).json((await query("INSERT INTO catalogues (name, description, is_active) VALUES ($1, $2, $3) RETURNING *", [req.body.name, req.body.description, req.body.is_active !== undefined ? req.body.is_active : 1])).rows[0]); } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 
+// =====================================================================
+// CRM AUTOMATION HELPERS — chaine de synchronisation CRM
+// =====================================================================
+const COMMISSION_RATE = 20; // Taux par défaut: 20%
+
+// Auto-create invoice from a signed quote (idempotent: skip if quote already has an invoice)
+async function autoCreateInvoiceFromQuote(quoteId: number) {
+  const existing = await query("SELECT id FROM invoices WHERE quote_id = $1", [quoteId]);
+  if (existing.rows.length > 0) return existing.rows[0].id;
+  const qr = await query("SELECT * FROM quotes WHERE id = $1", [quoteId]);
+  if (qr.rows.length === 0) return null;
+  const quote = qr.rows[0];
+  if (!quote.customer_id) return null; // need a customer to invoice
+  const invoiceNumber = `F-${new Date().getFullYear()}-${Date.now().toString().slice(-5)}`;
+  const dueDate = new Date(); dueDate.setDate(dueDate.getDate() + 30);
+  const r = await query(
+    "INSERT INTO invoices (number, customer_id, quote_id, agent_id, amount, status, date, due_date) VALUES ($1,$2,$3,$4,$5,'En attente',$6,$7) RETURNING id",
+    [invoiceNumber, quote.customer_id, quoteId, quote.agent_id, quote.amount, new Date().toISOString().split('T')[0], dueDate.toISOString().split('T')[0]]
+  );
+  await query("UPDATE quotes SET status = 'Facturé', updated_at = CURRENT_TIMESTAMP WHERE id = $1", [quoteId]);
+  return r.rows[0].id;
+}
+
+// Auto-create commission when an invoice is paid (idempotent: skip if commission exists)
+async function autoCreateCommissionFromInvoice(invoiceId: number) {
+  const existing = await query("SELECT id FROM commissions WHERE invoice_id = $1", [invoiceId]);
+  if (existing.rows.length > 0) return existing.rows[0].id;
+  const ir = await query("SELECT * FROM invoices WHERE id = $1", [invoiceId]);
+  if (ir.rows.length === 0) return null;
+  const inv = ir.rows[0];
+  if (!inv.agent_id) return null;
+  const amount = Math.round(Number(inv.amount) * COMMISSION_RATE / 100);
+  const r = await query(
+    "INSERT INTO commissions (agent_id, invoice_id, amount, rate, status, date) VALUES ($1,$2,$3,$4,'En attente',$5) RETURNING id",
+    [inv.agent_id, invoiceId, amount, COMMISSION_RATE, new Date().toISOString().split('T')[0]]
+  );
+  return r.rows[0].id;
+}
+
 // Products
 // Products (filtered by user zone/currency)
 app.get("/api/products", authenticateToken, async (req: any, res) => {
@@ -614,7 +653,12 @@ app.put("/api/quotes/:id", authenticateToken, async (req, res) => {
   try {
     await query("UPDATE quotes SET amount=$1, status=$2, date=$3, expiry_date=$4, notes=$5, updated_at=CURRENT_TIMESTAMP WHERE id=$6", [amount, status, date, expiryDate, notes, id]);
     if (items) { await query("DELETE FROM quote_items WHERE quote_id = $1", [id]); for (const item of items) { await query("INSERT INTO quote_items (quote_id, product_id, description, quantity, unit_price, total_price) VALUES ($1,$2,$3,$4,$5,$6)", [id, item.productId === "" ? null : item.productId, item.description, item.quantity, item.unitPrice, item.totalPrice]); } }
-    res.json({ success: true });
+    // AUTO: create invoice if status becomes 'Signé' or 'Accepté'
+    let invoiceId = null;
+    if (status === 'Signé' || status === 'Accepté') {
+      invoiceId = await autoCreateInvoiceFromQuote(parseInt(id));
+    }
+    res.json({ success: true, invoiceId });
   } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 
@@ -626,21 +670,14 @@ app.delete("/api/quotes/:id", authenticateToken, async (req, res) => {
   } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 
-// Convert signed quote to invoice
+// Convert signed quote to invoice (uses helper — idempotent)
 app.post("/api/quotes/:id/convert-to-invoice", authenticateToken, async (req: any, res) => {
   const { id } = req.params;
   try {
-    const qr = await query("SELECT * FROM quotes WHERE id = $1", [id]);
-    if (qr.rows.length === 0) return res.status(404).json({ error: "Quote not found" });
-    const quote = qr.rows[0];
-    const invoiceNumber = `F-${new Date().getFullYear()}-${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`;
-    const dueDate = new Date(); dueDate.setDate(dueDate.getDate() + 30);
-    const result = await query(
-      "INSERT INTO invoices (number, customer_id, quote_id, agent_id, amount, status, date, due_date) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id",
-      [invoiceNumber, quote.customer_id, parseInt(id), quote.agent_id || req.user.uid, quote.amount, 'En attente', new Date().toISOString().split('T')[0], dueDate.toISOString().split('T')[0]]
-    );
-    await query("UPDATE quotes SET status = 'Facturé', updated_at = CURRENT_TIMESTAMP WHERE id = $1", [id]);
-    res.json({ success: true, invoiceId: result.rows[0].id, invoiceNumber });
+    const invoiceId = await autoCreateInvoiceFromQuote(parseInt(id));
+    if (!invoiceId) return res.status(400).json({ error: "Devis non convertible (client manquant ou devis inexistant)" });
+    const inv = await query("SELECT number FROM invoices WHERE id = $1", [invoiceId]);
+    res.json({ success: true, invoiceId, invoiceNumber: inv.rows[0]?.number });
   } catch (err: any) { console.error(err); res.status(500).json({ error: "Server error" }); }
 });
 
@@ -708,7 +745,9 @@ app.post("/api/public/quotes/:id/sign", async (req, res) => {
   const { id } = req.params; const { signature, signedBy } = req.body;
   try {
     await query("UPDATE quotes SET signature=$1, signed_by=$2, signature_date=CURRENT_TIMESTAMP, status='Signé' WHERE id=$3", [signature, signedBy, id]);
-    res.json({ success: true });
+    // AUTO: create invoice on signature
+    const invoiceId = await autoCreateInvoiceFromQuote(parseInt(id));
+    res.json({ success: true, invoiceId });
   } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 
@@ -726,6 +765,28 @@ app.post("/api/invoices", authenticateToken, async (req: any, res) => {
   const { number, customerId, quoteId, amount, status, date, dueDate } = req.body;
   const invoiceNum = number || `F-${new Date().getFullYear()}-${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`;
   try { res.status(201).json({ id: (await query("INSERT INTO invoices (number, customer_id, quote_id, agent_id, amount, status, date, due_date) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id", [invoiceNum, customerId === "" ? null : customerId, quoteId === "" ? null : quoteId, req.user.uid, amount || 0, status || 'En attente', date || new Date().toISOString().split('T')[0], dueDate])).rows[0].id }); } catch (err: any) { console.error(err); res.status(500).json({ error: "Server error: " + err.message }); }
+});
+app.put("/api/invoices/:id", authenticateToken, async (req: any, res) => {
+  const { id } = req.params;
+  const { status, amount, dueDate } = req.body;
+  try {
+    const cur = await query("SELECT status FROM invoices WHERE id = $1", [id]);
+    if (cur.rows.length === 0) return res.status(404).json({ error: "Invoice not found" });
+    const wasPaid = cur.rows[0].status === 'Payée';
+    const becomesPaid = status === 'Payée';
+    const paidAt = becomesPaid && !wasPaid ? new Date().toISOString() : null;
+    if (paidAt) {
+      await query("UPDATE invoices SET status=$1, amount=COALESCE($2, amount), due_date=COALESCE($3, due_date), paid_at=$4, updated_at=CURRENT_TIMESTAMP WHERE id=$5", [status, amount, dueDate, paidAt, id]);
+    } else {
+      await query("UPDATE invoices SET status=COALESCE($1, status), amount=COALESCE($2, amount), due_date=COALESCE($3, due_date), updated_at=CURRENT_TIMESTAMP WHERE id=$4", [status, amount, dueDate, id]);
+    }
+    // AUTO: create commission when invoice becomes Payée
+    let commissionId = null;
+    if (becomesPaid && !wasPaid) {
+      commissionId = await autoCreateCommissionFromInvoice(parseInt(id));
+    }
+    res.json({ success: true, commissionId });
+  } catch (err: any) { console.error(err); res.status(500).json({ error: "Server error" }); }
 });
 app.delete("/api/invoices/:id", authenticateToken, async (req, res) => {
   try { await query("DELETE FROM invoices WHERE id = $1", [req.params.id]); res.json({ success: true }); } catch (err) { res.status(500).json({ error: "Server error" }); }
@@ -1170,14 +1231,14 @@ app.post("/api/admin/seed-demo", authenticateToken, async (req: any, res) => {
     }
     summary.objectives = objCount;
 
-    // 12) Commissions (5% on paid invoices)
+    // 12) Commissions (20% on paid invoices)
     let cmCount = 0;
     for (const [idx, q] of quotes.entries()) {
       if (q.status !== 'Signé') continue;
       const invIndex = invoiceIds.findIndex((_, i) => i === cmCount);
       if (invIndex < 0) break;
       const date = new Date(); date.setDate(date.getDate() + q.days + 10);
-      const rate = 5;
+      const rate = 20;
       const amt = Math.round(q.amount * rate / 100);
       await query("INSERT INTO commissions (agent_id, invoice_id, amount, rate, status, date) VALUES ($1,$2,$3,$4,$5,$6)",
         [agentUids[q.agent], invoiceIds[invIndex], amt, rate, idx % 2 === 0 ? 'Payé' : 'En attente', date.toISOString().split('T')[0]]);
