@@ -63,9 +63,11 @@ export default function Objectives() {
   const [startDate, setStartDate] = useState(format(new Date(), 'yyyy-MM-01'));
   const [endDate, setEndDate] = useState(format(new Date(), 'yyyy-MM-dd'));
 
+  const isAdmin = profile?.role === 'admin' || profile?.role === 'superadmin';
+
   useEffect(() => {
     fetchData();
-    if (profile?.role === 'admin') {
+    if (isAdmin) {
       fetchUsers();
     }
   }, [profile]);
@@ -196,13 +198,14 @@ export default function Objectives() {
           <h1 className="text-2xl font-bold text-slate-900">Objectifs & Performance</h1>
           <p className="text-slate-500">Suivez vos indicateurs clés et dépassez vos limites</p>
         </div>
-        {profile?.role === 'admin' && (
+        {isAdmin && (
           <button
             onClick={() => {
               setEditingObjective(null);
               resetForm();
               setShowModal(true);
             }}
+            data-testid="new-objective-btn"
             className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-200"
           >
             <Plus size={20} />
@@ -342,7 +345,7 @@ export default function Objectives() {
                               {progress}% atteint
                             </p>
                           </div>
-                          {profile?.role === 'admin' && (
+                          {isAdmin && (
                             <div className="flex gap-1">
                               <button 
                                 onClick={() => handleDelete(obj.id)}

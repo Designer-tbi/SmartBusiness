@@ -21,6 +21,7 @@ interface PortfolioItem {
   fax?: string;
   mail?: string;
   web?: string;
+  niu?: string;
   created_at: string;
 }
 

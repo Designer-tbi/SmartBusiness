@@ -64,7 +64,7 @@ export default function Calls() {
   useEffect(() => {
     if (showModal) {
       fetchCustomers();
-      if (profile?.role === 'admin') {
+      if (profile?.role === 'admin' || profile?.role === 'superadmin') {
         fetchAgents();
       }
     }
@@ -225,7 +225,7 @@ export default function Calls() {
                 </select>
               </div>
 
-              {profile?.role === 'admin' && (
+              {(profile?.role === 'admin' || profile?.role === 'superadmin') && (
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1.5">Agent Assigné</label>
                   <select

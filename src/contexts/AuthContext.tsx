@@ -4,7 +4,7 @@ export interface UserProfile {
   uid: string;
   email: string;
   name: string;
-  role: 'admin' | 'agent';
+  role: 'admin' | 'agent' | 'superadmin';
   createdAt: string;
 }
 

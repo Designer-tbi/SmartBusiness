@@ -259,7 +259,7 @@ export default function Catalog() {
             {isPreviewMode ? "Mode Édition" : "Prévisualiser"}
           </button>
           
-          {profile?.role === 'admin' && !isPreviewMode && (
+          {(profile?.role === 'admin' || profile?.role === 'superadmin') && !isPreviewMode && (
             <div className="flex items-center gap-2">
               <button
                 onClick={() => setShowCatalogModal(true)}

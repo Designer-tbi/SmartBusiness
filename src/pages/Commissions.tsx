@@ -6,6 +6,7 @@ import { useAuth } from '../contexts/AuthContext';
 
 export default function Commissions() {
   const { profile } = useAuth();
+  const isAdmin = profile?.role === 'admin' || profile?.role === 'superadmin';
   const [commissions, setCommissions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -24,7 +25,7 @@ export default function Commissions() {
 
   useEffect(() => {
     fetchCommissions();
-    if (profile?.role === 'admin') {
+    if (isAdmin) {
       fetchData();
     }
   }, [profile]);
@@ -122,14 +123,15 @@ export default function Commissions() {
         <div>
           <h2 className="text-2xl font-bold text-slate-800">Commissions</h2>
           <p className="text-slate-500 text-sm">
-            {profile?.role === 'admin' 
+            {isAdmin
               ? 'Suivi des commissions sur ventes par agent' 
               : 'Consultez vos commissions et leur statut de paiement'}
           </p>
         </div>
-        {profile?.role === 'admin' && (
+        {isAdmin && (
           <button 
             onClick={() => setShowModal(true)}
+            data-testid="new-commission-btn"
             className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition-all shadow-sm"
           >
             <Plus size={20} />
@@ -180,19 +182,19 @@ export default function Commissions() {
           <table className="w-full text-left text-sm text-slate-600">
             <thead className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200">
               <tr>
-                {profile?.role === 'admin' && <th className="px-6 py-4">Agent</th>}
+                {isAdmin && <th className="px-6 py-4">Agent</th>}
                 <th className="px-6 py-4">Facture</th>
                 <th className="px-6 py-4">Taux</th>
                 <th className="px-6 py-4">Montant</th>
                 <th className="px-6 py-4">Statut</th>
                 <th className="px-6 py-4">Date</th>
-                {profile?.role === 'admin' && <th className="px-6 py-4">Actions</th>}
+                {isAdmin && <th className="px-6 py-4">Actions</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200">
               {filteredCommissions.map((comm) => (
                 <tr key={comm.id} className="hover:bg-slate-50 transition-colors">
-                  {profile?.role === 'admin' && <td className="px-6 py-4 text-slate-900 font-medium">{comm.agentName}</td>}
+                  {isAdmin && <td className="px-6 py-4 text-slate-900 font-medium">{comm.agentName}</td>}
                   <td className="px-6 py-4 text-indigo-600 font-medium">{comm.invoiceNumber || 'Vente directe'}</td>
                   <td className="px-6 py-4">{comm.rate}%</td>
                   <td className="px-6 py-4 font-semibold text-slate-900">{Number(comm.amount).toLocaleString()} FCFA</td>
@@ -202,7 +204,7 @@ export default function Commissions() {
                     </span>
                   </td>
                   <td className="px-6 py-4">{format(new Date(comm.date), 'dd MMM yyyy', { locale: fr })}</td>
-                  {profile?.role === 'admin' && (
+                  {isAdmin && (
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-2">
                         {comm.status === 'En attente' ? (
@@ -227,7 +229,7 @@ export default function Commissions() {
               ))}
               {filteredCommissions.length === 0 && (
                 <tr>
-                  <td colSpan={profile?.role === 'admin' ? 7 : 5} className="px-6 py-12 text-center text-slate-400 italic">
+                  <td colSpan={isAdmin ? 7 : 5} className="px-6 py-12 text-center text-slate-400 italic">
                     Aucune commission trouvée.
                   </td>
                 </tr>
