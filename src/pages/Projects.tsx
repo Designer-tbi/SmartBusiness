@@ -1,121 +1,81 @@
 import React, { useState, useEffect } from 'react';
-import { Briefcase, Plus, Search, Trash2, Edit2, Filter, Calendar, Clock, CheckCircle2, AlertCircle } from 'lucide-react';
-import { format } from 'date-fns';
-import { fr } from 'date-fns/locale';
+import { FolderKanban, Plus, Trash2, X, Save, Calendar } from 'lucide-react';
 
 export default function Projects() {
   const [projects, setProjects] = useState<any[]>([]);
+  const [customers, setCustomers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState('');
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({ name: '', customerId: '', status: 'En cours', startDate: '', endDate: '', description: '' });
 
-  useEffect(() => {
-    const fetchProjects = async () => {
-      try {
-        const response = await fetch('/api/projects');
-        if (response.ok) {
-          const data = await response.json();
-          setProjects(data);
-        }
-      } catch (err) {
-        console.error("Error fetching projects:", err);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchProjects();
-  }, []);
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'Terminé': return 'bg-emerald-100 text-emerald-800';
-      case 'En cours': return 'bg-blue-100 text-blue-800';
-      case 'En attente': return 'bg-slate-100 text-slate-800';
-      case 'Annulé': return 'bg-red-100 text-red-800';
-      default: return 'bg-slate-100 text-slate-800';
-    }
+  const fetchData = async () => {
+    try {
+      const [p, c] = await Promise.all([fetch('/api/projects'), fetch('/api/customers')]);
+      if (p.ok) setProjects(await p.json());
+      if (c.ok) setCustomers(await c.json());
+    } catch (e) {} finally { setLoading(false); }
   };
 
-  const filteredProjects = projects.filter(p => {
-    return p.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-           (p.customerName && p.customerName.toLowerCase().includes(searchTerm.toLowerCase()));
-  });
+  useEffect(() => { fetchData(); }, []);
 
-  if (loading) return <div className="flex h-screen items-center justify-center">Chargement...</div>;
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const r = await fetch('/api/projects', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) });
+      if (r.ok) { setShowForm(false); setForm({ name: '', customerId: '', status: 'En cours', startDate: '', endDate: '', description: '' }); fetchData(); }
+    } catch (e) {}
+  };
+
+  const handleDelete = async (id: number) => {
+    if (!confirm('Supprimer ce projet ?')) return;
+    await fetch(`/api/projects/${id}`, { method: 'DELETE' }); fetchData();
+  };
+
+  if (loading) return <div className="flex h-64 items-center justify-center text-slate-400">Chargement...</div>;
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-800">Projets</h2>
-          <p className="text-slate-500 text-sm">Suivi et gestion des projets clients</p>
-        </div>
-        <button className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition-all shadow-sm">
-          <Plus size={20} />
-          Nouveau Projet
-        </button>
+    <div className="space-y-6" data-testid="projects-page">
+      <div className="flex justify-between items-center">
+        <div><h2 className="text-2xl font-bold text-slate-800">Projets</h2><p className="text-slate-500 text-sm">{projects.length} projet{projects.length > 1 ? 's' : ''}</p></div>
+        <button onClick={() => setShowForm(true)} data-testid="new-project-btn" className="flex items-center gap-2 bg-indigo-600 text-white px-5 py-2.5 rounded-xl hover:bg-indigo-700 font-medium shadow-sm"><Plus size={20} /> Nouveau Projet</button>
       </div>
 
-      <div className="flex flex-col md:flex-row items-center gap-4 bg-white p-4 rounded-xl shadow-sm border border-slate-200">
-        <div className="relative flex-1 w-full">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-          <input
-            type="text"
-            placeholder="Rechercher un projet..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
-          />
-        </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {projects.map(p => (
+          <div key={p.id} className="bg-white rounded-xl border border-slate-200 shadow-sm p-5" data-testid={`project-card-${p.id}`}>
+            <div className="flex justify-between items-start mb-3">
+              <div><p className="font-bold text-slate-800">{p.name}</p><p className="text-xs text-slate-400">{p.customerName || 'Pas de client'}</p></div>
+              <button onClick={() => handleDelete(p.id)} className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg"><Trash2 size={16} /></button>
+            </div>
+            <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${p.status === 'Terminé' ? 'bg-emerald-100 text-emerald-700' : p.status === 'En pause' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}`}>{p.status}</span>
+            {p.description && <p className="text-sm text-slate-500 mt-3 line-clamp-2">{p.description}</p>}
+            {(p.startDate || p.endDate) && <p className="text-xs text-slate-400 mt-2 flex items-center gap-1"><Calendar size={12} />{p.startDate ? new Date(p.startDate).toLocaleDateString('fr-FR') : '?'} → {p.endDate ? new Date(p.endDate).toLocaleDateString('fr-FR') : '?'}</p>}
+          </div>
+        ))}
+        {projects.length === 0 && <div className="col-span-3 text-center py-16 text-slate-400">Aucun projet</div>}
       </div>
 
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm text-slate-600">
-            <thead className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200">
-              <tr>
-                <th className="px-6 py-4">Nom du Projet</th>
-                <th className="px-6 py-4">Client</th>
-                <th className="px-6 py-4">Statut</th>
-                <th className="px-6 py-4">Date Début</th>
-                <th className="px-6 py-4">Date Fin</th>
-                <th className="px-6 py-4">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-200">
-              {filteredProjects.map((project) => (
-                <tr key={project.id} className="hover:bg-slate-50 transition-colors">
-                  <td className="px-6 py-4 text-slate-900 font-medium">{project.name}</td>
-                  <td className="px-6 py-4 text-slate-700">{project.customerName || 'N/A'}</td>
-                  <td className="px-6 py-4">
-                    <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(project.status)}`}>
-                      {project.status}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4">{project.startDate ? format(new Date(project.startDate), 'dd MMM yyyy', { locale: fr }) : '-'}</td>
-                  <td className="px-6 py-4">{project.endDate ? format(new Date(project.endDate), 'dd MMM yyyy', { locale: fr }) : '-'}</td>
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-2">
-                      <button className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all">
-                        <Edit2 size={16} />
-                      </button>
-                      <button className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all">
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {filteredProjects.length === 0 && (
-                <tr>
-                  <td colSpan={6} className="px-6 py-8 text-center text-slate-500">
-                    Aucun projet trouvé.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+      {showForm && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg" data-testid="project-form-modal">
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center"><h3 className="text-lg font-bold text-slate-800">Nouveau Projet</h3><button onClick={() => setShowForm(false)} className="p-1.5 hover:bg-slate-100 rounded-lg"><X size={20} className="text-slate-400" /></button></div>
+            <form onSubmit={handleSubmit} className="p-6 space-y-4">
+              <div><label className="block text-sm font-medium text-slate-700 mb-1">Nom du projet *</label><input required value={form.name} onChange={e => setForm({...form, name: e.target.value})} placeholder="Ex: Refonte site web" className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 outline-none" /></div>
+              <div><label className="block text-sm font-medium text-slate-700 mb-1">Client</label><select value={form.customerId} onChange={e => setForm({...form, customerId: e.target.value})} className="w-full px-4 py-3 bg-white text-slate-900 border border-slate-200 rounded-xl outline-none"><option value="">Aucun client</option>{customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
+              <div><label className="block text-sm font-medium text-slate-700 mb-1">Statut</label><select value={form.status} onChange={e => setForm({...form, status: e.target.value})} className="w-full px-4 py-3 border border-slate-200 rounded-xl outline-none"><option>En cours</option><option>En pause</option><option>Terminé</option><option>Annulé</option></select></div>
+              <div className="grid grid-cols-2 gap-4">
+                <div><label className="block text-sm font-medium text-slate-700 mb-1">Date début</label><input type="date" value={form.startDate} onChange={e => setForm({...form, startDate: e.target.value})} className="w-full px-4 py-3 border border-slate-200 rounded-xl outline-none" /></div>
+                <div><label className="block text-sm font-medium text-slate-700 mb-1">Date fin</label><input type="date" value={form.endDate} onChange={e => setForm({...form, endDate: e.target.value})} className="w-full px-4 py-3 border border-slate-200 rounded-xl outline-none" /></div>
+              </div>
+              <div><label className="block text-sm font-medium text-slate-700 mb-1">Description</label><textarea rows={3} value={form.description} onChange={e => setForm({...form, description: e.target.value})} placeholder="Description..." className="w-full px-4 py-3 border border-slate-200 rounded-xl outline-none resize-none" /></div>
+              <div className="flex gap-3 pt-4 border-t border-slate-100">
+                <button type="button" onClick={() => setShowForm(false)} className="flex-1 px-4 py-3 border border-slate-200 rounded-xl text-slate-600 font-medium hover:bg-slate-50">Annuler</button>
+                <button type="submit" className="flex-1 px-4 py-3 bg-indigo-600 text-white rounded-xl font-medium hover:bg-indigo-700 flex items-center justify-center gap-2"><Save size={18} /> Créer</button>
+              </div>
+            </form>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
