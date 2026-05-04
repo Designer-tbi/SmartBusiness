@@ -8,6 +8,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell,
   PieChart, Pie, Legend
 } from 'recharts';
+import { formatCurrency } from '../lib/countryConfig';
 
 const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#0ea5e9'];
 
@@ -32,6 +33,7 @@ function StatCard({ icon: Icon, label, value, accent, hint }: { icon: any, label
 
 function AgentDashboard({ profile }: { profile: any }) {
   const [stats, setStats] = useState<any>(null);
+  const userZone = profile?.zone;
 
   useEffect(() => {
     fetch('/api/stats/agent').then(r => r.ok ? r.json() : null).then(setStats);
@@ -60,17 +62,17 @@ function AgentDashboard({ profile }: { profile: any }) {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard icon={DollarSign} label="CA encaissé" value={`${formatNumber(stats.revenue.paid)}`} accent="bg-emerald-500" hint={`${stats.revenue.invoicesPaid} facture(s) payée(s)`} />
-        <StatCard icon={FileSignature} label="Devis signés" value={stats.quotes.signed} accent="bg-indigo-500" hint={`${formatNumber(stats.quotes.signedAmount)} de chiffre signé`} />
+        <StatCard icon={DollarSign} label="CA encaissé" value={formatCurrency(stats.revenue.paid, userZone)} accent="bg-emerald-500" hint={`${stats.revenue.invoicesPaid} facture(s) payée(s)`} />
+        <StatCard icon={FileSignature} label="Devis signés" value={stats.quotes.signed} accent="bg-indigo-500" hint={`${formatCurrency(stats.quotes.signedAmount, userZone)} signés`} />
         <StatCard icon={TrendingUp} label="Taux conversion" value={`${stats.quotes.conversionRate}%`} accent="bg-amber-500" hint={`${stats.quotes.signed}/${stats.quotes.total} devis`} />
-        <StatCard icon={Briefcase} label="Pipeline" value={stats.pipeline.opportunities} accent="bg-violet-500" hint={`${formatNumber(stats.pipeline.opportunitiesValue)} en cours`} />
+        <StatCard icon={Briefcase} label="Pipeline" value={stats.pipeline.opportunities} accent="bg-violet-500" hint={`${formatCurrency(stats.pipeline.opportunitiesValue, userZone)} en cours`} />
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard icon={PhoneCall} label="Appels" value={stats.activities['Appel'] || 0} accent="bg-blue-500" />
         <StatCard icon={CalendarIcon} label="RDV / Réunions" value={(stats.activities['RDV'] || 0) + (stats.activities['Réunion'] || 0)} accent="bg-cyan-500" />
         <StatCard icon={Users} label="Mes prospects" value={stats.pipeline.leads} accent="bg-pink-500" hint={`${stats.pipeline.leadsConverted} convertis`} />
-        <StatCard icon={Target} label="Commissions" value={`${formatNumber(stats.commissions.total)}`} accent="bg-orange-500" hint={`${formatNumber(stats.commissions.paid)} payées`} />
+        <StatCard icon={Target} label="Commissions" value={formatCurrency(stats.commissions.total, userZone)} accent="bg-orange-500" hint={`${formatCurrency(stats.commissions.paid, userZone)} payées`} />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -122,6 +124,8 @@ function AgentDashboard({ profile }: { profile: any }) {
 function AdminDashboard() {
   const [overview, setOverview] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  // Admin sees the aggregate as displayed by each agent's zone — we use the dominant zone or just FCFA
+  // For simplicity, use the connected user's zone as base for currency display.
 
   useEffect(() => {
     fetch('/api/stats/agents-overview')
@@ -141,7 +145,7 @@ function AdminDashboard() {
   return (
     <div className="space-y-6" data-testid="admin-dashboard">
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard icon={DollarSign} label="CA total équipe" value={formatNumber(totalRevenue)} accent="bg-emerald-500" hint={`${overview.length} agent(s)`} />
+        <StatCard icon={DollarSign} label="CA total équipe" value={formatNumber(totalRevenue)} accent="bg-emerald-500" hint={`${overview.length} agent(s) · multi-devises`} />
         <StatCard icon={FileSignature} label="Devis signés" value={totalSigned} accent="bg-indigo-500" />
         <StatCard icon={TrendingUp} label="Conversion moyenne" value={`${avgConv}%`} accent="bg-amber-500" />
         <StatCard icon={PhoneCall} label="Appels totaux" value={totalCalls} accent="bg-blue-500" />
@@ -184,7 +188,7 @@ function AdminDashboard() {
                   <p className="font-medium text-slate-800 truncate">{a.name}</p>
                   <p className="text-xs text-slate-500">{a.zone || '—'} · {a.conversionRate}% conv.</p>
                 </div>
-                <p className="font-bold text-emerald-600 text-sm">{formatNumber(a.revenue)}</p>
+                <p className="font-bold text-emerald-600 text-sm">{formatCurrency(a.revenue, a.zone)}</p>
               </div>
             ))}
           </div>
@@ -218,7 +222,7 @@ function AdminDashboard() {
                   <td className="px-5 py-3 text-slate-500">
                     <span className="px-2 py-0.5 bg-slate-100 rounded text-xs">{a.zone || '—'}</span>
                   </td>
-                  <td className="px-5 py-3 text-right font-bold text-emerald-600">{formatNumber(a.revenue)}</td>
+                  <td className="px-5 py-3 text-right font-bold text-emerald-600">{formatCurrency(a.revenue, a.zone)}</td>
                   <td className="px-5 py-3 text-right">{a.quotesSigned} / {a.quotesTotal}</td>
                   <td className="px-5 py-3 text-right">
                     <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${a.conversionRate >= 50 ? 'bg-emerald-100 text-emerald-700' : a.conversionRate >= 25 ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-700'}`}>{a.conversionRate}%</span>

@@ -1,7 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { BarChart3, TrendingUp, DollarSign, Users, Target } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
+import { formatCurrency } from '../lib/countryConfig';
 
 export default function SalesAnalysis() {
+  const { profile } = useAuth();
+  const userZone = (profile as any)?.zone;
   const [stats, setStats] = useState({ revenue: 0, avgDeal: 0, newCustomers: 0, conversionRate: 0 });
   const [loading, setLoading] = useState(true);
 
@@ -40,11 +44,11 @@ export default function SalesAnalysis() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
           <div className="flex items-center gap-2 text-sm text-slate-500 mb-2"><DollarSign size={18} className="text-emerald-600" /> Chiffre d'Affaires</div>
-          <div className="text-2xl font-bold text-slate-900">{stats.revenue.toLocaleString()} FCFA</div>
+          <div className="text-2xl font-bold text-slate-900">{formatCurrency(stats.revenue, userZone)}</div>
         </div>
         <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
           <div className="flex items-center gap-2 text-sm text-slate-500 mb-2"><BarChart3 size={18} className="text-blue-600" /> Panier Moyen</div>
-          <div className="text-2xl font-bold text-slate-900">{Math.round(stats.avgDeal).toLocaleString()} FCFA</div>
+          <div className="text-2xl font-bold text-slate-900">{formatCurrency(Math.round(stats.avgDeal), userZone)}</div>
         </div>
         <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
           <div className="flex items-center gap-2 text-sm text-slate-500 mb-2"><Users size={18} className="text-indigo-600" /> Nouveaux Clients</div>

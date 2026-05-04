@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { FileText, Plus, Eye, Download, MessageSquare, Send, X, Clock, CheckCircle, AlertCircle, ChevronDown, BarChart3, Phone, Users, Target, DollarSign, Calendar } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { formatCurrency, getCurrencyLabel } from '../lib/countryConfig';
 
 interface Report {
   id: number; agent_id: string; agent_name: string; title: string;
@@ -15,6 +16,7 @@ interface Comment { id: number; author_name: string; author_role: string; conten
 
 export default function ReportsPage() {
   const { profile } = useAuth();
+  const userZone = (profile as any)?.zone;
   const isAdmin = profile?.role === 'admin' || profile?.role === 'superadmin';
   const [reports, setReports] = useState<Report[]>([]);
   const [loading, setLoading] = useState(true);
@@ -81,7 +83,7 @@ export default function ReportsPage() {
   };
 
   const downloadReport = (r: Report) => {
-    const text = `RAPPORT D'ACTIVITÉ\n${'='.repeat(40)}\n\nAgent: ${r.agent_name}\nTitre: ${r.title}\nPériode: ${r.period_start} au ${r.period_end}\nDate: ${new Date(r.created_at).toLocaleDateString('fr-FR')}\n\nSTATISTIQUES\n${'-'.repeat(20)}\nAppels: ${r.calls_count}\nRéunions: ${r.meetings_count}\nDevis: ${r.quotes_count} (${Number(r.quotes_amount).toLocaleString()} FCFA)\nNouveaux leads: ${r.new_leads}\nNouveaux clients: ${r.new_customers}\nFacturation: ${Number(r.invoices_amount).toLocaleString()} FCFA\n\nRÉSUMÉ\n${'-'.repeat(20)}\n${r.summary || 'N/A'}\n\nDIFFICULTÉS\n${'-'.repeat(20)}\n${r.challenges || 'N/A'}\n\nACTIONS À VENIR\n${'-'.repeat(20)}\n${r.next_actions || 'N/A'}`;
+    const text = `RAPPORT D'ACTIVITÉ\n${'='.repeat(40)}\n\nAgent: ${r.agent_name}\nTitre: ${r.title}\nPériode: ${r.period_start} au ${r.period_end}\nDate: ${new Date(r.created_at).toLocaleDateString('fr-FR')}\n\nSTATISTIQUES\n${'-'.repeat(20)}\nAppels: ${r.calls_count}\nRéunions: ${r.meetings_count}\nDevis: ${r.quotes_count} (${formatCurrency(r.quotes_amount, userZone)})\nNouveaux leads: ${r.new_leads}\nNouveaux clients: ${r.new_customers}\nFacturation: ${formatCurrency(r.invoices_amount, userZone)}\n\nRÉSUMÉ\n${'-'.repeat(20)}\n${r.summary || 'N/A'}\n\nDIFFICULTÉS\n${'-'.repeat(20)}\n${r.challenges || 'N/A'}\n\nACTIONS À VENIR\n${'-'.repeat(20)}\n${r.next_actions || 'N/A'}`;
     const blob = new Blob([text], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = `rapport_${r.agent_name.replace(/\s/g, '_')}_${r.period_start}.txt`; a.click();
@@ -125,7 +127,7 @@ export default function ReportsPage() {
                   <div className="flex gap-3 text-xs text-slate-500">
                     <span>{r.calls_count} appels</span>
                     <span>{r.quotes_count} devis</span>
-                    <span>{Number(r.invoices_amount).toLocaleString()} FCFA</span>
+                    <span>{formatCurrency(r.invoices_amount, userZone)}</span>
                   </div>
                 </td>
                 <td className="px-4 py-4">
@@ -173,10 +175,10 @@ export default function ReportsPage() {
                     { label: 'Appels effectués', key: 'callsCount', icon: Phone },
                     { label: 'Réunions / RDV', key: 'meetingsCount', icon: Users },
                     { label: 'Devis envoyés', key: 'quotesCount', icon: Target },
-                    { label: 'Montant devis (FCFA)', key: 'quotesAmount', icon: DollarSign },
+                    { label: `Montant devis (${getCurrencyLabel(userZone)})`, key: 'quotesAmount', icon: DollarSign },
                     { label: 'Nouveaux leads', key: 'newLeads', icon: Users },
                     { label: 'Nouveaux clients', key: 'newCustomers', icon: Users },
-                    { label: 'Facturation (FCFA)', key: 'invoicesAmount', icon: DollarSign },
+                    { label: `Facturation (${getCurrencyLabel(userZone)})`, key: 'invoicesAmount', icon: DollarSign },
                   ].map(({ label, key, icon: Icon }) => (
                     <div key={key}>
                       <label className="block text-xs font-medium text-slate-500 mb-1 flex items-center gap-1"><Icon className="w-3 h-3" />{label}</label>
@@ -233,8 +235,8 @@ export default function ReportsPage() {
                   { label: 'Devis', value: viewReport.quotes_count, color: 'text-indigo-600 bg-indigo-50' },
                   { label: 'Leads', value: viewReport.new_leads, color: 'text-amber-600 bg-amber-50' },
                   { label: 'Clients', value: viewReport.new_customers, color: 'text-emerald-600 bg-emerald-50' },
-                  { label: 'Montant devis', value: `${Number(viewReport.quotes_amount).toLocaleString()} FCFA`, color: 'text-cyan-600 bg-cyan-50' },
-                  { label: 'Facturation', value: `${Number(viewReport.invoices_amount).toLocaleString()} FCFA`, color: 'text-green-600 bg-green-50' },
+                  { label: 'Montant devis', value: formatCurrency(viewReport.quotes_amount, userZone), color: 'text-cyan-600 bg-cyan-50' },
+                  { label: 'Facturation', value: formatCurrency(viewReport.invoices_amount, userZone), color: 'text-green-600 bg-green-50' },
                 ].map(({ label, value, color }) => (
                   <div key={label} className={`p-3 rounded-xl ${color}`}>
                     <p className="text-xs font-medium opacity-75">{label}</p>
