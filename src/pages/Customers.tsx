@@ -1,8 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { format } from 'date-fns';
 import { Users, Plus, Building2, User, Search, Trash2, Edit2 } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
+import { getZoneConfig } from '../lib/countryConfig';
 
 export default function Customers() {
+  const { profile } = useAuth();
+  const zoneCfg = getZoneConfig((profile as any)?.zone);
   const [customers, setCustomers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -400,8 +404,11 @@ export default function Customers() {
                   <input type="text" value={address} onChange={(e) => setAddress(e.target.value)} className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all" placeholder="Quartier, avenue, numéro..." />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Ville</label>
-                  <input type="text" value={city} onChange={(e) => setCity(e.target.value)} className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all" placeholder="Ex: Brazzaville" />
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Ville {zoneCfg.flag}</label>
+                  <select value={city} onChange={(e) => setCity(e.target.value)} className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all">
+                    <option value="">Sélectionner une ville</option>
+                    {zoneCfg.cities.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1.5">Pays</label>

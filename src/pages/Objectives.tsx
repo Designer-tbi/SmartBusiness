@@ -20,6 +20,7 @@ import {
 import { format, isAfter, isBefore, parseISO } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { useAuth } from '../contexts/AuthContext';
+import { getZoneConfig } from '../lib/countryConfig';
 import { cn } from '../lib/utils';
 import { 
   BarChart, 
@@ -49,6 +50,7 @@ interface Objective {
 
 export default function Objectives() {
   const { profile } = useAuth();
+  const zoneCfg = getZoneConfig((profile as any)?.zone);
   const [objectives, setObjectives] = useState<Objective[]>([]);
   const [users, setUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -413,109 +415,130 @@ export default function Objectives() {
       </div>
 
       {/* Modal */}
-      {showModal && (
+      {showModal && (() => {
+        const typeOptions = [
+          { value: 'revenue', label: 'Chiffre d\'affaires', icon: DollarSign, hint: `Total facturé payé en ${zoneCfg.currency}`, placeholder: 'Ex: 5000000', suffix: zoneCfg.currency,
+            classesActive: 'border-emerald-500 bg-emerald-50 shadow-sm', iconActive: 'text-emerald-600', textActive: 'text-emerald-900' },
+          { value: 'calls', label: 'Appels', icon: PhoneCall, hint: 'Nombre d\'appels effectués', placeholder: 'Ex: 30', suffix: 'appels',
+            classesActive: 'border-blue-500 bg-blue-50 shadow-sm', iconActive: 'text-blue-600', textActive: 'text-blue-900' },
+          { value: 'meetings', label: 'Rendez-vous', icon: CalendarIcon, hint: 'Nombre de RDV programmés', placeholder: 'Ex: 15', suffix: 'RDV',
+            classesActive: 'border-violet-500 bg-violet-50 shadow-sm', iconActive: 'text-violet-600', textActive: 'text-violet-900' },
+          { value: 'quotes', label: 'Devis', icon: FileText, hint: 'Nombre de devis émis', placeholder: 'Ex: 10', suffix: 'devis',
+            classesActive: 'border-amber-500 bg-amber-50 shadow-sm', iconActive: 'text-amber-600', textActive: 'text-amber-900' },
+        ];
+        const currentType = typeOptions.find(t => t.value === type) || typeOptions[0];
+
+        const applyPeriod = (p: string) => {
+          setPeriod(p as any);
+          const now = new Date();
+          let start: Date, end: Date;
+          if (p === 'monthly') { start = new Date(now.getFullYear(), now.getMonth(), 1); end = new Date(now.getFullYear(), now.getMonth() + 1, 0); }
+          else if (p === 'quarterly') { const q = Math.floor(now.getMonth() / 3); start = new Date(now.getFullYear(), q * 3, 1); end = new Date(now.getFullYear(), q * 3 + 3, 0); }
+          else { start = new Date(now.getFullYear(), 0, 1); end = new Date(now.getFullYear(), 11, 31); }
+          setStartDate(start.toISOString().split('T')[0]);
+          setEndDate(end.toISOString().split('T')[0]);
+        };
+
+        return (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-3xl shadow-2xl w-full sm:max-w-md max-h-[90vh] overflow-y-auto animate-in zoom-in duration-200">
-            <div className="sticky top-0 z-10 p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/80 backdrop-blur-md">
-              <h3 className="text-xl font-bold text-slate-900">
-                {editingObjective ? 'Modifier l\'objectif' : 'Nouvel objectif'}
-              </h3>
-              <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-slate-600">
-                <Plus size={24} className="rotate-45" />
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto" data-testid="objective-form-modal">
+            <div className="sticky top-0 z-10 p-6 border-b border-slate-100 flex justify-between items-center bg-white">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-indigo-100 rounded-lg flex items-center justify-center"><Trophy className="text-indigo-600" size={20} /></div>
+                <div>
+                  <h3 className="text-lg font-bold text-slate-900">{editingObjective ? 'Modifier l\'objectif' : 'Nouvel objectif'}</h3>
+                  <p className="text-xs text-slate-500">Définissez une cible mesurable pour un agent</p>
+                </div>
+              </div>
+              <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-slate-600 p-1.5 hover:bg-slate-100 rounded-lg">
+                <Plus size={20} className="rotate-45" />
               </button>
             </div>
-            <form onSubmit={handleSubmit} className="p-6 space-y-4">
+            <form onSubmit={handleSubmit} className="p-6 space-y-5">
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1.5">Agent</label>
-                <select
-                  value={agentId}
-                  onChange={(e) => setAgentId(e.target.value)}
-                  className="w-full px-4 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
-                  required
-                >
+                <label className="block text-sm font-medium text-slate-700 mb-1.5 flex items-center gap-1"><User size={14} /> Agent assigné *</label>
+                <select value={agentId} onChange={(e) => setAgentId(e.target.value)} required
+                  className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500/20 outline-none">
                   <option value="">Sélectionner un agent</option>
-                  {users.map(u => (
-                    <option key={u.uid} value={u.uid}>{u.name}</option>
+                  {users.filter(u => u.role === 'agent' || u.role === 'admin').map(u => (
+                    <option key={u.uid} value={u.uid}>{u.name} {u.zone ? `· ${u.zone}` : ''}</option>
                   ))}
                 </select>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1.5">Type d'objectif</label>
-                <select
-                  value={type}
-                  onChange={(e) => setType(e.target.value as any)}
-                  className="w-full px-4 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
-                  required
-                >
-                  <option value="revenue">Chiffre d'affaires (€)</option>
-                  <option value="calls">Nombre d'appels</option>
-                  <option value="meetings">Nombre de rendez-vous</option>
-                  <option value="quotes">Nombre de devis</option>
-                </select>
+                <label className="block text-sm font-medium text-slate-700 mb-2">Type d'objectif *</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {typeOptions.map(opt => (
+                    <button key={opt.value} type="button" onClick={() => setType(opt.value as any)}
+                      className={`p-3 rounded-xl border-2 text-left transition-all ${
+                        type === opt.value
+                          ? opt.classesActive
+                          : 'border-slate-200 bg-white hover:border-slate-300'
+                      }`}>
+                      <div className="flex items-center gap-2 mb-1">
+                        <opt.icon className={type === opt.value ? opt.iconActive : 'text-slate-400'} size={18} />
+                        <span className={`font-semibold text-sm ${type === opt.value ? opt.textActive : 'text-slate-700'}`}>{opt.label}</span>
+                      </div>
+                      <p className="text-xs text-slate-500">{opt.hint}</p>
+                    </button>
+                  ))}
+                </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1.5">Valeur cible</label>
-                <input
-                  type="number"
-                  value={targetValue}
-                  onChange={(e) => setTargetValue(e.target.value)}
-                  className="w-full px-4 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
-                  placeholder="Ex: 10000"
-                  required
-                />
+                <label className="block text-sm font-medium text-slate-700 mb-1.5 flex items-center gap-1"><Target size={14} /> Valeur cible *</label>
+                <div className="relative">
+                  <input type="number" min="0" step={type === 'revenue' ? '1000' : '1'} value={targetValue} onChange={(e) => setTargetValue(e.target.value)} required
+                    className="w-full px-4 py-3 pr-24 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500/20 outline-none text-lg font-semibold"
+                    placeholder={currentType.placeholder} data-testid="objective-target" />
+                  <span className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 text-sm font-medium">{currentType.suffix}</span>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">Période *</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { v: 'monthly', l: 'Mensuel', d: 'Ce mois-ci' },
+                    { v: 'quarterly', l: 'Trimestriel', d: 'Ce trimestre' },
+                    { v: 'yearly', l: 'Annuel', d: 'Cette année' },
+                  ].map(opt => (
+                    <button key={opt.v} type="button" onClick={() => applyPeriod(opt.v)}
+                      className={`p-2.5 rounded-xl border-2 text-center transition-all ${
+                        period === opt.v ? 'border-indigo-500 bg-indigo-50' : 'border-slate-200 bg-white hover:border-slate-300'
+                      }`}>
+                      <div className={`font-semibold text-sm ${period === opt.v ? 'text-indigo-900' : 'text-slate-700'}`}>{opt.l}</div>
+                      <div className="text-xs text-slate-500">{opt.d}</div>
+                    </button>
+                  ))}
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Date début</label>
-                  <input
-                    type="date"
-                    value={startDate}
-                    onChange={(e) => setStartDate(e.target.value)}
-                    className="w-full px-4 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
-                    required
-                  />
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Date début *</label>
+                  <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} required
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500/20 outline-none" />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Date fin</label>
-                  <input
-                    type="date"
-                    value={endDate}
-                    onChange={(e) => setEndDate(e.target.value)}
-                    className="w-full px-4 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
-                    required
-                  />
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Date fin *</label>
+                  <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} required
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500/20 outline-none" />
                 </div>
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1.5">Période</label>
-                <select
-                  value={period}
-                  onChange={(e) => setPeriod(e.target.value as any)}
-                  className="w-full px-4 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
-                  required
-                >
-                  <option value="monthly">Mensuel</option>
-                  <option value="quarterly">Trimestriel</option>
-                  <option value="yearly">Annuel</option>
-                </select>
-              </div>
-
-              <div className="pt-4">
-                <button
-                  type="submit"
-                  className="w-full bg-indigo-600 text-white py-3 rounded-xl font-bold hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-200"
-                >
+              <div className="flex gap-3 pt-4 border-t border-slate-100">
+                <button type="button" onClick={() => setShowModal(false)} className="flex-1 px-4 py-3 border border-slate-200 rounded-xl text-slate-600 font-medium hover:bg-slate-50">Annuler</button>
+                <button type="submit" className="flex-1 px-4 py-3 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-200" data-testid="objective-submit-btn">
                   {editingObjective ? 'Mettre à jour' : 'Créer l\'objectif'}
                 </button>
               </div>
             </form>
           </div>
         </div>
-      )}
+        );
+      })()}
     </div>
   );
 }

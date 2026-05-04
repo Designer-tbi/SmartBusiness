@@ -96,6 +96,7 @@ async function ensureDbInitialized() {
       "ALTER TABLE quotes ADD COLUMN IF NOT EXISTS payment_date TIMESTAMP WITH TIME ZONE",
       "ALTER TABLE quotes ADD COLUMN IF NOT EXISTS payment_amount NUMERIC",
       "ALTER TABLE quotes ADD COLUMN IF NOT EXISTS payment_currency TEXT",
+      "ALTER TABLE invoices ADD COLUMN IF NOT EXISTS notes TEXT",
       "CREATE TABLE IF NOT EXISTS reports (id SERIAL PRIMARY KEY, agent_id TEXT NOT NULL, agent_name TEXT NOT NULL, title TEXT NOT NULL, period_start DATE NOT NULL, period_end DATE NOT NULL, calls_count INTEGER DEFAULT 0, meetings_count INTEGER DEFAULT 0, quotes_count INTEGER DEFAULT 0, quotes_amount NUMERIC DEFAULT 0, new_leads INTEGER DEFAULT 0, new_customers INTEGER DEFAULT 0, invoices_amount NUMERIC DEFAULT 0, summary TEXT, challenges TEXT, next_actions TEXT, status TEXT DEFAULT 'submitted', created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
       "CREATE TABLE IF NOT EXISTS report_comments (id SERIAL PRIMARY KEY, report_id INTEGER NOT NULL REFERENCES reports(id) ON DELETE CASCADE, author_id TEXT NOT NULL, author_name TEXT NOT NULL, author_role TEXT NOT NULL, content TEXT NOT NULL, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
     ];
@@ -1025,9 +1026,9 @@ app.get("/api/invoices", authenticateToken, async (req: any, res) => {
   } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 app.post("/api/invoices", authenticateToken, async (req: any, res) => {
-  const { number, customerId, quoteId, amount, status, date, dueDate } = req.body;
+  const { number, customerId, quoteId, amount, status, date, dueDate, notes } = req.body;
   const invoiceNum = number || `F-${new Date().getFullYear()}-${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`;
-  try { res.status(201).json({ id: (await query("INSERT INTO invoices (number, customer_id, quote_id, agent_id, amount, status, date, due_date) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id", [invoiceNum, customerId === "" ? null : customerId, quoteId === "" ? null : quoteId, req.user.uid, amount || 0, status || 'En attente', date || new Date().toISOString().split('T')[0], dueDate])).rows[0].id }); } catch (err: any) { console.error(err); res.status(500).json({ error: "Server error: " + err.message }); }
+  try { res.status(201).json({ id: (await query("INSERT INTO invoices (number, customer_id, quote_id, agent_id, amount, status, date, due_date, notes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id", [invoiceNum, customerId === "" ? null : customerId, quoteId === "" ? null : quoteId, req.user.uid, amount || 0, status || 'En attente', date || new Date().toISOString().split('T')[0], dueDate || null, notes || null])).rows[0].id }); } catch (err: any) { console.error(err); res.status(500).json({ error: "Server error: " + err.message }); }
 });
 app.put("/api/invoices/:id", authenticateToken, async (req: any, res) => {
   const { id } = req.params;
@@ -1089,6 +1090,14 @@ app.put("/api/commissions/:id", authenticateToken, async (req: any, res) => {
     if (result.rows.length === 0) return res.status(404).json({ error: "Commission not found" });
     res.json(result.rows[0]);
   } catch (err) { res.status(500).json({ error: "Server error" }); }
+});
+app.delete("/api/commissions/:id", authenticateToken, async (req: any, res) => {
+  if (req.user.role !== 'admin' && req.user.role !== 'superadmin') return res.status(403).json({ error: "Forbidden" });
+  try {
+    const r = await query("DELETE FROM commissions WHERE id = $1", [req.params.id]);
+    if (r.rowCount === 0) return res.status(404).json({ error: "Commission introuvable" });
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: "Erreur: " + err.message }); }
 });
 
 // Activities

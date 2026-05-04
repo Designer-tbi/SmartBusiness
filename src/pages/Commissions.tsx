@@ -222,6 +222,19 @@ export default function Commissions() {
                             Remettre en attente
                           </button>
                         )}
+                        <button
+                          onClick={async () => {
+                            if (!confirm(`Supprimer cette commission de ${Number(comm.amount).toLocaleString()} FCFA ?`)) return;
+                            const r = await fetch(`/api/commissions/${comm.id}`, { method: 'DELETE' });
+                            if (r.ok) fetchData();
+                            else { const d = await r.json().catch(() => ({})); alert('❌ ' + (d.error || 'Erreur')); }
+                          }}
+                          className="text-xs bg-red-50 text-red-600 p-1.5 rounded border border-red-100 hover:bg-red-100 transition-all"
+                          title="Supprimer la commission"
+                          data-testid={`delete-commission-${comm.id}`}
+                        >
+                          <Trash2 size={14} />
+                        </button>
                       </div>
                     </td>
                   )}

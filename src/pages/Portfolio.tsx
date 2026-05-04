@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { Plus, Search, Folder, Loader2, AlertCircle, ChevronLeft, Building2, Phone, Mail, Globe, MapPin, Hash, Map as MapIcon, List, UserPlus, ArrowRight, Trash2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import MapView from '../components/MapView';
+import { useAuth } from '../contexts/AuthContext';
+import { getZoneConfig } from '../lib/countryConfig';
 
 interface Category {
   id: number;
@@ -27,6 +29,8 @@ interface PortfolioItem {
 
 export default function Portfolio() {
   const navigate = useNavigate();
+  const { profile } = useAuth();
+  const zoneCfg = getZoneConfig((profile as any)?.zone);
   const [categories, setCategories] = useState<Category[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<Category | null>(null);
   const [viewAll, setViewAll] = useState(false);
@@ -440,13 +444,15 @@ export default function Portfolio() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1.5">Ville</label>
-                <input
-                  type="text"
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">Ville {zoneCfg.flag}</label>
+                <select
                   value={newItem.city}
                   onChange={(e) => setNewItem({...newItem, city: e.target.value})}
                   className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
-                />
+                >
+                  <option value="">Sélectionner une ville</option>
+                  {zoneCfg.cities.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1.5">BP</label>
@@ -494,13 +500,13 @@ export default function Portfolio() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1.5">NIU (Identifiant Unique)</label>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">{zoneCfg.niuLabel}</label>
                 <input
                   type="text"
                   value={newItem.niu}
                   onChange={(e) => setNewItem({...newItem, niu: e.target.value})}
-                  placeholder="Ex: M012345678901A"
-                  className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+                  placeholder={zoneCfg.niuPlaceholder}
+                  className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all font-mono text-sm"
                 />
               </div>
             </div>
