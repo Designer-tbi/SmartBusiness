@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Receipt, Plus, Search, Trash2, Filter, DollarSign, CheckCircle2, Clock, X, Save } from 'lucide-react';
+import { Receipt, Plus, Search, Trash2, Filter, DollarSign, CheckCircle2, Clock, X, Save, Eye } from 'lucide-react';
 
 export default function Invoices() {
   const [invoices, setInvoices] = useState<any[]>([]);
@@ -87,6 +87,7 @@ export default function Invoices() {
                 <td className="px-4 py-3"><span className={`text-xs px-2.5 py-1 rounded-full font-medium ${i.status === 'Payée' ? 'bg-emerald-100 text-emerald-700' : i.status === 'En retard' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>{i.status}</span></td>
                 <td className="px-4 py-3 text-right">
                   <div className="flex items-center justify-end gap-1">
+                    <button onClick={() => window.open(`/public/invoices/${i.id}`, '_blank')} title="Aperçu" className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg" data-testid={`preview-invoice-${i.id}`}><Eye size={16} /></button>
                     {i.status !== 'Payée' && (
                       <button onClick={() => handleMarkPaid(i.id)} title="Marquer comme payée (commission 20%)" className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg" data-testid={`mark-paid-${i.id}`}><CheckCircle2 size={16} /></button>
                     )}

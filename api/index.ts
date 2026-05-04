@@ -569,6 +569,15 @@ async function createActivity(opts: { type: string; subject: string; agentId: st
   } catch (e) { console.error("Auto activity create failed:", e); }
 }
 
+// Helper: mark all 'À faire' / 'En retard' activities as Terminé for a given entity
+async function autoCompleteActivities(opts: { leadId?: number; customerId?: number; opportunityId?: number }) {
+  try {
+    if (opts.leadId) await query("UPDATE activities SET status='Terminé', updated_at=CURRENT_TIMESTAMP WHERE lead_id=$1 AND status IN ('À faire','En retard')", [opts.leadId]);
+    if (opts.customerId) await query("UPDATE activities SET status='Terminé', updated_at=CURRENT_TIMESTAMP WHERE customer_id=$1 AND status IN ('À faire','En retard')", [opts.customerId]);
+    if (opts.opportunityId) await query("UPDATE activities SET status='Terminé', updated_at=CURRENT_TIMESTAMP WHERE opportunity_id=$1 AND status IN ('À faire','En retard')", [opts.opportunityId]);
+  } catch (e) { console.error("autoCompleteActivities error:", e); }
+}
+
 // Auto-create invoice from a signed quote (idempotent: skip if quote already has an invoice)
 async function autoCreateInvoiceFromQuote(quoteId: number) {
   const existing = await query("SELECT id FROM invoices WHERE quote_id = $1", [quoteId]);
@@ -625,6 +634,8 @@ async function autoConvertLeadToCustomer(leadId: number): Promise<number | null>
     const customerId = cr.rows[0].id;
     await query("UPDATE leads SET status='Converti', updated_at=CURRENT_TIMESTAMP WHERE id=$1", [leadId]);
     await query("UPDATE opportunities SET customer_id=$1, lead_id=NULL WHERE lead_id=$2", [customerId, leadId]);
+    // AUTO: mark all pending activities for this lead as Terminé
+    await autoCompleteActivities({ leadId });
     // Welcome activity for the agent
     await createActivity({ type: 'RDV', subject: `Onboarding nouveau client: ${name}`, agentId: lead.agent_id, customerId, daysFromNow: 2, notes: `Client converti depuis le prospect #${leadId}` });
     return customerId;
@@ -665,9 +676,13 @@ async function autoSyncOpportunityFromQuote(quoteId: number, quoteStatus: string
   const oppId = oppRes.rows[0].id;
   if (quoteStatus === 'Signé' || quoteStatus === 'Accepté') {
     await query("UPDATE opportunities SET stage='Gagné', probability=100, updated_at=CURRENT_TIMESTAMP WHERE id=$1", [oppId]);
+    // AUTO: complete pending activities for this opportunity
+    await autoCompleteActivities({ opportunityId: oppId });
     await createActivity({ type: 'Tâche', subject: `Devis signé — préparer la mise en œuvre`, agentId: q.agent_id, customerId: q.customer_id, opportunityId: oppId, daysFromNow: 1, status: 'À faire' });
   } else if (quoteStatus === 'Refusé') {
     await query("UPDATE opportunities SET stage='Perdu', probability=0, updated_at=CURRENT_TIMESTAMP WHERE id=$1", [oppId]);
+    // AUTO: complete pending activities for this opportunity
+    await autoCompleteActivities({ opportunityId: oppId });
     await createActivity({ type: 'Appel', subject: `Relance commerciale après refus de devis`, agentId: q.agent_id, customerId: q.customer_id, opportunityId: oppId, daysFromNow: 7, status: 'À faire', notes: 'Comprendre le refus et proposer une alternative.' });
   }
 }
@@ -834,11 +849,28 @@ app.post("/api/quotes/:id/send-email", authenticateToken, async (req: any, res) 
 app.get("/api/public/quotes/:id", async (req, res) => {
   const { id } = req.params;
   try {
-    const qr = await query('SELECT q.*, c.name as "customerName", c.email as "customerEmail", c.phone as "customerPhone", l.first_name || \' \' || l.last_name as "leadName", l.email as "leadEmail", l.phone as "leadPhone" FROM quotes q LEFT JOIN customers c ON q.customer_id = c.id LEFT JOIN leads l ON q.lead_id = l.id WHERE q.id = $1', [id]);
+    const qr = await query('SELECT q.*, c.name as "customerName", c.email as "customerEmail", c.phone as "customerPhone", c.address as "customerAddress", c.city as "customerCity", l.first_name || \' \' || l.last_name as "leadName", l.email as "leadEmail", l.phone as "leadPhone", l.address as "leadAddress", l.city as "leadCity", u.name as "agentName", u.email as "agentEmail" FROM quotes q LEFT JOIN customers c ON q.customer_id = c.id LEFT JOIN leads l ON q.lead_id = l.id LEFT JOIN users u ON q.agent_id = u.uid WHERE q.id = $1', [id]);
     if (qr.rows.length === 0) return res.status(404).json({ error: "Quote not found" });
     const items = await query("SELECT * FROM quote_items WHERE quote_id = $1", [id]);
     const quote = qr.rows[0];
-    res.json({ ...quote, customerName: quote.customerName || quote.leadName, customerEmail: quote.customerEmail || quote.leadEmail, customerPhone: quote.customerPhone || quote.leadPhone, items: items.rows });
+    res.json({ ...quote, customerName: quote.customerName || quote.leadName, customerEmail: quote.customerEmail || quote.leadEmail, customerPhone: quote.customerPhone || quote.leadPhone, customerAddress: quote.customerAddress || quote.leadAddress, customerCity: quote.customerCity || quote.leadCity, items: items.rows });
+  } catch (err) { res.status(500).json({ error: "Server error" }); }
+});
+
+// Public Invoice view (no auth — for client preview/share)
+app.get("/api/public/invoices/:id", async (req, res) => {
+  const { id } = req.params;
+  try {
+    const ir = await query('SELECT i.*, c.name as "customerName", c.email as "customerEmail", c.phone as "customerPhone", c.address as "customerAddress", c.city as "customerCity", u.name as "agentName", u.email as "agentEmail", q.number as "quoteNumber" FROM invoices i LEFT JOIN customers c ON i.customer_id = c.id LEFT JOIN users u ON i.agent_id = u.uid LEFT JOIN quotes q ON i.quote_id = q.id WHERE i.id = $1', [id]);
+    if (ir.rows.length === 0) return res.status(404).json({ error: "Invoice not found" });
+    const inv = ir.rows[0];
+    // Fetch quote items for the invoice (via linked quote)
+    let items: any[] = [];
+    if (inv.quote_id) {
+      const itemsRes = await query("SELECT * FROM quote_items WHERE quote_id = $1", [inv.quote_id]);
+      items = itemsRes.rows;
+    }
+    res.json({ ...inv, dueDate: inv.due_date, paidAt: inv.paid_at, items });
   } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 app.post("/api/public/quotes/:id/sign", async (req, res) => {
@@ -923,6 +955,8 @@ app.put("/api/commissions/:id", authenticateToken, async (req: any, res) => {
 // Activities
 app.get("/api/activities", authenticateToken, async (req: any, res) => {
   try {
+    // AUTO: mark overdue 'À faire' activities as 'En retard'
+    await query("UPDATE activities SET status='En retard', updated_at=CURRENT_TIMESTAMP WHERE status='À faire' AND date < CURRENT_TIMESTAMP - INTERVAL '1 day'");
     let q = 'SELECT a.*, c.name as "customerName", l.first_name || \' \' || l.last_name as "leadName", o.title as "opportunityTitle", u.name as "agentName", u.role as "agentRole" FROM activities a LEFT JOIN customers c ON a.customer_id = c.id LEFT JOIN leads l ON a.lead_id = l.id LEFT JOIN opportunities o ON a.opportunity_id = o.id LEFT JOIN users u ON a.agent_id = u.uid';
     // Non-admin users cannot see admin/superadmin activities
     if (req.user.role !== 'admin' && req.user.role !== 'superadmin') {

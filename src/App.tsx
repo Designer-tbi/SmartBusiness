@@ -17,6 +17,7 @@ import Activities from './pages/Activities';
 import Calendar from './pages/Calendar';
 import Catalog from './pages/Catalog';
 import QuotePublicView from './pages/QuotePublicView';
+import InvoicePublicView from './pages/InvoicePublicView';
 import Invoices from './pages/Invoices';
 import Commissions from './pages/Commissions';
 import Tracking from './pages/Tracking';
@@ -59,6 +60,7 @@ export default function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
           <Route path="/public/quotes/:id" element={<QuotePublicView />} />
+          <Route path="/public/invoices/:id" element={<InvoicePublicView />} />
           <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
             <Route index element={<Dashboard />} />
             <Route path="calls" element={<Calls />} />

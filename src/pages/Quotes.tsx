@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { FileText, Plus, Search, Trash2, Edit2, Filter, Calendar, X, Save, PlusCircle, MinusCircle, Send, Share2, AlertCircle, Percent, Mail } from 'lucide-react';
+import { FileText, Plus, Search, Trash2, Edit2, Filter, Calendar, X, Save, PlusCircle, MinusCircle, Send, Share2, AlertCircle, Percent, Mail, Eye } from 'lucide-react';
 import { format } from 'date-fns';
 
 export default function Quotes() {
@@ -215,6 +215,7 @@ export default function Quotes() {
                 <td className="px-4 py-4"><span className={`text-xs px-2.5 py-1 rounded-full font-medium ${getStatusColor(q.status)}`}>{q.status}</span></td>
                 <td className="px-4 py-4">
                   <div className="flex items-center justify-end gap-1">
+                    <button onClick={() => window.open(`/public/quotes/${q.id}`, '_blank')} title="Aperçu" className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all" data-testid={`preview-quote-${q.id}`}><Eye size={16} /></button>
                     <button onClick={() => {
                       const email = q.customerEmail || q.leadEmail || '';
                       setEmailForm({ email, name: q.customerName || '', message: '' });
