@@ -89,6 +89,7 @@ async function ensureDbInitialized() {
       "ALTER TABLE users ADD COLUMN IF NOT EXISTS deactivated_at TIMESTAMP WITH TIME ZONE",
       "ALTER TABLE users ADD COLUMN IF NOT EXISTS company_name TEXT",
       "ALTER TABLE users ADD COLUMN IF NOT EXISTS zone TEXT DEFAULT 'CG'",
+      "ALTER TABLE products ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'XAF'",
       "CREATE TABLE IF NOT EXISTS reports (id SERIAL PRIMARY KEY, agent_id TEXT NOT NULL, agent_name TEXT NOT NULL, title TEXT NOT NULL, period_start DATE NOT NULL, period_end DATE NOT NULL, calls_count INTEGER DEFAULT 0, meetings_count INTEGER DEFAULT 0, quotes_count INTEGER DEFAULT 0, quotes_amount NUMERIC DEFAULT 0, new_leads INTEGER DEFAULT 0, new_customers INTEGER DEFAULT 0, invoices_amount NUMERIC DEFAULT 0, summary TEXT, challenges TEXT, next_actions TEXT, status TEXT DEFAULT 'submitted', created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
       "CREATE TABLE IF NOT EXISTS report_comments (id SERIAL PRIMARY KEY, report_id INTEGER NOT NULL REFERENCES reports(id) ON DELETE CASCADE, author_id TEXT NOT NULL, author_name TEXT NOT NULL, author_role TEXT NOT NULL, content TEXT NOT NULL, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
     ];
@@ -441,13 +442,42 @@ app.post("/api/catalogues", authenticateToken, async (req: any, res) => {
 });
 
 // Products
-app.get("/api/products", authenticateToken, async (req, res) => {
-  try { res.json((await query('SELECT p.*, c.name as "categoryName", cat.name as "catalogName" FROM products p LEFT JOIN categories c ON p.category_id = c.id LEFT JOIN catalogues cat ON p.catalog_id = cat.id ORDER BY p.name ASC')).rows); } catch (err) { res.status(500).json({ error: "Server error" }); }
+// Products (filtered by user zone/currency)
+app.get("/api/products", authenticateToken, async (req: any, res) => {
+  try {
+    // Get user zone
+    const userRes = await query("SELECT zone FROM users WHERE uid = $1", [req.user.uid]);
+    const userZone = userRes.rows[0]?.zone || 'CG';
+    // Zone -> allowed currencies mapping
+    const zoneCurrencies: Record<string, string[]> = {
+      'CG': ['XAF'],         // Congo Brazzaville -> XAF only
+      'CM': ['XAF'],         // Cameroun -> XAF
+      'GA': ['XAF'],         // Gabon -> XAF
+      'TD': ['XAF'],         // Tchad -> XAF
+      'CF': ['XAF'],         // Centrafrique -> XAF
+      'GQ': ['XAF'],         // Guinée Eq. -> XAF
+      'CD': ['CDF', 'USD'],  // RD Congo -> CDF + USD
+      'CI': ['XOF'],         // Côte d'Ivoire -> XOF
+      'SN': ['XOF'],         // Sénégal -> XOF
+      'FR': ['EUR'],         // France -> EUR
+    };
+    const allowed = zoneCurrencies[userZone] || ['XAF'];
+    // Admin/superadmin see all products
+    let q = 'SELECT p.*, c.name as "categoryName", cat.name as "catalogName" FROM products p LEFT JOIN categories c ON p.category_id = c.id LEFT JOIN catalogues cat ON p.catalog_id = cat.id';
+    let params: any[] = [];
+    if (req.user.role !== 'admin' && req.user.role !== 'superadmin') {
+      const placeholders = allowed.map((_, i) => `$${i + 1}`).join(',');
+      q += ` WHERE (p.currency IN (${placeholders}) OR p.currency IS NULL)`;
+      params = allowed;
+    }
+    q += ' ORDER BY p.name ASC';
+    res.json((await query(q, params)).rows);
+  } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 app.post("/api/products", authenticateToken, async (req: any, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'superadmin') return res.status(403).json({ error: "Forbidden" });
-  const { name, type, category, categoryId, catalogId, price, vatRate, vatRateId, stock, unit, description, technicalFileUrl } = req.body;
-  try { res.status(201).json((await query("INSERT INTO products (name, type, category, category_id, catalog_id, price, vat_rate, vat_rate_id, stock, unit, description, technical_file_url) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *", [name, type || 'product', category, categoryId, catalogId, price, vatRate || 20, vatRateId, stock || 0, unit, description, technicalFileUrl])).rows[0]); } catch (err) { res.status(500).json({ error: "Server error" }); }
+  const { name, type, category, categoryId, catalogId, price, vatRate, vatRateId, stock, unit, description, technicalFileUrl, currency } = req.body;
+  try { res.status(201).json((await query("INSERT INTO products (name, type, category, category_id, catalog_id, price, vat_rate, vat_rate_id, stock, unit, description, technical_file_url, currency) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *", [name, type || 'product', category, categoryId, catalogId, price, vatRate || 20, vatRateId, stock || 0, unit, description, technicalFileUrl, currency || 'XAF'])).rows[0]); } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 app.delete("/api/products/:id", authenticateToken, async (req: any, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'superadmin') return res.status(403).json({ error: "Forbidden" });
