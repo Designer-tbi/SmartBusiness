@@ -612,17 +612,24 @@ async function autoConvertLeadToCustomer(leadId: number): Promise<number | null>
   const lr = await query("SELECT * FROM leads WHERE id = $1", [leadId]);
   if (lr.rows.length === 0) return null;
   const lead = lr.rows[0];
-  const name = lead.type === 'company' ? lead.company_name : `${lead.first_name || ''} ${lead.last_name || ''}`.trim();
-  const cr = await query(
-    "INSERT INTO customers (type, first_name, last_name, company_name, name, email, phone, address, city, industry, agent_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'Non spécifié',$10) RETURNING id",
-    [lead.type, lead.first_name, lead.last_name, lead.company_name, name, lead.email, lead.phone, lead.address, lead.city, lead.agent_id]
-  );
-  const customerId = cr.rows[0].id;
-  await query("UPDATE leads SET status='Converti', updated_at=CURRENT_TIMESTAMP WHERE id=$1", [leadId]);
-  await query("UPDATE opportunities SET customer_id=$1, lead_id=NULL WHERE lead_id=$2", [customerId, leadId]);
-  // Welcome activity for the agent
-  await createActivity({ type: 'RDV', subject: `Onboarding nouveau client: ${name}`, agentId: lead.agent_id, customerId, daysFromNow: 2, notes: `Client converti depuis le prospect #${leadId}` });
-  return customerId;
+  // Skip if lead already converted and linked to a customer (via phone/email match)
+  const name = lead.type === 'company' ? (lead.company_name || 'Client sans nom') : `${lead.first_name || ''} ${lead.last_name || ''}`.trim() || 'Client sans nom';
+  const phone = lead.phone || 'N/A'; // customers.phone is NOT NULL, fallback required
+  try {
+    const cr = await query(
+      "INSERT INTO customers (type, first_name, last_name, company_name, name, email, phone, address, city, industry, agent_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'Non spécifié',$10) RETURNING id",
+      [lead.type || 'individual', lead.first_name, lead.last_name, lead.company_name, name, lead.email, phone, lead.address, lead.city, lead.agent_id]
+    );
+    const customerId = cr.rows[0].id;
+    await query("UPDATE leads SET status='Converti', updated_at=CURRENT_TIMESTAMP WHERE id=$1", [leadId]);
+    await query("UPDATE opportunities SET customer_id=$1, lead_id=NULL WHERE lead_id=$2", [customerId, leadId]);
+    // Welcome activity for the agent
+    await createActivity({ type: 'RDV', subject: `Onboarding nouveau client: ${name}`, agentId: lead.agent_id, customerId, daysFromNow: 2, notes: `Client converti depuis le prospect #${leadId}` });
+    return customerId;
+  } catch (err: any) {
+    console.error("autoConvertLeadToCustomer error:", err);
+    throw err;
+  }
 }
 
 // Auto-create opportunity from qualified lead (idempotent: skip if opportunity already linked)
@@ -1042,13 +1049,13 @@ app.post("/api/leads/:id/convert-to-customer", authenticateToken, async (req, re
   try {
     const lr = await query("SELECT * FROM leads WHERE id = $1", [id]);
     if (lr.rows.length === 0) return res.status(404).json({ error: "Lead not found" });
-    const lead = lr.rows[0];
-    const cr = await query("INSERT INTO customers (type, first_name, last_name, company_name, email, phone, industry, updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,CURRENT_TIMESTAMP) RETURNING id", [lead.type, lead.first_name, lead.last_name, lead.company_name, lead.email, lead.phone, 'Non spécifié']);
-    const customerId = cr.rows[0].id;
-    await query("UPDATE opportunities SET customer_id=$1, lead_id=NULL WHERE lead_id=$2", [customerId, id]);
-    await query("UPDATE leads SET status='Converti', updated_at=CURRENT_TIMESTAMP WHERE id=$1", [id]);
+    const customerId = await autoConvertLeadToCustomer(parseInt(id));
+    if (!customerId) return res.status(500).json({ error: "Conversion échouée" });
     res.json({ success: true, customerId });
-  } catch (err) { res.status(500).json({ error: "Server error" }); }
+  } catch (err: any) {
+    console.error("convert-to-customer error:", err);
+    res.status(500).json({ error: "Server error: " + err.message });
+  }
 });
 app.post("/api/leads/:id/convert-to-opportunity", authenticateToken, async (req, res) => {
   const { id } = req.params; const { title, amount, expectedCloseDate } = req.body;

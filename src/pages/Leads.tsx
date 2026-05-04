@@ -141,14 +141,18 @@ export default function Leads() {
   };
 
   const handleConvertToCustomer = async (id: number) => {
-    if (!window.confirm('Convertir ce prospect en client ? Cela supprimera le lead et créera un nouveau client.')) return;
+    if (!window.confirm('Convertir ce prospect en client ? Le prospect sera marqué "Converti" et un nouveau client sera créé avec les infos du prospect.')) return;
     try {
       const response = await fetch(`/api/leads/${id}/convert-to-customer`, { method: 'POST' });
+      const data = await response.json();
       if (response.ok) {
         fetchLeads();
-        alert('Prospect converti avec succès !');
+        alert(`✅ Prospect converti en client (ID #${data.customerId}) ! Une activité d'onboarding a été programmée à J+2.`);
+      } else {
+        alert(`❌ Erreur: ${data.error || 'Conversion échouée'}`);
       }
-    } catch (error) {
+    } catch (error: any) {
+      alert(`❌ Erreur réseau: ${error.message}`);
       console.error("Error converting lead:", error);
     }
   };
