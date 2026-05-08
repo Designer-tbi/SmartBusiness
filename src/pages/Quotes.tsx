@@ -1,8 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { FileText, Plus, Search, Trash2, Edit2, Filter, Calendar, X, Save, PlusCircle, MinusCircle, Send, Share2, AlertCircle, Percent, Mail, Eye } from 'lucide-react';
 import { format } from 'date-fns';
+import { useAuth } from '../contexts/AuthContext';
+import { getZoneConfig, formatCurrency, getCurrencyLabel } from '../lib/countryConfig';
 
 export default function Quotes() {
+  const { profile } = useAuth();
+  const zoneCfg = getZoneConfig(profile?.zone);
+  const userZone = profile?.zone;
+  const currencyLabel = getCurrencyLabel(userZone);
   const [quotes, setQuotes] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -24,11 +30,19 @@ export default function Quotes() {
     notes: '',
     paymentTerms: 'Paiement à 30 jours',
     deliveryDelay: '',
-    vatRate: 19.25,
+    vatRate: zoneCfg.vatRate,
     globalDiscount: 0,
     discountType: 'percent' as 'percent' | 'fixed',
     items: [{ productId: '', description: '', quantity: 1, unitPrice: 0, discount: 0, totalPrice: 0 }]
   });
+
+  // Re-apply zone VAT when profile zone is loaded
+  useEffect(() => {
+    if (zoneCfg.vatRate && formData.vatRate !== zoneCfg.vatRate) {
+      setFormData(f => ({ ...f, vatRate: zoneCfg.vatRate }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile?.zone]);
 
   useEffect(() => {
   }, [showModal]);
@@ -47,6 +61,20 @@ export default function Quotes() {
       if (p.ok) setProducts(await p.json());
     } catch (err) { console.error(err); }
   };
+
+  // Filter products to those matching the user's zone currencies (or NULL fallback)
+  const allowedCurrencies = (() => {
+    const z = profile?.zone;
+    if (!z) return [];
+    if (z === 'CD') return ['CDF', 'USD', 'EUR'];
+    if (z === 'CI' || z === 'SN') return ['XOF'];
+    if (z === 'FR') return ['EUR'];
+    return ['XAF'];
+  })();
+  const isAdmin = profile?.role === 'admin' || profile?.role === 'superadmin';
+  const visibleProducts = isAdmin
+    ? products
+    : products.filter(p => !p.currency || allowedCurrencies.includes(p.currency));
 
   const handleAddItem = () => {
     setFormData({ ...formData, items: [...formData.items, { productId: '', description: '', quantity: 1, unitPrice: 0, discount: 0, totalPrice: 0 }] });
@@ -96,7 +124,7 @@ export default function Quotes() {
         formData.paymentTerms ? `Conditions de paiement: ${formData.paymentTerms}` : '',
         formData.deliveryDelay ? `Délai de livraison: ${formData.deliveryDelay}` : '',
         `TVA: ${formData.vatRate}%`,
-        formData.globalDiscount ? `Remise globale: ${formData.discountType === 'percent' ? formData.globalDiscount + '%' : formData.globalDiscount + ' FCFA'}` : '',
+        formData.globalDiscount ? `Remise globale: ${formData.discountType === 'percent' ? formData.globalDiscount + '%' : formData.globalDiscount + ' ' + currencyLabel}` : '',
       ].filter(Boolean).join('\n');
       const res = await fetch('/api/quotes', {
         method: 'POST',
@@ -211,7 +239,7 @@ export default function Quotes() {
                 <td className="px-6 py-4 font-medium text-sm text-slate-800">{q.number}</td>
                 <td className="px-4 py-4 text-sm text-slate-600">{q.customerName || 'N/A'}</td>
                 <td className="px-4 py-4 text-sm text-slate-500 hidden md:table-cell">{q.date ? new Date(q.date).toLocaleDateString('fr-FR') : '-'}</td>
-                <td className="px-4 py-4 text-sm font-bold text-slate-800">{Number(q.amount).toLocaleString()} FCFA</td>
+                <td className="px-4 py-4 text-sm font-bold text-slate-800">{formatCurrency(q.amount, userZone)}</td>
                 <td className="px-4 py-4"><span className={`text-xs px-2.5 py-1 rounded-full font-medium ${getStatusColor(q.status)}`}>{q.status}</span></td>
                 <td className="px-4 py-4">
                   <div className="flex items-center justify-end gap-1">
@@ -355,7 +383,8 @@ export default function Quotes() {
                             <select value={item.productId} onChange={e => handleItemChange(i, 'productId', e.target.value)}
                               className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500/20 outline-none mb-2">
                               <option value="">Produit du catalogue...</option>
-                              {products.map(p => <option key={p.id} value={p.id}>{p.name} - {Number(p.price).toLocaleString()} FCFA</option>)}
+                              {visibleProducts.map(p => <option key={p.id} value={p.id}>{p.name} - {Number(p.price).toLocaleString('fr-FR')} {p.currency || currencyLabel}{p.billing_type === 'subscription' ? ' /mois' : ''}</option>)}
+                              {visibleProducts.length === 0 && <option disabled>Aucun produit dans votre devise ({currencyLabel}) — demandez à l'admin d'en créer</option>}
                             </select>
                             <input type="text" placeholder="Description libre..." value={item.description} onChange={e => handleItemChange(i, 'description', e.target.value)}
                               className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500/20 outline-none" />
@@ -366,7 +395,7 @@ export default function Quotes() {
                             className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm text-right focus:ring-2 focus:ring-indigo-500/20 outline-none" /></td>
                           <td className="px-4 py-3"><input type="number" min="0" max="100" value={item.discount} onChange={e => handleItemChange(i, 'discount', e.target.value)}
                             className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm text-center focus:ring-2 focus:ring-indigo-500/20 outline-none" /></td>
-                          <td className="px-4 py-3 text-right font-bold text-slate-900">{item.totalPrice.toLocaleString()} FCFA</td>
+                          <td className="px-4 py-3 text-right font-bold text-slate-900">{Number(item.totalPrice).toLocaleString('fr-FR')} {currencyLabel}</td>
                           <td className="px-4 py-3 text-center"><button type="button" onClick={() => handleRemoveItem(i)} className="text-slate-300 hover:text-red-500"><MinusCircle size={18} /></button></td>
                         </tr>
                       ))}
@@ -384,7 +413,7 @@ export default function Quotes() {
                       <button type="button" onClick={() => setFormData({ ...formData, discountType: 'percent' })}
                         className={`px-3 py-1.5 rounded-md text-xs font-medium ${formData.discountType === 'percent' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500'}`}><Percent size={14} /></button>
                       <button type="button" onClick={() => setFormData({ ...formData, discountType: 'fixed' })}
-                        className={`px-3 py-1.5 rounded-md text-xs font-medium ${formData.discountType === 'fixed' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500'}`}>FCFA</button>
+                        className={`px-3 py-1.5 rounded-md text-xs font-medium ${formData.discountType === 'fixed' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500'}`}>{currencyLabel}</button>
                     </div>
                     <input type="number" min="0" value={formData.globalDiscount} onChange={e => setFormData({ ...formData, globalDiscount: parseFloat(e.target.value) || 0 })}
                       className="w-32 px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 outline-none text-sm" placeholder="0" />
@@ -397,13 +426,13 @@ export default function Quotes() {
                 </div>
                 <div className="w-full lg:w-96">
                   <div className="bg-slate-50 p-5 rounded-xl border border-slate-200 space-y-3">
-                    <div className="flex justify-between text-sm text-slate-500"><span>Sous-total HT</span><span>{subtotal.toLocaleString()} FCFA</span></div>
-                    {itemDiscounts > 0 && <div className="flex justify-between text-sm text-orange-600"><span>Remises articles</span><span>-{itemDiscounts.toLocaleString()} FCFA</span></div>}
-                    {globalDiscountAmount > 0 && <div className="flex justify-between text-sm text-orange-600"><span>Remise globale {formData.discountType === 'percent' ? `(${formData.globalDiscount}%)` : ''}</span><span>-{globalDiscountAmount.toLocaleString()} FCFA</span></div>}
-                    <div className="flex justify-between text-sm text-slate-500 border-t border-slate-200 pt-3"><span>Total HT</span><span>{afterAllDiscounts.toLocaleString()} FCFA</span></div>
-                    <div className="flex justify-between text-sm text-slate-500"><span>TVA ({formData.vatRate}%)</span><span>{vatAmount.toLocaleString()} FCFA</span></div>
+                    <div className="flex justify-between text-sm text-slate-500"><span>Sous-total HT</span><span>{Number(subtotal).toLocaleString('fr-FR')} {currencyLabel}</span></div>
+                    {itemDiscounts > 0 && <div className="flex justify-between text-sm text-orange-600"><span>Remises articles</span><span>-{Number(itemDiscounts).toLocaleString('fr-FR')} {currencyLabel}</span></div>}
+                    {globalDiscountAmount > 0 && <div className="flex justify-between text-sm text-orange-600"><span>Remise globale {formData.discountType === 'percent' ? `(${formData.globalDiscount}%)` : ''}</span><span>-{Number(globalDiscountAmount).toLocaleString('fr-FR')} {currencyLabel}</span></div>}
+                    <div className="flex justify-between text-sm text-slate-500 border-t border-slate-200 pt-3"><span>Total HT</span><span>{Number(afterAllDiscounts).toLocaleString('fr-FR')} {currencyLabel}</span></div>
+                    <div className="flex justify-between text-sm text-slate-500"><span>TVA ({formData.vatRate}%)</span><span>{Number(vatAmount).toLocaleString('fr-FR')} {currencyLabel}</span></div>
                     <div className="flex justify-between text-lg font-bold text-slate-900 border-t-2 border-slate-300 pt-3">
-                      <span>TOTAL TTC</span><span className="text-indigo-600">{totalTTC.toLocaleString()} FCFA</span>
+                      <span>TOTAL TTC</span><span className="text-indigo-600">{Number(totalTTC).toLocaleString('fr-FR')} {currencyLabel}</span>
                     </div>
                   </div>
                 </div>
