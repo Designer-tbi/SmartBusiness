@@ -6,7 +6,7 @@ import PhoneInput from '../components/PhoneInput';
 
 export default function Leads() {
   const { profile } = useAuth();
-  const zoneCfg = getZoneConfig((profile as any)?.zone);
+  const zoneCfg = getZoneConfig(profile?.zone);
   const [leads, setLeads] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -440,7 +440,7 @@ export default function Leads() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1.5">Téléphone</label>
-                  <PhoneInput value={phone} onChange={setPhone} zone={(profile as any)?.zone} />
+                  <PhoneInput value={phone} onChange={setPhone} zone={profile?.zone} />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1.5">Email</label>

@@ -147,21 +147,21 @@ export default function Commissions() {
             <TrendingUp size={20} className="text-indigo-600" />
             <span className="text-sm font-medium">Total Commissions</span>
           </div>
-          <div className="text-2xl font-bold text-slate-900">{formatCurrency(totalCommissions, (profile as any)?.zone)}</div>
+          <div className="text-2xl font-bold text-slate-900">{formatCurrency(totalCommissions, profile?.zone)}</div>
         </div>
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
           <div className="flex items-center gap-3 text-slate-500 mb-2">
             <CheckCircle size={20} className="text-emerald-600" />
             <span className="text-sm font-medium">Payées</span>
           </div>
-          <div className="text-2xl font-bold text-emerald-600">{formatCurrency(paidCommissions, (profile as any)?.zone)}</div>
+          <div className="text-2xl font-bold text-emerald-600">{formatCurrency(paidCommissions, profile?.zone)}</div>
         </div>
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
           <div className="flex items-center gap-3 text-slate-500 mb-2">
             <Clock size={20} className="text-blue-600" />
             <span className="text-sm font-medium">En attente</span>
           </div>
-          <div className="text-2xl font-bold text-blue-600">{formatCurrency(pendingCommissions, (profile as any)?.zone)}</div>
+          <div className="text-2xl font-bold text-blue-600">{formatCurrency(pendingCommissions, profile?.zone)}</div>
         </div>
       </div>
 
@@ -198,7 +198,7 @@ export default function Commissions() {
                   {isAdmin && <td className="px-6 py-4 text-slate-900 font-medium">{comm.agentName}</td>}
                   <td className="px-6 py-4 text-indigo-600 font-medium">{comm.invoiceNumber || 'Vente directe'}</td>
                   <td className="px-6 py-4">{comm.rate}%</td>
-                  <td className="px-6 py-4 font-semibold text-slate-900">{formatCurrency(comm.amount, (profile as any)?.zone)}</td>
+                  <td className="px-6 py-4 font-semibold text-slate-900">{formatCurrency(comm.amount, profile?.zone)}</td>
                   <td className="px-6 py-4">
                     <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(comm.status)}`}>
                       {comm.status}
@@ -225,7 +225,7 @@ export default function Commissions() {
                         )}
                         <button
                           onClick={async () => {
-                            if (!confirm(`Supprimer cette commission de ${formatCurrency(comm.amount, (profile as any)?.zone)} ?`)) return;
+                            if (!confirm(`Supprimer cette commission de ${formatCurrency(comm.amount, profile?.zone)} ?`)) return;
                             const r = await fetch(`/api/commissions/${comm.id}`, { method: 'DELETE' });
                             if (r.ok) fetchData();
                             else { const d = await r.json().catch(() => ({})); alert('❌ ' + (d.error || 'Erreur')); }

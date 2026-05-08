@@ -41,6 +41,8 @@ export default function QuotePublicView() {
 
   const isPaid = quote?.payment_status === 'PAID';
 
+  const isSubscription = quote?.hasSubscription || quote?.paymentMode === 'subscription';
+
   const handlePayPalCreateOrder = async () => {
     setProcessingPayment(true);
     try {
@@ -65,6 +67,35 @@ export default function QuotePublicView() {
       alert(`✅ Paiement reçu (${result.amount} ${result.currency}) ! Vous pouvez maintenant signer le devis.`);
     } catch (e: any) {
       alert('Erreur de capture: ' + e.message);
+    } finally {
+      setProcessingPayment(false);
+    }
+  };
+
+  // Subscription: fetch plan_id then use createSubscription
+  const handleSubscriptionCreate = async (_data: any, actions: any) => {
+    setProcessingPayment(true);
+    try {
+      const r = await fetch(`/api/public/quotes/${id}/paypal/subscription-plan`, { method: 'POST' });
+      const planData = await r.json();
+      if (!r.ok) throw new Error(planData.error || 'Erreur plan');
+      return actions.subscription.create({ plan_id: planData.planId });
+    } catch (e: any) {
+      alert('Erreur: ' + e.message);
+      setProcessingPayment(false);
+      throw e;
+    }
+  };
+
+  const handleSubscriptionApprove = async (data: any) => {
+    try {
+      const r = await fetch(`/api/public/quotes/${id}/paypal/subscription/${data.subscriptionID}`, { method: 'POST' });
+      const result = await r.json();
+      if (!r.ok) throw new Error(result.error || 'Activation échouée');
+      setQuote((prev: any) => ({ ...prev, payment_status: 'PAID', payment_id: data.subscriptionID, payment_method: 'PAYPAL_SUBSCRIPTION' }));
+      alert(`✅ Abonnement activé ! Vous pouvez maintenant signer le devis.\n\nRéf. : ${data.subscriptionID}`);
+    } catch (e: any) {
+      alert('Erreur: ' + e.message);
     } finally {
       setProcessingPayment(false);
     }
@@ -218,10 +249,17 @@ export default function QuotePublicView() {
               <div className="space-y-4">
                 <div className="flex items-center justify-center gap-2 text-slate-700">
                   <CreditCard size={20} />
-                  <h3 className="font-bold text-lg">Étape 1 : Régler ce devis</h3>
+                  <h3 className="font-bold text-lg">
+                    Étape 1 : {isSubscription ? 'S\'abonner' : 'Régler ce devis'}
+                  </h3>
                 </div>
                 <p className="text-center text-sm text-slate-500 max-w-md mx-auto">
-                  Paiement sécurisé par PayPal. Carte bancaire (Visa, Mastercard, etc.) ou compte PayPal acceptés.
+                  {isSubscription ? (
+                    <>Abonnement <strong>mensuel</strong> sécurisé via PayPal. Vous serez prélevé chaque mois à la même date. Vous pouvez annuler à tout moment depuis votre compte PayPal.</>
+                  ) : (
+                    <>Paiement sécurisé par PayPal. Carte bancaire (Visa, Mastercard, etc.) ou compte PayPal acceptés.</>
+                  )}
+                  <br />
                   Le montant en FCFA sera converti en EUR au taux fixe (1 EUR = 655,957 XAF).
                 </p>
                 {!paypalConfig?.clientId ? (
@@ -230,16 +268,29 @@ export default function QuotePublicView() {
                   </div>
                 ) : (
                   <div className="max-w-md mx-auto">
-                    <PayPalScriptProvider options={{ clientId: paypalConfig.clientId, currency: 'EUR', intent: 'capture' }}>
-                      <PayPalButtons
-                        style={{ layout: 'vertical', shape: 'rect', color: 'gold', label: 'pay' }}
-                        createOrder={handlePayPalCreateOrder}
-                        onApprove={handlePayPalApprove}
-                        onError={(err) => { alert('Erreur PayPal: ' + (err as any).message); setProcessingPayment(false); }}
-                        onCancel={() => setProcessingPayment(false)}
-                        disabled={processingPayment}
-                      />
-                    </PayPalScriptProvider>
+                    {isSubscription ? (
+                      <PayPalScriptProvider options={{ clientId: paypalConfig.clientId, currency: 'EUR', intent: 'subscription', vault: true }}>
+                        <PayPalButtons
+                          style={{ layout: 'vertical', shape: 'rect', color: 'blue', label: 'subscribe' }}
+                          createSubscription={handleSubscriptionCreate}
+                          onApprove={handleSubscriptionApprove}
+                          onError={(err) => { alert('Erreur PayPal: ' + (err as any).message); setProcessingPayment(false); }}
+                          onCancel={() => setProcessingPayment(false)}
+                          disabled={processingPayment}
+                        />
+                      </PayPalScriptProvider>
+                    ) : (
+                      <PayPalScriptProvider options={{ clientId: paypalConfig.clientId, currency: 'EUR', intent: 'capture' }}>
+                        <PayPalButtons
+                          style={{ layout: 'vertical', shape: 'rect', color: 'gold', label: 'pay' }}
+                          createOrder={handlePayPalCreateOrder}
+                          onApprove={handlePayPalApprove}
+                          onError={(err) => { alert('Erreur PayPal: ' + (err as any).message); setProcessingPayment(false); }}
+                          onCancel={() => setProcessingPayment(false)}
+                          disabled={processingPayment}
+                        />
+                      </PayPalScriptProvider>
+                    )}
                   </div>
                 )}
               </div>

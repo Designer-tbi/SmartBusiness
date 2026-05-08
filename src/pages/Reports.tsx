@@ -16,7 +16,7 @@ interface Comment { id: number; author_name: string; author_role: string; conten
 
 export default function ReportsPage() {
   const { profile } = useAuth();
-  const userZone = (profile as any)?.zone;
+  const userZone = profile?.zone;
   const isAdmin = profile?.role === 'admin' || profile?.role === 'superadmin';
   const [reports, setReports] = useState<Report[]>([]);
   const [loading, setLoading] = useState(true);

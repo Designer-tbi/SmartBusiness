@@ -7,7 +7,7 @@ export default function Products() {
   const [searchTerm, setSearchTerm] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [editingProduct, setEditingProduct] = useState<any>(null);
-  const [form, setForm] = useState({ name: '', type: 'product', category: '', price: 0, vatRate: 19.25, stock: 0, unit: 'unité', description: '', currency: 'XAF' });
+  const [form, setForm] = useState({ name: '', type: 'product', category: '', price: 0, vatRate: 19.25, stock: 0, unit: 'unité', description: '', currency: 'XAF', billingType: 'one_time', billingPeriod: 'monthly' });
 
   const fetchProducts = async () => {
     try { const r = await fetch('/api/products'); if (r.ok) setProducts(await r.json()); }
@@ -16,7 +16,7 @@ export default function Products() {
 
   useEffect(() => { fetchProducts(); }, []);
 
-  const resetForm = () => { setForm({ name: '', type: 'product', category: '', price: 0, vatRate: 19.25, stock: 0, unit: 'unité', description: '', currency: 'XAF' }); setEditingProduct(null); };
+  const resetForm = () => { setForm({ name: '', type: 'product', category: '', price: 0, vatRate: 19.25, stock: 0, unit: 'unité', description: '', currency: 'XAF', billingType: 'one_time', billingPeriod: 'monthly' }); setEditingProduct(null); };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -92,9 +92,12 @@ export default function Products() {
                   <p className="font-medium text-slate-800">{p.name}</p>
                   {p.description && <p className="text-xs text-slate-400 truncate max-w-[200px]">{p.description}</p>}
                 </td>
-                <td className="px-4 py-3"><span className={`text-xs px-2 py-1 rounded-full font-medium ${p.type === 'service' ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-600'}`}>{p.type === 'service' ? 'Service' : 'Produit'}</span></td>
+                <td className="px-4 py-3">
+                  <span className={`text-xs px-2 py-1 rounded-full font-medium ${p.type === 'service' ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-600'}`}>{p.type === 'service' ? 'Service' : 'Produit'}</span>
+                  {p.billing_type === 'subscription' && <span className="ml-1 text-xs px-2 py-1 rounded-full font-medium bg-emerald-100 text-emerald-700" title="Abonnement mensuel">🔁 Abo.</span>}
+                </td>
                 <td className="px-4 py-3 text-sm text-slate-500 hidden md:table-cell">{p.category || '-'}</td>
-                <td className="px-4 py-3 font-bold text-slate-800">{Number(p.price).toLocaleString()} {p.currency || 'XAF'}</td>
+                <td className="px-4 py-3 font-bold text-slate-800">{Number(p.price).toLocaleString()} {p.currency || 'XAF'}{p.billing_type === 'subscription' ? <span className="text-xs text-slate-400 font-normal">/mois</span> : ''}</td>
                 <td className="px-4 py-3 text-sm text-slate-500 hidden md:table-cell">{p.vat_rate}%</td>
                 <td className="px-4 py-3 hidden lg:table-cell"><span className={`font-medium ${Number(p.stock) < 10 ? 'text-red-600' : 'text-slate-700'}`}>{p.stock} {p.unit || ''}</span></td>
                 <td className="px-4 py-3 text-right">
@@ -120,6 +123,26 @@ export default function Products() {
                 <div className="md:col-span-2">
                   <label className="block text-sm font-medium text-slate-700 mb-1">Nom *</label>
                   <input required value={form.name} onChange={e => setForm({...form, name: e.target.value})} placeholder="Nom du produit ou service" className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none" />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-slate-700 mb-2">Mode de facturation *</label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button type="button" onClick={() => setForm({...form, billingType: 'one_time'})}
+                      className={`p-4 rounded-xl border-2 text-left transition-all ${form.billingType === 'one_time' ? 'border-indigo-500 bg-indigo-50' : 'border-slate-200 bg-white hover:border-slate-300'}`}>
+                      <div className={`font-semibold text-sm mb-1 ${form.billingType === 'one_time' ? 'text-indigo-900' : 'text-slate-700'}`}>💰 Paiement unique</div>
+                      <p className="text-xs text-slate-500">Le client paie une seule fois (produit ou prestation ponctuelle)</p>
+                    </button>
+                    <button type="button" onClick={() => setForm({...form, billingType: 'subscription'})}
+                      className={`p-4 rounded-xl border-2 text-left transition-all ${form.billingType === 'subscription' ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200 bg-white hover:border-slate-300'}`}>
+                      <div className={`font-semibold text-sm mb-1 ${form.billingType === 'subscription' ? 'text-emerald-900' : 'text-slate-700'}`}>🔁 Abonnement mensuel</div>
+                      <p className="text-xs text-slate-500">Le client est prélevé chaque mois via PayPal (renouvellement automatique)</p>
+                    </button>
+                  </div>
+                  {form.billingType === 'subscription' && (
+                    <div className="mt-3 p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-xs text-emerald-800">
+                      ℹ️ Un devis ne peut contenir que des produits d'abonnement OU uniquement des produits à paiement unique (pas de mélange).
+                    </div>
+                  )}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Type</label>

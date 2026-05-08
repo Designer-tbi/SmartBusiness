@@ -5,7 +5,7 @@ import { formatCurrency } from '../lib/countryConfig';
 
 export default function SalesAnalysis() {
   const { profile } = useAuth();
-  const userZone = (profile as any)?.zone;
+  const userZone = profile?.zone;
   const [stats, setStats] = useState({ revenue: 0, avgDeal: 0, newCustomers: 0, conversionRate: 0 });
   const [loading, setLoading] = useState(true);
 

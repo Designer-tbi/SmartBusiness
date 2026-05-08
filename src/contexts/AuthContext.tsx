@@ -5,6 +5,9 @@ export interface UserProfile {
   email: string;
   name: string;
   role: 'admin' | 'agent' | 'superadmin';
+  zone?: string | null;
+  accountType?: string;
+  demoRemainingDays?: number;
   createdAt: string;
 }
 

@@ -31,7 +31,7 @@ interface PortfolioItem {
 export default function Portfolio() {
   const navigate = useNavigate();
   const { profile } = useAuth();
-  const zoneCfg = getZoneConfig((profile as any)?.zone);
+  const zoneCfg = getZoneConfig(profile?.zone);
   const [categories, setCategories] = useState<Category[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<Category | null>(null);
   const [viewAll, setViewAll] = useState(false);
@@ -469,7 +469,7 @@ export default function Portfolio() {
                 <PhoneInput
                   value={newItem.tel}
                   onChange={(v) => setNewItem({...newItem, tel: v})}
-                  zone={(profile as any)?.zone}
+                  zone={profile?.zone}
                 />
               </div>
               <div>

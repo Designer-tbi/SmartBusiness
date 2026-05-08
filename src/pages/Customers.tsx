@@ -7,7 +7,7 @@ import PhoneInput from '../components/PhoneInput';
 
 export default function Customers() {
   const { profile } = useAuth();
-  const zoneCfg = getZoneConfig((profile as any)?.zone);
+  const zoneCfg = getZoneConfig(profile?.zone);
   const [customers, setCustomers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -376,7 +376,7 @@ export default function Customers() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1.5">Téléphone *</label>
-                  <PhoneInput value={phone} onChange={setPhone} required zone={(profile as any)?.zone} />
+                  <PhoneInput value={phone} onChange={setPhone} required zone={profile?.zone} />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1.5">Email</label>

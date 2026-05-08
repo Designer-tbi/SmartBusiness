@@ -7,7 +7,7 @@ import { formatCurrency, getCurrencyLabel } from '../lib/countryConfig';
 
 export default function Opportunities() {
   const { profile } = useAuth();
-  const userZone = (profile as any)?.zone;
+  const userZone = profile?.zone;
   const [opportunities, setOpportunities] = useState<any[]>([]);
   const [customers, setCustomers] = useState<any[]>([]);
   const [leads, setLeads] = useState<any[]>([]);

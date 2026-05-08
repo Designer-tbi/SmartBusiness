@@ -243,7 +243,14 @@ export default function Layout() {
             {isSidebarOpen && (
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium truncate">{profile?.name}</p>
-                <p className="text-xs text-slate-400 truncate capitalize">{profile?.role}</p>
+                <p className="text-xs text-slate-400 truncate capitalize">
+                  {profile?.role}
+                  {profile?.zone && (
+                    <span className="ml-1 px-1.5 py-0.5 bg-indigo-500/30 rounded text-[10px] font-bold tracking-wide" data-testid="user-zone-badge">
+                      {profile.zone}
+                    </span>
+                  )}
+                </p>
               </div>
             )}
           </div>

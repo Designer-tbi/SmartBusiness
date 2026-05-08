@@ -50,7 +50,7 @@ interface Objective {
 
 export default function Objectives() {
   const { profile } = useAuth();
-  const zoneCfg = getZoneConfig((profile as any)?.zone);
+  const zoneCfg = getZoneConfig(profile?.zone);
   const [objectives, setObjectives] = useState<Objective[]>([]);
   const [users, setUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);

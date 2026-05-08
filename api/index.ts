@@ -97,6 +97,10 @@ async function ensureDbInitialized() {
       "ALTER TABLE quotes ADD COLUMN IF NOT EXISTS payment_amount NUMERIC",
       "ALTER TABLE quotes ADD COLUMN IF NOT EXISTS payment_currency TEXT",
       "ALTER TABLE invoices ADD COLUMN IF NOT EXISTS notes TEXT",
+      "ALTER TABLE products ADD COLUMN IF NOT EXISTS billing_type TEXT DEFAULT 'one_time'",
+      "ALTER TABLE products ADD COLUMN IF NOT EXISTS billing_period TEXT DEFAULT NULL",
+      "ALTER TABLE products ADD COLUMN IF NOT EXISTS paypal_plan_id TEXT DEFAULT NULL",
+      "ALTER TABLE quotes ADD COLUMN IF NOT EXISTS subscription_id TEXT DEFAULT NULL",
       "CREATE TABLE IF NOT EXISTS reports (id SERIAL PRIMARY KEY, agent_id TEXT NOT NULL, agent_name TEXT NOT NULL, title TEXT NOT NULL, period_start DATE NOT NULL, period_end DATE NOT NULL, calls_count INTEGER DEFAULT 0, meetings_count INTEGER DEFAULT 0, quotes_count INTEGER DEFAULT 0, quotes_amount NUMERIC DEFAULT 0, new_leads INTEGER DEFAULT 0, new_customers INTEGER DEFAULT 0, invoices_amount NUMERIC DEFAULT 0, summary TEXT, challenges TEXT, next_actions TEXT, status TEXT DEFAULT 'submitted', created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
       "CREATE TABLE IF NOT EXISTS report_comments (id SERIAL PRIMARY KEY, report_id INTEGER NOT NULL REFERENCES reports(id) ON DELETE CASCADE, author_id TEXT NOT NULL, author_name TEXT NOT NULL, author_role TEXT NOT NULL, content TEXT NOT NULL, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
     ];
@@ -206,7 +210,7 @@ app.post("/api/auth/logout", (req, res) => { res.clearCookie("token"); res.json(
 
 app.get("/api/auth/me", authenticateToken, async (req: any, res) => {
   try {
-    const result = await query('SELECT uid, email, name, role, account_type as "accountType", is_active as "isActive", first_login_at as "firstLoginAt", company_name as "companyName", created_at as "createdAt" FROM users WHERE uid = $1', [req.user.uid]);
+    const result = await query('SELECT uid, email, name, role, zone, account_type as "accountType", is_active as "isActive", first_login_at as "firstLoginAt", company_name as "companyName", created_at as "createdAt" FROM users WHERE uid = $1', [req.user.uid]);
     if (result.rows.length === 0) return res.status(404).json({ error: "User not found" });
     const user = result.rows[0];
     // Calculate days remaining for demo
@@ -729,8 +733,24 @@ app.get("/api/products", authenticateToken, async (req: any, res) => {
 });
 app.post("/api/products", authenticateToken, async (req: any, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'superadmin') return res.status(403).json({ error: "Forbidden" });
-  const { name, type, category, categoryId, catalogId, price, vatRate, vatRateId, stock, unit, description, technicalFileUrl, currency } = req.body;
-  try { res.status(201).json((await query("INSERT INTO products (name, type, category, category_id, catalog_id, price, vat_rate, vat_rate_id, stock, unit, description, technical_file_url, currency) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *", [name, type || 'product', category, categoryId, catalogId, price, vatRate || 20, vatRateId, stock || 0, unit, description, technicalFileUrl, currency || 'XAF'])).rows[0]); } catch (err) { res.status(500).json({ error: "Server error" }); }
+  const { name, type, category, categoryId, catalogId, price, vatRate, vatRateId, stock, unit, description, technicalFileUrl, currency, billingType, billingPeriod } = req.body;
+  try {
+    const bt = billingType === 'subscription' ? 'subscription' : 'one_time';
+    const bp = bt === 'subscription' ? (billingPeriod || 'monthly') : null;
+    res.status(201).json((await query("INSERT INTO products (name, type, category, category_id, catalog_id, price, vat_rate, vat_rate_id, stock, unit, description, technical_file_url, currency, billing_type, billing_period) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *", [name, type || 'product', category, categoryId, catalogId, price, vatRate || 20, vatRateId, stock || 0, unit, description, technicalFileUrl, currency || 'XAF', bt, bp])).rows[0]);
+  } catch (err: any) { console.error(err); res.status(500).json({ error: "Server error: " + err.message }); }
+});
+app.put("/api/products/:id", authenticateToken, async (req: any, res) => {
+  if (req.user.role !== 'admin' && req.user.role !== 'superadmin') return res.status(403).json({ error: "Forbidden" });
+  const { name, price, vatRate, stock, unit, description, currency, billingType, billingPeriod } = req.body;
+  try {
+    const bt = billingType === 'subscription' ? 'subscription' : 'one_time';
+    const bp = bt === 'subscription' ? (billingPeriod || 'monthly') : null;
+    // Invalidate existing PayPal plan when billing changes
+    await query("UPDATE products SET name=COALESCE($1,name), price=COALESCE($2,price), vat_rate=COALESCE($3,vat_rate), stock=COALESCE($4,stock), unit=COALESCE($5,unit), description=COALESCE($6,description), currency=COALESCE($7,currency), billing_type=$8, billing_period=$9, paypal_plan_id=NULL WHERE id=$10",
+      [name, price, vatRate, stock, unit, description, currency, bt, bp, req.params.id]);
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: "Server error: " + err.message }); }
 });
 app.delete("/api/products/:id", authenticateToken, async (req: any, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'superadmin') return res.status(403).json({ error: "Forbidden" });
@@ -758,18 +778,34 @@ app.get("/api/quotes/:id", authenticateToken, async (req, res) => {
     res.json({ ...quote, customerName: quote.customerName || quote.leadName, customerEmail: quote.customerEmail || quote.leadEmail, customerPhone: quote.customerPhone || quote.leadPhone, items: items.rows });
   } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
+// Helper: reject quote items that mix subscription + one_time
+async function validateQuoteItemsMix(items: any[]): Promise<string | null> {
+  if (!items || items.length === 0) return null;
+  const productIds = items.map(i => i.productId).filter((x: any) => x !== "" && x !== null && x !== undefined);
+  if (productIds.length === 0) return null;
+  const r = await query("SELECT id, billing_type FROM products WHERE id = ANY($1::int[])", [productIds]);
+  const types = new Set(r.rows.map((p: any) => p.billing_type || 'one_time'));
+  if (types.has('subscription') && types.has('one_time')) {
+    return "Un devis ne peut pas mélanger des produits d'abonnement et des produits à paiement unique.";
+  }
+  return null;
+}
+
 app.post("/api/quotes", authenticateToken, async (req: any, res) => {
   const { number, customerId, leadId, amount, status, date, expiryDate, notes, items } = req.body;
   try {
+    const err = await validateQuoteItemsMix(items || []);
+    if (err) return res.status(400).json({ error: err });
     const result = await query("INSERT INTO quotes (number, customer_id, lead_id, agent_id, amount, status, date, expiry_date, notes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id", [number, customerId === "" ? null : customerId, leadId === "" ? null : leadId, req.user.uid, amount, status || 'Brouillon', date, expiryDate, notes]);
     const quoteId = result.rows[0].id;
     if (items?.length > 0) { for (const item of items) { await query("INSERT INTO quote_items (quote_id, product_id, description, quantity, unit_price, total_price) VALUES ($1,$2,$3,$4,$5,$6)", [quoteId, item.productId === "" ? null : item.productId, item.description, item.quantity, item.unitPrice, item.totalPrice]); } }
     res.status(201).json({ id: quoteId });
-  } catch (err) { res.status(500).json({ error: "Server error" }); }
+  } catch (err: any) { console.error(err); res.status(500).json({ error: "Server error: " + err.message }); }
 });
 app.put("/api/quotes/:id", authenticateToken, async (req, res) => {
   const { id } = req.params; const { amount, status, date, expiryDate, notes, items } = req.body;
   try {
+    if (items) { const err = await validateQuoteItemsMix(items); if (err) return res.status(400).json({ error: err }); }
     await query("UPDATE quotes SET amount=$1, status=$2, date=$3, expiry_date=$4, notes=$5, updated_at=CURRENT_TIMESTAMP WHERE id=$6", [amount, status, date, expiryDate, notes, id]);
     if (items) { await query("DELETE FROM quote_items WHERE quote_id = $1", [id]); for (const item of items) { await query("INSERT INTO quote_items (quote_id, product_id, description, quantity, unit_price, total_price) VALUES ($1,$2,$3,$4,$5,$6)", [id, item.productId === "" ? null : item.productId, item.description, item.quantity, item.unitPrice, item.totalPrice]); } }
     // AUTO: sync linked opportunity + invoice on Signé/Refusé
@@ -866,9 +902,10 @@ app.get("/api/public/quotes/:id", async (req, res) => {
   try {
     const qr = await query('SELECT q.*, c.name as "customerName", c.email as "customerEmail", c.phone as "customerPhone", c.address as "customerAddress", c.city as "customerCity", l.first_name || \' \' || l.last_name as "leadName", l.email as "leadEmail", l.phone as "leadPhone", l.address as "leadAddress", l.city as "leadCity", u.name as "agentName", u.email as "agentEmail" FROM quotes q LEFT JOIN customers c ON q.customer_id = c.id LEFT JOIN leads l ON q.lead_id = l.id LEFT JOIN users u ON q.agent_id = u.uid WHERE q.id = $1', [id]);
     if (qr.rows.length === 0) return res.status(404).json({ error: "Quote not found" });
-    const items = await query("SELECT * FROM quote_items WHERE quote_id = $1", [id]);
+    const items = await query("SELECT qi.*, p.billing_type, p.billing_period FROM quote_items qi LEFT JOIN products p ON qi.product_id = p.id WHERE qi.quote_id = $1", [id]);
     const quote = qr.rows[0];
-    res.json({ ...quote, customerName: quote.customerName || quote.leadName, customerEmail: quote.customerEmail || quote.leadEmail, customerPhone: quote.customerPhone || quote.leadPhone, customerAddress: quote.customerAddress || quote.leadAddress, customerCity: quote.customerCity || quote.leadCity, items: items.rows });
+    const hasSubscription = items.rows.some((i: any) => i.billing_type === 'subscription');
+    res.json({ ...quote, customerName: quote.customerName || quote.leadName, customerEmail: quote.customerEmail || quote.leadEmail, customerPhone: quote.customerPhone || quote.leadPhone, customerAddress: quote.customerAddress || quote.leadAddress, customerCity: quote.customerCity || quote.leadCity, items: items.rows, hasSubscription, paymentMode: hasSubscription ? 'subscription' : 'one_time' });
   } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 
@@ -995,6 +1032,129 @@ app.get("/api/public/paypal/config", (req, res) => {
     clientId: process.env.PAYPAL_CLIENT_ID || '',
     mode: process.env.PAYPAL_MODE === 'live' ? 'live' : 'sandbox'
   });
+});
+
+// =====================================================================
+// PAYPAL SUBSCRIPTIONS — for recurring monthly products
+// =====================================================================
+
+// Ensure PayPal Product exists (cached via a placeholder strategy — create-on-demand)
+async function ensurePayPalProductForCrmProduct(productRow: any, token: string): Promise<string> {
+  // Strategy: product name is unique enough to dedupe via a local cache column (paypal_product_id would be ideal)
+  // For simplicity we create a product each time and rely on Plan IDs.
+  const r = await fetch(`${PAYPAL_BASE}/v1/catalogs/products`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name: productRow.name?.substring(0, 100) || 'Produit CRM',
+      description: (productRow.description || productRow.name || '').substring(0, 200),
+      type: 'SERVICE',
+      category: 'SOFTWARE'
+    })
+  });
+  const data: any = await r.json();
+  if (!r.ok) { console.error('PayPal product create error:', data); throw new Error(data.message || 'create product failed'); }
+  return data.id;
+}
+
+// Ensure a monthly Plan exists on PayPal for a given CRM product
+async function ensurePayPalPlanForProduct(productId: number): Promise<{ planId: string, amount: number, currency: string }> {
+  const pr = await query("SELECT * FROM products WHERE id = $1", [productId]);
+  if (pr.rows.length === 0) throw new Error('Product not found');
+  const product = pr.rows[0];
+  if (product.billing_type !== 'subscription') throw new Error('Not a subscription product');
+
+  // Return cached if present
+  if (product.paypal_plan_id) {
+    const converted = convertToPayPalCurrency(Number(product.price), product.currency || 'XAF');
+    return { planId: product.paypal_plan_id, amount: Number(converted.value), currency: converted.currency };
+  }
+
+  const token = await getPayPalAccessToken();
+  const paypalProductId = await ensurePayPalProductForCrmProduct(product, token);
+  const converted = convertToPayPalCurrency(Number(product.price), product.currency || 'XAF');
+
+  const planRes = await fetch(`${PAYPAL_BASE}/v1/billing/plans`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      product_id: paypalProductId,
+      name: `Plan mensuel - ${product.name}`.substring(0, 127),
+      description: `Abonnement mensuel ${product.name}`.substring(0, 127),
+      status: 'ACTIVE',
+      billing_cycles: [{
+        frequency: { interval_unit: 'MONTH', interval_count: 1 },
+        tenure_type: 'REGULAR',
+        sequence: 1,
+        total_cycles: 0, // 0 = infinite
+        pricing_scheme: { fixed_price: { value: converted.value, currency_code: converted.currency } }
+      }],
+      payment_preferences: {
+        auto_bill_outstanding: true,
+        setup_fee: { value: '0', currency_code: converted.currency },
+        setup_fee_failure_action: 'CONTINUE',
+        payment_failure_threshold: 3
+      }
+    })
+  });
+  const plan: any = await planRes.json();
+  if (!planRes.ok) { console.error('PayPal plan create error:', plan); throw new Error(plan.message || 'create plan failed'); }
+
+  await query("UPDATE products SET paypal_plan_id = $1 WHERE id = $2", [plan.id, productId]);
+  return { planId: plan.id, amount: Number(converted.value), currency: converted.currency };
+}
+
+// Public — Create PayPal subscription plan data for a subscription-type quote
+app.post("/api/public/quotes/:id/paypal/subscription-plan", async (req, res) => {
+  const { id } = req.params;
+  try {
+    const qr = await query("SELECT * FROM quotes WHERE id = $1", [id]);
+    if (qr.rows.length === 0) return res.status(404).json({ error: "Devis introuvable" });
+    if (qr.rows[0].payment_status === 'PAID') return res.status(400).json({ error: "Devis déjà payé" });
+
+    const items = await query("SELECT qi.*, p.billing_type, p.billing_period FROM quote_items qi LEFT JOIN products p ON qi.product_id = p.id WHERE qi.quote_id = $1", [id]);
+    const rows = items.rows;
+    const hasSubscription = rows.some((i: any) => i.billing_type === 'subscription');
+    const hasOneTime = rows.some((i: any) => i.billing_type === 'one_time' || !i.billing_type);
+
+    if (!hasSubscription) return res.status(400).json({ error: "Ce devis ne contient pas d'abonnement" });
+    if (hasSubscription && hasOneTime) return res.status(400).json({ error: "Un devis ne peut pas mélanger abonnement et produit unique" });
+
+    // For simplicity: take the first subscription product as the master plan (most common case: 1 subscription per quote)
+    const subItem = rows.find((i: any) => i.billing_type === 'subscription');
+    if (!subItem?.product_id) return res.status(400).json({ error: "Produit d'abonnement invalide" });
+
+    const plan = await ensurePayPalPlanForProduct(subItem.product_id);
+    res.json({ planId: plan.planId, amount: plan.amount, currency: plan.currency });
+  } catch (err: any) {
+    console.error('subscription-plan error:', err);
+    res.status(500).json({ error: err.message || 'Server error' });
+  }
+});
+
+// Public — Record subscription activation (called after user approves subscription on PayPal)
+app.post("/api/public/quotes/:id/paypal/subscription/:subscriptionId", async (req, res) => {
+  const { id, subscriptionId } = req.params;
+  try {
+    const token = await getPayPalAccessToken();
+    // Fetch subscription to validate it's ACTIVE
+    const sr = await fetch(`${PAYPAL_BASE}/v1/billing/subscriptions/${subscriptionId}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    const sub: any = await sr.json();
+    if (!sr.ok) { console.error('sub fetch error:', sub); return res.status(500).json({ error: 'Impossible de vérifier l\'abonnement' }); }
+    if (sub.status !== 'ACTIVE' && sub.status !== 'APPROVED') {
+      return res.status(400).json({ error: `Abonnement non actif (${sub.status})` });
+    }
+    const amount = sub.billing_info?.last_payment?.amount?.value || null;
+    const currency = sub.billing_info?.last_payment?.amount?.currency_code || 'EUR';
+    await query("UPDATE quotes SET payment_status='PAID', payment_id=$1, payment_method='PAYPAL_SUBSCRIPTION', payment_date=CURRENT_TIMESTAMP, payment_amount=$2, payment_currency=$3, subscription_id=$4, updated_at=CURRENT_TIMESTAMP WHERE id=$5",
+      [subscriptionId, amount, currency, subscriptionId, id]);
+    res.json({ success: true, subscriptionId, status: sub.status });
+  } catch (err: any) {
+    console.error('subscription activate error:', err);
+    res.status(500).json({ error: err.message || 'Server error' });
+  }
 });
 app.post("/api/public/quotes/:id/sign", async (req, res) => {
   const { id } = req.params; const { signature, signedBy } = req.body;

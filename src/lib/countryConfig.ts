@@ -6,6 +6,7 @@ export interface ZoneConfig {
   flag: string;
   cities: string[];
   currency: string;
+  altCurrencies?: string[];
   niuLabel: string;
   niuPlaceholder: string;
   niuPattern?: RegExp;
@@ -30,6 +31,7 @@ export const ZONE_CONFIG: Record<ZoneCode, ZoneConfig> = {
     flag: '🇨🇩',
     cities: ['Kinshasa', 'Lubumbashi', 'Mbuji-Mayi', 'Kananga', 'Kisangani', 'Bukavu', 'Tshikapa', 'Kolwezi', 'Likasi', 'Goma', 'Matadi', 'Mbandaka', 'Beni', 'Uvira', 'Bunia'],
     currency: 'CDF',
+    altCurrencies: ['USD', 'EUR'],
     niuLabel: 'NIF',
     niuPlaceholder: 'A0123456789',
     niuPattern: /^[A-Z]\d{10}$/,
