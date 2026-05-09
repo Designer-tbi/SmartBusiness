@@ -4,6 +4,8 @@ import { Users, Plus, Building2, User, Search, Trash2, Edit2 } from 'lucide-reac
 import { useAuth } from '../contexts/AuthContext';
 import { getZoneConfig } from '../lib/countryConfig';
 import PhoneInput from '../components/PhoneInput';
+import CurrencySelector from '../components/CurrencySelector';
+import CommentsSection from '../components/CommentsSection';
 
 export default function Customers() {
   const { profile } = useAuth();
@@ -25,6 +27,8 @@ export default function Customers() {
   const [city, setCity] = useState('');
   const [industry, setIndustry] = useState('');
   const [niu, setNiu] = useState('');
+  const [currency, setCurrency] = useState<string>('');
+  const [expandedComments, setExpandedComments] = useState<number | null>(null);
 
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -93,6 +97,7 @@ export default function Customers() {
       address: address || null,
       city: city || null,
       industry: type === 'company' ? industry : null,
+      currency: currency || null,
     };
 
     try {
@@ -122,7 +127,7 @@ export default function Customers() {
   };
 
   const handleDelete = async (id: number) => {
-    if (!window.confirm('Êtes-vous sûr de vouloir supprimer ce client ?')) return;
+    if (!window.confirm('Supprimer ce client ? Ses devis/factures/opportunités seront détachés (non supprimés).')) return;
 
     try {
       const response = await fetch(`/api/customers/${id}`, {
@@ -131,9 +136,12 @@ export default function Customers() {
 
       if (response.ok) {
         fetchCustomers();
+      } else {
+        const d = await response.json().catch(() => ({}));
+        alert('❌ ' + (d.error || 'Suppression échouée'));
       }
-    } catch (error) {
-      console.error("Error deleting customer:", error);
+    } catch (error: any) {
+      alert('❌ Erreur réseau: ' + error.message);
     }
   };
 
@@ -188,8 +196,9 @@ export default function Customers() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200">
-              {filteredCustomers.map((customer) => (
-                <tr key={customer.id} className="hover:bg-slate-50 transition-colors">
+              {filteredCustomers.map(customer => (
+                <React.Fragment key={customer.id}>
+                <tr className="hover:bg-slate-50 transition-colors">
                   <td className="px-6 py-4">
                     {customer.type === 'company' ? (
                       <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
@@ -220,6 +229,14 @@ export default function Customers() {
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setExpandedComments(expandedComments === customer.id ? null : customer.id)}
+                        className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
+                        title="Commentaires de suivi"
+                        data-testid={`customer-comments-${customer.id}`}
+                      >
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>
+                      </button>
                       <button 
                         onClick={() => handleEdit(customer)}
                         className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
@@ -228,6 +245,7 @@ export default function Customers() {
                       </button>
                       <button 
                         onClick={() => handleDelete(customer.id)}
+                        data-testid={`delete-customer-${customer.id}`}
                         className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
                       >
                         <Trash2 size={16} />
@@ -235,6 +253,14 @@ export default function Customers() {
                     </div>
                   </td>
                 </tr>
+                {expandedComments === customer.id && (
+                  <tr>
+                    <td colSpan={6} className="px-6 pb-4 bg-slate-50">
+                      <CommentsSection entityType="customer" entityId={customer.id} compact />
+                    </td>
+                  </tr>
+                )}
+                </React.Fragment>
               ))}
               {filteredCustomers.length === 0 && (
                 <tr>
@@ -396,6 +422,10 @@ export default function Customers() {
                     <option value="">Sélectionner une ville</option>
                     {zoneCfg.cities.map(c => <option key={c} value={c}>{c}</option>)}
                   </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Devise préférée</label>
+                  <CurrencySelector value={currency} onChange={setCurrency} zone={profile?.zone} />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1.5">Pays</label>

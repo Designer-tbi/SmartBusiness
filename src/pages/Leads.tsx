@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { UserPlus, Plus, Building2, User, Search, Trash2, Edit2, Filter, UserCheck, Target } from 'lucide-react';
+import { UserPlus, Plus, Building2, User, Search, Trash2, Edit2, Filter, UserCheck, Target, MessageSquare } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { getZoneConfig } from '../lib/countryConfig';
 import PhoneInput from '../components/PhoneInput';
+import CurrencySelector from '../components/CurrencySelector';
+import CommentsSection from '../components/CommentsSection';
 
 export default function Leads() {
   const { profile } = useAuth();
@@ -27,6 +29,8 @@ export default function Leads() {
   const [address, setAddress] = useState('');
   const [city, setCity] = useState('');
   const [niu, setNiu] = useState('');
+  const [currency, setCurrency] = useState<string>('');
+  const [expandedComments, setExpandedComments] = useState<number | null>(null);
 
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -101,6 +105,7 @@ export default function Leads() {
       notes: notes ? `${niu ? `NIU: ${niu}\n` : ''}${notes}` : (niu ? `NIU: ${niu}` : null),
       address: address || null,
       city: city || null,
+      currency: currency || null,
     };
 
     try {
@@ -264,7 +269,8 @@ export default function Leads() {
             </thead>
             <tbody className="divide-y divide-slate-200">
               {filteredLeads.map((lead) => (
-                <tr key={lead.id} className="hover:bg-slate-50 transition-colors">
+                <React.Fragment key={lead.id}>
+                <tr className="hover:bg-slate-50 transition-colors">
                   <td className="px-6 py-4">
                     {lead.type === 'company' ? (
                       <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
@@ -298,6 +304,14 @@ export default function Leads() {
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setExpandedComments(expandedComments === lead.id ? null : lead.id)}
+                        title="Commentaires"
+                        className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
+                        data-testid={`lead-comments-${lead.id}`}
+                      >
+                        <MessageSquare size={16} />
+                      </button>
                       <button 
                         onClick={() => handleConvertToCustomer(lead.id)}
                         title="Convertir en Client"
@@ -320,6 +334,14 @@ export default function Leads() {
                     </div>
                   </td>
                 </tr>
+                {expandedComments === lead.id && (
+                  <tr>
+                    <td colSpan={6} className="px-6 pb-4 bg-slate-50">
+                      <CommentsSection entityType="lead" entityId={lead.id} compact />
+                    </td>
+                  </tr>
+                )}
+                </React.Fragment>
               ))}
               {filteredLeads.length === 0 && (
                 <tr>
@@ -464,6 +486,10 @@ export default function Leads() {
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1.5">{zoneCfg.niuLabel}</label>
                   <input type="text" value={niu} onChange={(e) => setNiu(e.target.value)} placeholder={zoneCfg.niuPlaceholder} className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all font-mono text-sm" />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Devise prévue pour le devis</label>
+                  <CurrencySelector value={currency} onChange={setCurrency} zone={profile?.zone} />
                 </div>
 
                 <div className="md:col-span-2 border-t border-slate-100 pt-4 mt-2">

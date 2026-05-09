@@ -1,14 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
-import { Target, Plus, Search, Trash2, Edit2, Filter, DollarSign, Calendar, TrendingUp, UserCheck, UserPlus } from 'lucide-react';
+import { Target, Plus, Search, Trash2, Edit2, Filter, DollarSign, Calendar, TrendingUp, UserCheck, UserPlus, MessageSquare } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { formatCurrency, getCurrencyLabel } from '../lib/countryConfig';
+import CurrencySelector from '../components/CurrencySelector';
+import CommentsSection from '../components/CommentsSection';
 
 export default function Opportunities() {
   const { profile } = useAuth();
   const userZone = profile?.zone;
   const [opportunities, setOpportunities] = useState<any[]>([]);
+  const [expandedComments, setExpandedComments] = useState<number | null>(null);
   const [customers, setCustomers] = useState<any[]>([]);
   const [leads, setLeads] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -22,6 +25,7 @@ export default function Opportunities() {
   const [leadId, setLeadId] = useState('');
   const [title, setTitle] = useState('');
   const [amount, setAmount] = useState('');
+  const [currency, setCurrency] = useState<string>('');
   const [stage, setStage] = useState('Prospection');
   const [probability, setProbability] = useState('20');
   const [expectedCloseDate, setExpectedCloseDate] = useState('');
@@ -68,6 +72,7 @@ export default function Opportunities() {
     setLeadId('');
     setTitle('');
     setAmount('');
+    setCurrency('');
     setStage('Prospection');
     setProbability('20');
     setExpectedCloseDate('');
@@ -82,6 +87,7 @@ export default function Opportunities() {
     setLeadId(opp.leadId ? opp.leadId.toString() : '');
     setTitle(opp.title);
     setAmount(opp.amount.toString());
+    setCurrency(opp.currency || '');
     setStage(opp.stage);
     setProbability(opp.probability.toString());
     setExpectedCloseDate(opp.expectedCloseDate ? opp.expectedCloseDate.split('T')[0] : '');
@@ -100,6 +106,7 @@ export default function Opportunities() {
       leadId: leadId ? parseInt(leadId) : null,
       title,
       amount: parseFloat(amount),
+      currency: currency || null,
       stage,
       probability: parseInt(probability),
       expectedCloseDate: expectedCloseDate || null,
@@ -284,7 +291,8 @@ export default function Opportunities() {
             </thead>
             <tbody className="divide-y divide-slate-200">
               {filteredOpportunities.map((opp) => (
-                <tr key={opp.id} className="hover:bg-slate-50 transition-colors">
+                <React.Fragment key={opp.id}>
+                <tr className="hover:bg-slate-50 transition-colors">
                   <td className="px-6 py-4">
                     <div className="font-medium text-slate-900">{opp.title}</div>
                     <div className="text-xs text-slate-400">ID: #{opp.id}</div>
@@ -325,6 +333,14 @@ export default function Opportunities() {
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setExpandedComments(expandedComments === opp.id ? null : opp.id)}
+                        title="Commentaires"
+                        className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
+                        data-testid={`opp-comments-${opp.id}`}
+                      >
+                        <MessageSquare size={16} />
+                      </button>
                       {opp.stage !== 'Gagnée' && (
                         <>
                           <button 
@@ -358,6 +374,14 @@ export default function Opportunities() {
                     </div>
                   </td>
                 </tr>
+                {expandedComments === opp.id && (
+                  <tr>
+                    <td colSpan={7} className="px-6 pb-4 bg-slate-50">
+                      <CommentsSection entityType="opportunity" entityId={opp.id} compact />
+                    </td>
+                  </tr>
+                )}
+                </React.Fragment>
               ))}
               {filteredOpportunities.length === 0 && (
                 <tr>
@@ -444,7 +468,7 @@ export default function Opportunities() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Montant ({getCurrencyLabel(userZone)})</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Montant</label>
                   <input
                     type="number"
                     required
@@ -453,6 +477,11 @@ export default function Opportunities() {
                     className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
                     placeholder="0"
                   />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Devise</label>
+                  <CurrencySelector value={currency} onChange={setCurrency} zone={userZone} />
                 </div>
 
                 <div>

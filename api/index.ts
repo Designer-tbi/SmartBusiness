@@ -101,6 +101,20 @@ async function ensureDbInitialized() {
       "ALTER TABLE products ADD COLUMN IF NOT EXISTS billing_period TEXT DEFAULT NULL",
       "ALTER TABLE products ADD COLUMN IF NOT EXISTS paypal_plan_id TEXT DEFAULT NULL",
       "ALTER TABLE quotes ADD COLUMN IF NOT EXISTS subscription_id TEXT DEFAULT NULL",
+      "ALTER TABLE portfolio_items ADD COLUMN IF NOT EXISTS agent_id TEXT",
+      "ALTER TABLE leads ADD COLUMN IF NOT EXISTS currency TEXT",
+      "ALTER TABLE customers ADD COLUMN IF NOT EXISTS currency TEXT",
+      "ALTER TABLE opportunities ADD COLUMN IF NOT EXISTS currency TEXT",
+      `CREATE TABLE IF NOT EXISTS comments (
+        id SERIAL PRIMARY KEY,
+        entity_type TEXT NOT NULL,
+        entity_id INTEGER NOT NULL,
+        author_id TEXT,
+        author_name TEXT,
+        content TEXT NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      )`,
+      "CREATE INDEX IF NOT EXISTS idx_comments_entity ON comments(entity_type, entity_id)",
       "CREATE TABLE IF NOT EXISTS reports (id SERIAL PRIMARY KEY, agent_id TEXT NOT NULL, agent_name TEXT NOT NULL, title TEXT NOT NULL, period_start DATE NOT NULL, period_end DATE NOT NULL, calls_count INTEGER DEFAULT 0, meetings_count INTEGER DEFAULT 0, quotes_count INTEGER DEFAULT 0, quotes_amount NUMERIC DEFAULT 0, new_leads INTEGER DEFAULT 0, new_customers INTEGER DEFAULT 0, invoices_amount NUMERIC DEFAULT 0, summary TEXT, challenges TEXT, next_actions TEXT, status TEXT DEFAULT 'submitted', created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
       "CREATE TABLE IF NOT EXISTS report_comments (id SERIAL PRIMARY KEY, report_id INTEGER NOT NULL REFERENCES reports(id) ON DELETE CASCADE, author_id TEXT NOT NULL, author_name TEXT NOT NULL, author_role TEXT NOT NULL, content TEXT NOT NULL, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
     ];
@@ -237,16 +251,26 @@ app.post("/api/categories", authenticateToken, async (req: any, res) => {
 });
 
 // Portfolio Items
-app.get("/api/portfolio-items", authenticateToken, async (req, res) => {
-  try { res.json((await query("SELECT * FROM portfolio_items ORDER BY name ASC")).rows); } catch (err) { res.status(500).json({ error: "Server error" }); }
+app.get("/api/portfolio-items", authenticateToken, async (req: any, res) => {
+  try {
+    let q = "SELECT * FROM portfolio_items"; let params: any[] = [];
+    if (req.user.role !== 'admin' && req.user.role !== 'superadmin') { q += " WHERE (agent_id = $1 OR agent_id IS NULL)"; params.push(req.user.uid); }
+    q += " ORDER BY name ASC";
+    res.json((await query(q, params)).rows);
+  } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
-app.get("/api/categories/:categoryId/items", authenticateToken, async (req, res) => {
-  try { res.json((await query("SELECT * FROM portfolio_items WHERE category_id = $1 ORDER BY name ASC", [req.params.categoryId])).rows); } catch (err) { res.status(500).json({ error: "Server error" }); }
+app.get("/api/categories/:categoryId/items", authenticateToken, async (req: any, res) => {
+  try {
+    let q = "SELECT * FROM portfolio_items WHERE category_id = $1"; let params: any[] = [req.params.categoryId];
+    if (req.user.role !== 'admin' && req.user.role !== 'superadmin') { q += " AND (agent_id = $2 OR agent_id IS NULL)"; params.push(req.user.uid); }
+    q += " ORDER BY name ASC";
+    res.json((await query(q, params)).rows);
+  } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
-app.post("/api/portfolio-items", authenticateToken, async (req, res) => {
+app.post("/api/portfolio-items", authenticateToken, async (req: any, res) => {
   const { category_id, name, sub_type, address, city, bp, tel, fax, mail, web, niu } = req.body;
   if (!category_id || !name) return res.status(400).json({ error: "Category ID and Name are required" });
-  try { res.status(201).json((await query("INSERT INTO portfolio_items (category_id, name, sub_type, address, city, bp, tel, fax, mail, web, niu) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *", [category_id, name, sub_type, address, city, bp, tel, fax, mail, web, niu])).rows[0]); } catch (err) { res.status(500).json({ error: "Server error" }); }
+  try { res.status(201).json((await query("INSERT INTO portfolio_items (category_id, name, sub_type, address, city, bp, tel, fax, mail, web, niu, agent_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *", [category_id, name, sub_type, address, city, bp, tel, fax, mail, web, niu, req.user.uid])).rows[0]); } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 app.delete("/api/portfolio-items/:id", authenticateToken, async (req, res) => {
   try { await query("DELETE FROM portfolio_items WHERE id = $1", [req.params.id]); res.json({ success: true }); } catch (err) { res.status(500).json({ error: "Server error" }); }
@@ -440,10 +464,10 @@ app.get("/api/customers", authenticateToken, async (req: any, res) => {
   } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 app.post("/api/customers", authenticateToken, async (req: any, res) => {
-  const { type, firstName, lastName, companyName, email, phone, address, city, industry } = req.body;
+  const { type, firstName, lastName, companyName, email, phone, address, city, industry, currency } = req.body;
   const name = type === 'company' ? companyName : `${firstName} ${lastName}`;
   try {
-    const created = (await query('INSERT INTO customers (type, first_name, last_name, company_name, name, email, phone, address, city, industry, agent_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id, type, first_name as "firstName", last_name as "lastName", company_name as "companyName", name, email, phone, address, city, industry, created_at as "createdAt"', [type || 'individual', firstName, lastName, companyName, name, email, phone, address, city, industry, req.user.uid])).rows[0];
+    const created = (await query('INSERT INTO customers (type, first_name, last_name, company_name, name, email, phone, address, city, industry, currency, agent_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id, type, first_name as "firstName", last_name as "lastName", company_name as "companyName", name, email, phone, address, city, industry, currency, created_at as "createdAt"', [type || 'individual', firstName, lastName, companyName, name, email, phone, address, city, industry, currency || null, req.user.uid])).rows[0];
     // AUTO: schedule onboarding RDV
     await createActivity({ type: 'RDV', subject: `Onboarding: ${name}`, agentId: req.user.uid, customerId: created.id, daysFromNow: 2, notes: 'Premier RDV de prise en main avec le nouveau client.' });
     res.status(201).json(created);
@@ -458,8 +482,24 @@ app.put("/api/customers/:id", authenticateToken, async (req, res) => {
     res.json(result.rows[0]);
   } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
-app.delete("/api/customers/:id", authenticateToken, async (req, res) => {
-  try { await query("DELETE FROM customers WHERE id = $1", [req.params.id]); res.json({ success: true }); } catch (err) { res.status(500).json({ error: "Server error" }); }
+app.delete("/api/customers/:id", authenticateToken, async (req: any, res) => {
+  const { id } = req.params;
+  try {
+    // CASCADE manuel : détacher tout ce qui référence ce client (FK contraintes)
+    await query("UPDATE quotes SET customer_id = NULL WHERE customer_id = $1", [id]);
+    await query("UPDATE invoices SET customer_id = NULL WHERE customer_id = $1", [id]);
+    await query("UPDATE opportunities SET customer_id = NULL WHERE customer_id = $1", [id]);
+    await query("UPDATE activities SET customer_id = NULL WHERE customer_id = $1", [id]);
+    await query("UPDATE projects SET customer_id = NULL WHERE customer_id = $1", [id]);
+    await query("DELETE FROM comments WHERE entity_type = 'customer' AND entity_id = $1", [id]).catch(() => {});
+    await query("DELETE FROM documents WHERE customer_id = $1", [id]).catch(() => {});
+    const r = await query("DELETE FROM customers WHERE id = $1", [id]);
+    if (r.rowCount === 0) return res.status(404).json({ error: "Client introuvable" });
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error("Delete customer error:", err);
+    res.status(500).json({ error: "Erreur de suppression: " + (err.message || 'inconnue') });
+  }
 });
 
 // Leads (agent sees own, admin sees all)
@@ -473,18 +513,18 @@ app.get("/api/leads", authenticateToken, async (req: any, res) => {
   } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 app.post("/api/leads", authenticateToken, async (req: any, res) => {
-  const { type, firstName, lastName, companyName, email, phone, source, status, notes, address, city } = req.body;
+  const { type, firstName, lastName, companyName, email, phone, source, status, notes, address, city, currency } = req.body;
   try {
-    const result = await query('INSERT INTO leads (type, first_name, last_name, company_name, email, phone, source, status, notes, address, city, agent_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id, type, first_name as "firstName", last_name as "lastName", company_name as "companyName", email, phone, source, status, notes, address, city, created_at as "createdAt"', [type || 'individual', firstName, lastName, companyName, email, phone, source, status || 'Nouveau', notes, address, city, req.user.uid]);
+    const result = await query('INSERT INTO leads (type, first_name, last_name, company_name, email, phone, source, status, notes, address, city, currency, agent_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id, type, first_name as "firstName", last_name as "lastName", company_name as "companyName", email, phone, source, status, notes, address, city, currency, created_at as "createdAt"', [type || 'individual', firstName, lastName, companyName, email, phone, source, status || 'Nouveau', notes, address, city, currency || null, req.user.uid]);
     const leadId = result.rows[0].id;
     try { const d = new Date(); d.setDate(d.getDate() + 1); await query("INSERT INTO activities (type, subject, lead_id, agent_id, status, date, notes) VALUES ($1,$2,$3,$4,$5,$6,$7)", ['Appel', `Premier contact - Lead #${leadId}`, leadId, req.user.uid, 'À faire', d.toISOString(), `Contacter: ${type === 'company' ? companyName : firstName + ' ' + lastName}`]); } catch (e) {}
     res.status(201).json(result.rows[0]);
   } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 app.put("/api/leads/:id", authenticateToken, async (req: any, res) => {
-  const { id } = req.params; const { type, firstName, lastName, companyName, email, phone, source, status, notes, address, city } = req.body;
+  const { id } = req.params; const { type, firstName, lastName, companyName, email, phone, source, status, notes, address, city, currency } = req.body;
   try {
-    const result = await query('UPDATE leads SET type=$1, first_name=$2, last_name=$3, company_name=$4, email=$5, phone=$6, source=$7, status=$8, notes=$9, address=$10, city=$11, updated_at=CURRENT_TIMESTAMP WHERE id=$12 RETURNING id, type, first_name as "firstName", last_name as "lastName", company_name as "companyName", email, phone, source, status, notes, address, city, agent_id as "agentId", updated_at as "updatedAt"', [type, firstName, lastName, companyName, email, phone, source, status, notes, address, city, id]);
+    const result = await query('UPDATE leads SET type=$1, first_name=$2, last_name=$3, company_name=$4, email=$5, phone=$6, source=$7, status=$8, notes=$9, address=$10, city=$11, currency=$12, updated_at=CURRENT_TIMESTAMP WHERE id=$13 RETURNING id, type, first_name as "firstName", last_name as "lastName", company_name as "companyName", email, phone, source, status, notes, address, city, currency, agent_id as "agentId", updated_at as "updatedAt"', [type, firstName, lastName, companyName, email, phone, source, status, notes, address, city, currency || null, id]);
     if (result.rows.length === 0) return res.status(404).json({ error: "Lead not found" });
     const lead = result.rows[0];
     let opportunityId: number | null = null;
@@ -505,26 +545,68 @@ app.delete("/api/leads/:id", authenticateToken, async (req, res) => {
 });
 
 // Opportunities
-app.get("/api/opportunities", authenticateToken, async (req, res) => {
-  try { res.json((await query('SELECT o.id, o.customer_id as "customerId", o.lead_id as "leadId", o.title, o.amount, o.stage, o.probability, o.expected_close_date as "expectedCloseDate", o.notes, o.created_at as "createdAt", o.updated_at as "updatedAt", c.name as "customerName", CASE WHEN l.type = \'company\' THEN l.company_name ELSE COALESCE(l.first_name,\'\') || \' \' || COALESCE(l.last_name,\'\') END as "leadName" FROM opportunities o LEFT JOIN customers c ON o.customer_id = c.id LEFT JOIN leads l ON o.lead_id = l.id ORDER BY o.created_at DESC')).rows); } catch (err) { res.status(500).json({ error: "Server error" }); }
+app.get("/api/opportunities", authenticateToken, async (req: any, res) => {
+  try {
+    let q = 'SELECT o.id, o.customer_id as "customerId", o.lead_id as "leadId", o.title, o.amount, o.currency, o.stage, o.probability, o.expected_close_date as "expectedCloseDate", o.notes, o.created_at as "createdAt", o.updated_at as "updatedAt", c.name as "customerName", c.agent_id as "customerAgentId", l.agent_id as "leadAgentId", CASE WHEN l.type = \'company\' THEN l.company_name ELSE COALESCE(l.first_name,\'\') || \' \' || COALESCE(l.last_name,\'\') END as "leadName" FROM opportunities o LEFT JOIN customers c ON o.customer_id = c.id LEFT JOIN leads l ON o.lead_id = l.id';
+    let params: any[] = [];
+    if (req.user.role !== 'admin' && req.user.role !== 'superadmin') {
+      q += ' WHERE c.agent_id = $1 OR l.agent_id = $1';
+      params.push(req.user.uid);
+    }
+    q += ' ORDER BY o.created_at DESC';
+    res.json((await query(q, params)).rows);
+  } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 app.post("/api/opportunities", authenticateToken, async (req: any, res) => {
-  const { customerId, leadId, title, amount, stage, probability, expectedCloseDate, notes } = req.body;
+  const { customerId, leadId, title, amount, currency, stage, probability, expectedCloseDate, notes } = req.body;
   try {
-    const result = await query('INSERT INTO opportunities (customer_id, lead_id, title, amount, stage, probability, expected_close_date, notes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id, customer_id as "customerId", lead_id as "leadId", title, amount, stage, probability, expected_close_date as "expectedCloseDate", notes, created_at as "createdAt"', [customerId || null, leadId || null, title, amount, stage || 'Prospection', probability, expectedCloseDate, notes]);
+    const result = await query('INSERT INTO opportunities (customer_id, lead_id, title, amount, currency, stage, probability, expected_close_date, notes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id, customer_id as "customerId", lead_id as "leadId", title, amount, currency, stage, probability, expected_close_date as "expectedCloseDate", notes, created_at as "createdAt"', [customerId || null, leadId || null, title, amount, currency || null, stage || 'Prospection', probability, expectedCloseDate, notes]);
     res.status(201).json(result.rows[0]);
   } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 app.put("/api/opportunities/:id", authenticateToken, async (req, res) => {
-  const { id } = req.params; const { customerId, leadId, title, amount, stage, probability, expectedCloseDate, notes } = req.body;
+  const { id } = req.params; const { customerId, leadId, title, amount, currency, stage, probability, expectedCloseDate, notes } = req.body;
   try {
-    const result = await query('UPDATE opportunities SET customer_id=$1, lead_id=$2, title=$3, amount=$4, stage=$5, probability=$6, expected_close_date=$7, notes=$8, updated_at=CURRENT_TIMESTAMP WHERE id=$9 RETURNING id, customer_id as "customerId", lead_id as "leadId", title, amount, stage, probability, expected_close_date as "expectedCloseDate", notes, updated_at as "updatedAt"', [customerId || null, leadId || null, title, amount, stage, probability, expectedCloseDate, notes, id]);
+    const result = await query('UPDATE opportunities SET customer_id=$1, lead_id=$2, title=$3, amount=$4, currency=$5, stage=$6, probability=$7, expected_close_date=$8, notes=$9, updated_at=CURRENT_TIMESTAMP WHERE id=$10 RETURNING id, customer_id as "customerId", lead_id as "leadId", title, amount, currency, stage, probability, expected_close_date as "expectedCloseDate", notes, updated_at as "updatedAt"', [customerId || null, leadId || null, title, amount, currency || null, stage, probability, expectedCloseDate, notes, id]);
     if (result.rows.length === 0) return res.status(404).json({ error: "Opportunity not found" });
     res.json(result.rows[0]);
   } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 app.delete("/api/opportunities/:id", authenticateToken, async (req, res) => {
   try { await query("DELETE FROM opportunities WHERE id = $1", [req.params.id]); res.json({ success: true }); } catch (err) { res.status(500).json({ error: "Server error" }); }
+});
+
+// =====================================================================
+// COMMENTS — generic comment system on portfolio/lead/opportunity/customer
+// =====================================================================
+const COMMENT_ENTITIES = ['portfolio', 'lead', 'opportunity', 'customer'];
+app.get("/api/comments/:entityType/:entityId", authenticateToken, async (req, res) => {
+  const { entityType, entityId } = req.params;
+  if (!COMMENT_ENTITIES.includes(entityType)) return res.status(400).json({ error: "Invalid entity" });
+  try {
+    const r = await query("SELECT * FROM comments WHERE entity_type = $1 AND entity_id = $2 ORDER BY created_at DESC", [entityType, entityId]);
+    res.json(r.rows);
+  } catch (err: any) { res.status(500).json({ error: "Server error: " + err.message }); }
+});
+app.post("/api/comments/:entityType/:entityId", authenticateToken, async (req: any, res) => {
+  const { entityType, entityId } = req.params; const { content } = req.body;
+  if (!COMMENT_ENTITIES.includes(entityType)) return res.status(400).json({ error: "Invalid entity" });
+  if (!content || !content.trim()) return res.status(400).json({ error: "Commentaire vide" });
+  try {
+    const r = await query("INSERT INTO comments (entity_type, entity_id, author_id, author_name, content) VALUES ($1,$2,$3,$4,$5) RETURNING *",
+      [entityType, entityId, req.user.uid, req.user.name || req.user.email || 'Utilisateur', content.trim()]);
+    res.status(201).json(r.rows[0]);
+  } catch (err: any) { res.status(500).json({ error: "Server error: " + err.message }); }
+});
+app.delete("/api/comments/:id", authenticateToken, async (req: any, res) => {
+  try {
+    const own = await query("SELECT author_id FROM comments WHERE id = $1", [req.params.id]);
+    if (own.rows.length === 0) return res.status(404).json({ error: "Comment not found" });
+    const isAdmin = req.user.role === 'admin' || req.user.role === 'superadmin';
+    if (own.rows[0].author_id !== req.user.uid && !isAdmin) return res.status(403).json({ error: "Forbidden" });
+    await query("DELETE FROM comments WHERE id = $1", [req.params.id]);
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: "Server error" }); }
 });
 
 // Calls
