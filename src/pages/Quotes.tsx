@@ -66,7 +66,7 @@ export default function Quotes() {
   const allowedCurrencies = (() => {
     const z = profile?.zone;
     if (!z) return [];
-    if (z === 'CD') return ['CDF', 'USD', 'EUR'];
+    if (z === 'CD') return ['USD', 'CDF', 'EUR'];
     if (z === 'CI' || z === 'SN') return ['XOF'];
     if (z === 'FR') return ['EUR'];
     return ['XAF'];
