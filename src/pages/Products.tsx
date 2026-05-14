@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Package, Plus, Search, Trash2, Edit2, Tag, Layers, Box, X, Save } from 'lucide-react';
+import { Package, Plus, Search, Trash2, Edit2, Tag, Layers, Box, X, Save, Eye, RefreshCw, DollarSign, CheckCircle2, FileText } from 'lucide-react';
+import { format } from 'date-fns';
+import { fr } from 'date-fns/locale';
 
 export default function Products() {
   const [products, setProducts] = useState<any[]>([]);
@@ -7,6 +9,7 @@ export default function Products() {
   const [searchTerm, setSearchTerm] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [editingProduct, setEditingProduct] = useState<any>(null);
+  const [previewProduct, setPreviewProduct] = useState<any>(null);
   const [form, setForm] = useState({ name: '', type: 'product', category: '', price: 0, vatRate: 19.25, stock: 0, unit: 'unité', description: '', currency: 'XAF', billingType: 'one_time', billingPeriod: 'monthly' });
 
   const fetchProducts = async () => {
@@ -89,7 +92,9 @@ export default function Products() {
             {filteredProducts.map((p) => (
               <tr key={p.id} className="hover:bg-slate-50/50" data-testid={`product-row-${p.id}`}>
                 <td className="px-6 py-3">
-                  <p className="font-medium text-slate-800">{p.name}</p>
+                  <button onClick={() => setPreviewProduct(p)} className="text-left font-medium text-slate-800 hover:text-indigo-600 transition-colors">
+                    {p.name}
+                  </button>
                   {p.description && <p className="text-xs text-slate-400 truncate max-w-[200px]">{p.description}</p>}
                 </td>
                 <td className="px-4 py-3">
@@ -101,7 +106,10 @@ export default function Products() {
                 <td className="px-4 py-3 text-sm text-slate-500 hidden md:table-cell">{p.vat_rate}%</td>
                 <td className="px-4 py-3 hidden lg:table-cell"><span className={`font-medium ${Number(p.stock) < 10 ? 'text-red-600' : 'text-slate-700'}`}>{p.stock} {p.unit || ''}</span></td>
                 <td className="px-4 py-3 text-right">
-                  <button onClick={() => handleDelete(p.id)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg"><Trash2 size={16} /></button>
+                  <div className="flex items-center justify-end gap-1">
+                    <button onClick={() => setPreviewProduct(p)} title="Aperçu détaillé" className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg" data-testid={`preview-product-${p.id}`}><Eye size={16} /></button>
+                    <button onClick={() => handleDelete(p.id)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg"><Trash2 size={16} /></button>
+                  </div>
                 </td>
               </tr>
             ))}
@@ -200,6 +208,103 @@ export default function Products() {
                 <button type="submit" className="px-6 py-2.5 bg-indigo-600 text-white rounded-xl font-medium hover:bg-indigo-700 flex items-center gap-2 shadow-sm"><Save size={18} /> Enregistrer</button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {previewProduct && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={() => setPreviewProduct(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()} data-testid="product-preview-modal">
+            <div className="relative p-8 bg-gradient-to-br from-indigo-600 to-purple-600 text-white">
+              <button onClick={() => setPreviewProduct(null)} className="absolute top-4 right-4 p-2 bg-white/10 hover:bg-white/20 rounded-lg transition-all" data-testid="close-product-preview">
+                <X size={20} />
+              </button>
+              <div className="flex items-start gap-3 mb-3">
+                <div className="w-14 h-14 bg-white/15 rounded-xl flex items-center justify-center backdrop-blur-sm">
+                  {previewProduct.type === 'service' ? <Layers size={28} /> : <Box size={28} />}
+                </div>
+                <div>
+                  <h2 className="text-2xl font-bold mb-1">{previewProduct.name}</h2>
+                  <div className="flex flex-wrap gap-2">
+                    <span className="text-xs px-2 py-0.5 bg-white/20 rounded-full backdrop-blur-sm">{previewProduct.type === 'service' ? '💼 Service' : '📦 Produit'}</span>
+                    {previewProduct.billing_type === 'subscription' ? (
+                      <span className="text-xs px-2 py-0.5 bg-emerald-400/30 rounded-full backdrop-blur-sm font-medium">🔁 Abonnement mensuel</span>
+                    ) : (
+                      <span className="text-xs px-2 py-0.5 bg-amber-400/30 rounded-full backdrop-blur-sm font-medium">💰 Paiement unique</span>
+                    )}
+                    {previewProduct.category && <span className="text-xs px-2 py-0.5 bg-white/20 rounded-full backdrop-blur-sm">{previewProduct.category}</span>}
+                  </div>
+                </div>
+              </div>
+              <div className="mt-6 flex items-baseline gap-2">
+                <span className="text-4xl font-bold">{Number(previewProduct.price).toLocaleString('fr-FR')}</span>
+                <span className="text-lg opacity-80">{previewProduct.currency || 'XAF'}</span>
+                {previewProduct.billing_type === 'subscription' && <span className="text-sm opacity-70">/mois</span>}
+              </div>
+            </div>
+
+            <div className="p-8 space-y-6">
+              {previewProduct.description && (
+                <div>
+                  <h3 className="text-xs font-bold text-slate-400 uppercase mb-2 flex items-center gap-1"><FileText size={14} /> Description</h3>
+                  <p className="text-slate-700 whitespace-pre-line">{previewProduct.description}</p>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="bg-slate-50 p-4 rounded-xl">
+                  <p className="text-xs font-bold text-slate-400 uppercase mb-1">Prix HT</p>
+                  <p className="text-xl font-bold text-slate-900">{Number(previewProduct.price).toLocaleString('fr-FR')} {previewProduct.currency || 'XAF'}</p>
+                </div>
+                <div className="bg-slate-50 p-4 rounded-xl">
+                  <p className="text-xs font-bold text-slate-400 uppercase mb-1">TVA</p>
+                  <p className="text-xl font-bold text-slate-900">{previewProduct.vat_rate}%</p>
+                </div>
+                <div className="bg-slate-50 p-4 rounded-xl">
+                  <p className="text-xs font-bold text-slate-400 uppercase mb-1">Prix TTC</p>
+                  <p className="text-xl font-bold text-indigo-600">
+                    {Math.round(Number(previewProduct.price) * (1 + Number(previewProduct.vat_rate || 0)/100)).toLocaleString('fr-FR')} {previewProduct.currency || 'XAF'}
+                  </p>
+                </div>
+                <div className="bg-slate-50 p-4 rounded-xl">
+                  <p className="text-xs font-bold text-slate-400 uppercase mb-1">Stock disponible</p>
+                  <p className={`text-xl font-bold ${Number(previewProduct.stock) < 10 ? 'text-red-600' : 'text-slate-900'}`}>
+                    {previewProduct.stock || 0} <span className="text-sm font-normal text-slate-400">{previewProduct.unit || 'unité'}</span>
+                  </p>
+                </div>
+              </div>
+
+              <div className="bg-gradient-to-r from-indigo-50 to-purple-50 p-5 rounded-xl border border-indigo-100">
+                <h3 className="text-xs font-bold text-indigo-600 uppercase mb-3 flex items-center gap-1">
+                  {previewProduct.billing_type === 'subscription' ? <RefreshCw size={14} /> : <DollarSign size={14} />} Mode de paiement
+                </h3>
+                {previewProduct.billing_type === 'subscription' ? (
+                  <div className="space-y-2">
+                    <p className="text-sm text-slate-700"><strong>🔁 Abonnement mensuel</strong> — Le client est facturé automatiquement chaque mois via PayPal.</p>
+                    <ul className="text-xs text-slate-600 space-y-1 ml-4">
+                      <li>• Premier prélèvement lors de la validation du devis</li>
+                      <li>• Renouvellement automatique chaque mois à la même date</li>
+                      <li>• Le client peut résilier à tout moment depuis son compte PayPal</li>
+                      <li>• En cas d'échec : 3 tentatives PayPal puis suspension</li>
+                    </ul>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <p className="text-sm text-slate-700"><strong>💰 Paiement unique</strong> — Le client paie une seule fois à la signature du devis.</p>
+                    <ul className="text-xs text-slate-600 space-y-1 ml-4">
+                      <li>• Paiement intégral en une fois via PayPal</li>
+                      <li>• Carte bancaire (Visa, Mastercard) ou compte PayPal acceptés</li>
+                      <li>• Facture émise automatiquement après paiement</li>
+                    </ul>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex justify-between items-center text-xs text-slate-400 pt-4 border-t border-slate-100">
+                <span>ID: #{previewProduct.id}</span>
+                {previewProduct.created_at && <span>Créé le {format(new Date(previewProduct.created_at), 'dd MMM yyyy', { locale: fr })}</span>}
+              </div>
+            </div>
           </div>
         </div>
       )}
