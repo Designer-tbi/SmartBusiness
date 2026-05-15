@@ -256,8 +256,18 @@ export default function Quotes() {
                         if (r.ok) { alert('Facture créée !'); fetchQuotes(); } else { alert('Erreur'); }
                       }} className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all" title="Convertir en Facture"><FileText size={16} /></button>
                     )}
+                    {q.payment_status === 'PAID' && isAdmin && (
+                      <button onClick={async () => {
+                        if (!confirm('Re-provisionner le compte SmartDesk pour ce devis (envoie un nouvel email avec un nouveau mot de passe) ?')) return;
+                        const r = await fetch(`/api/quotes/${q.id}/smartdesk/provision`, { method: 'POST' });
+                        const d = await r.json().catch(() => ({}));
+                        if (r.ok && d.provisioned) alert(`✅ Compte SmartDesk créé. Email envoyé: ${d.emailSent ? 'oui' : 'non'}`);
+                        else alert(`ℹ️ ${d.error || 'Aucun produit SmartDesk dans ce devis ou compte déjà provisionné'}`);
+                      }} className="p-1.5 text-slate-400 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-all" title="Provisionner SmartDesk" data-testid={`smartdesk-${q.id}`}>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                      </button>
+                    )}
                     <button onClick={async () => {
-                      if (!confirm('Supprimer ce devis ? Les factures liées seront détachées (non supprimées).')) return;
                       const r = await fetch(`/api/quotes/${q.id}`, { method: 'DELETE' });
                       if (r.ok) { fetchQuotes(); }
                       else { const d = await r.json().catch(() => ({})); alert('❌ ' + (d.error || 'Suppression échouée')); }
