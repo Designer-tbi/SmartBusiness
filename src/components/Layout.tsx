@@ -105,6 +105,13 @@ export default function Layout() {
   });
 
   if (profile?.role === 'admin' || profile?.role === 'superadmin') {
+    // Standalone top-level item — highly visible for admins
+    navItems.push({
+      name: 'Stratégies Commerciales',
+      href: '/strategies',
+      icon: Target,
+      highlight: true,
+    } as any);
     navItems.push({ 
       name: 'Administration', 
       icon: Settings,
@@ -116,6 +123,13 @@ export default function Layout() {
         { name: 'Super Admin', href: '/super-admin', icon: Settings },
       ]
     });
+  } else {
+    // Commerciaux : lecture seule
+    navItems.push({
+      name: 'Stratégies',
+      href: '/strategies',
+      icon: Target,
+    } as any);
   }
 
   const getPageTitle = () => {
@@ -216,6 +230,7 @@ export default function Layout() {
             }
 
             const isActive = location.pathname === item.href;
+            const highlight = (item as any).highlight;
             return (
               <Link
                 key={item.name}
@@ -225,13 +240,18 @@ export default function Layout() {
                   "flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-200 text-sm mb-1",
                   isActive 
                     ? "bg-indigo-600 text-white shadow-lg shadow-indigo-900/20" 
+                    : highlight
+                    ? "bg-gradient-to-r from-amber-500/20 to-orange-500/20 text-amber-300 hover:from-amber-500/30 hover:to-orange-500/30 border border-amber-500/40 font-bold"
                     : "text-slate-400 hover:bg-slate-800 hover:text-white",
                   !isSidebarOpen && "justify-center px-0"
                 )}
                 title={!isSidebarOpen ? item.name : ""}
               >
-                <Icon size={18} />
-                {isSidebarOpen && <span className="font-medium">{item.name}</span>}
+                <Icon size={18} className={highlight && !isActive ? "text-amber-400" : ""} />
+                {isSidebarOpen && <span className={cn("font-medium", highlight && !isActive && "font-bold")}>{item.name}</span>}
+                {isSidebarOpen && highlight && !isActive && (
+                  <span className="ml-auto text-[9px] bg-amber-500 text-white px-1.5 py-0.5 rounded-full font-bold">NEW</span>
+                )}
               </Link>
             );
           })}

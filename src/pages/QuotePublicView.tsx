@@ -268,6 +268,31 @@ export default function QuotePublicView() {
                   <br />
                   Le montant en FCFA sera converti en EUR au taux fixe (1 EUR = 655,957 XAF).
                 </p>
+
+                {/* Visual mode selector helper — clarifies that two options are available */}
+                {!isSubscription && (
+                  <div className="max-w-md mx-auto bg-gradient-to-br from-indigo-50 to-blue-50 border-2 border-indigo-200 rounded-2xl p-4 shadow-sm">
+                    <div className="flex items-center justify-center gap-2 mb-3">
+                      <span className="text-xs font-bold text-indigo-700 uppercase tracking-wider">Choisissez votre mode de paiement</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3 mb-4 text-center text-xs">
+                      <div className="bg-white p-3 rounded-xl border-2 border-yellow-300 shadow-sm">
+                        <div className="text-2xl mb-1">💛</div>
+                        <p className="font-bold text-slate-800">PayPal</p>
+                        <p className="text-slate-500 text-[10px]">Compte PayPal existant</p>
+                      </div>
+                      <div className="bg-white p-3 rounded-xl border-2 border-slate-300 shadow-sm">
+                        <div className="text-2xl mb-1">💳</div>
+                        <p className="font-bold text-slate-800">Carte bancaire</p>
+                        <p className="text-slate-500 text-[10px]">Visa, Mastercard…<br />Pas besoin de compte</p>
+                      </div>
+                    </div>
+                    <p className="text-center text-[11px] text-indigo-700 font-medium">
+                      ↓ Les deux boutons ci-dessous, cliquez celui que vous voulez ↓
+                    </p>
+                  </div>
+                )}
+
                 {!paypalConfig?.clientId ? (
                   <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl text-amber-800 text-sm text-center">
                     Le module de paiement n'est pas encore configuré. Veuillez contacter votre commercial.

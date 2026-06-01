@@ -49,7 +49,7 @@ const authenticateToken = (req: any, res: any, next: any) => {
 
 // Create Express app
 const app = express();
-app.use(express.json({ limit: '50mb' }));
+app.use(express.json({ limit: '100mb' }));
 app.use(cookieParser());
 
 // Initialize database tables on first request
@@ -118,6 +118,41 @@ async function ensureDbInitialized() {
       "ALTER TABLE documents ADD COLUMN IF NOT EXISTS tag TEXT",
       "CREATE TABLE IF NOT EXISTS reports (id SERIAL PRIMARY KEY, agent_id TEXT NOT NULL, agent_name TEXT NOT NULL, title TEXT NOT NULL, period_start DATE NOT NULL, period_end DATE NOT NULL, calls_count INTEGER DEFAULT 0, meetings_count INTEGER DEFAULT 0, quotes_count INTEGER DEFAULT 0, quotes_amount NUMERIC DEFAULT 0, new_leads INTEGER DEFAULT 0, new_customers INTEGER DEFAULT 0, invoices_amount NUMERIC DEFAULT 0, summary TEXT, challenges TEXT, next_actions TEXT, status TEXT DEFAULT 'submitted', created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
       "CREATE TABLE IF NOT EXISTS report_comments (id SERIAL PRIMARY KEY, report_id INTEGER NOT NULL REFERENCES reports(id) ON DELETE CASCADE, author_id TEXT NOT NULL, author_name TEXT NOT NULL, author_role TEXT NOT NULL, content TEXT NOT NULL, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)",
+      // === Stratégies commerciales (admin/superadmin only) ===
+      `CREATE TABLE IF NOT EXISTS strategies (
+        id SERIAL PRIMARY KEY,
+        title TEXT NOT NULL,
+        period TEXT NOT NULL,
+        start_date DATE,
+        end_date DATE,
+        zone TEXT DEFAULT 'CG',
+        city TEXT,
+        target_segment TEXT,
+        target_industry TEXT,
+        target_revenue NUMERIC DEFAULT 0,
+        currency TEXT DEFAULT 'XAF',
+        kpis TEXT,
+        risks TEXT,
+        description TEXT,
+        status TEXT DEFAULT 'draft',
+        agent_visible BOOLEAN DEFAULT true,
+        created_by TEXT,
+        created_by_name TEXT,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      )`,
+      `CREATE TABLE IF NOT EXISTS strategy_actions (
+        id SERIAL PRIMARY KEY,
+        strategy_id INTEGER NOT NULL REFERENCES strategies(id) ON DELETE CASCADE,
+        action TEXT NOT NULL,
+        responsible TEXT,
+        due_date DATE,
+        status TEXT DEFAULT 'todo',
+        sort_order INTEGER DEFAULT 0,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      )`,
+      "ALTER TABLE documents ADD COLUMN IF NOT EXISTS strategy_id INTEGER",
+      "CREATE INDEX IF NOT EXISTS idx_documents_strategy ON documents(strategy_id)",
     ];
     for (const s of schema) { await query(s); }
     // Seed superadmin
@@ -2015,11 +2050,34 @@ app.post("/api/admin/purge", authenticateToken, async (req: any, res) => {
 });
 
 // Documents Routes
-app.get("/api/documents", authenticateToken, async (req, res) => {
+app.get("/api/documents", authenticateToken, async (req: any, res) => {
   try {
-    const result = await query('SELECT id, name, file_name, file_type, file_size, customer_id, quote_id, invoice_id, uploaded_by, notes, created_at as "createdAt" FROM documents ORDER BY created_at DESC');
+    // Filter by strategy_id if requested
+    const { strategyId } = req.query;
+    if (strategyId) {
+      const result = await query('SELECT id, name, file_name, file_type, file_size, customer_id, quote_id, invoice_id, strategy_id, uploaded_by, notes, created_at as "createdAt" FROM documents WHERE strategy_id = $1 ORDER BY created_at DESC', [strategyId]);
+      return res.json(result.rows);
+    }
+    const result = await query('SELECT id, name, file_name, file_type, file_size, customer_id, quote_id, invoice_id, strategy_id, uploaded_by, notes, created_at as "createdAt" FROM documents ORDER BY created_at DESC');
     res.json(result.rows);
   } catch (err) { res.status(500).json({ error: "Server error" }); }
+});
+
+// Stream the actual file content (binary) — for preview/download from DB
+app.get("/api/documents/:id/file", authenticateToken, async (req, res) => {
+  try {
+    const r = await query("SELECT file_name, file_type, file_data FROM documents WHERE id = $1", [req.params.id]);
+    if (r.rows.length === 0) return res.status(404).json({ error: "Document not found" });
+    const d = r.rows[0];
+    // file_data is base64 (with or without data: prefix)
+    let b64 = d.file_data || '';
+    if (b64.startsWith('data:')) b64 = b64.split(',')[1] || '';
+    const buf = Buffer.from(b64, 'base64');
+    res.setHeader('Content-Type', d.file_type || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(d.file_name || 'fichier')}"`);
+    res.setHeader('Cache-Control', 'private, max-age=60');
+    res.send(buf);
+  } catch (err: any) { res.status(500).json({ error: err.message || "Server error" }); }
 });
 
 app.get("/api/documents/:id", authenticateToken, async (req, res) => {
@@ -2031,12 +2089,12 @@ app.get("/api/documents/:id", authenticateToken, async (req, res) => {
 });
 
 app.post("/api/documents", authenticateToken, async (req: any, res) => {
-  const { name, fileName, fileType, fileSize, fileData, customerId, quoteId, invoiceId, notes } = req.body;
+  const { name, fileName, fileType, fileSize, fileData, customerId, quoteId, invoiceId, strategyId, notes } = req.body;
   if (!name || !fileName || !fileData) return res.status(400).json({ error: "Name, fileName and fileData are required" });
   try {
     const result = await query(
-      'INSERT INTO documents (name, file_name, file_type, file_size, file_data, customer_id, quote_id, invoice_id, uploaded_by, notes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id, name, file_name, file_type, file_size, customer_id, quote_id, invoice_id, uploaded_by, notes, created_at as "createdAt"',
-      [name, fileName, fileType, fileSize, fileData, customerId || null, quoteId || null, invoiceId || null, req.user.uid, notes]
+      'INSERT INTO documents (name, file_name, file_type, file_size, file_data, customer_id, quote_id, invoice_id, strategy_id, uploaded_by, notes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id, name, file_name, file_type, file_size, customer_id, quote_id, invoice_id, strategy_id, uploaded_by, notes, created_at as "createdAt"',
+      [name, fileName, fileType, fileSize, fileData, customerId || null, quoteId || null, invoiceId || null, strategyId || null, req.user.uid, notes]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) { res.status(500).json({ error: "Server error" }); }
@@ -2141,6 +2199,97 @@ app.get("/api/admin/user-activity", authenticateToken, async (req: any, res) => 
     }));
     res.json(activity);
   } catch (err) { res.status(500).json({ error: "Server error" }); }
+});
+
+// =====================================================================
+// COMMERCIAL STRATEGIES — admin/superadmin CRUD, commercial read-only
+// =====================================================================
+const canEditStrategy = (req: any) => req.user.role === 'admin' || req.user.role === 'superadmin';
+
+app.get("/api/strategies", authenticateToken, async (req: any, res) => {
+  try {
+    const sql = `
+      SELECT s.*,
+        (SELECT COUNT(*) FROM strategy_actions WHERE strategy_id = s.id) AS actions_count,
+        (SELECT COUNT(*) FROM documents WHERE strategy_id = s.id) AS documents_count
+      FROM strategies s
+      ${canEditStrategy(req) ? '' : "WHERE s.agent_visible = true AND s.status = 'published'"}
+      ORDER BY s.created_at DESC
+    `;
+    const r = await query(sql);
+    res.json(r.rows);
+  } catch (err: any) { res.status(500).json({ error: err.message || "Server error" }); }
+});
+
+app.get("/api/strategies/:id", authenticateToken, async (req: any, res) => {
+  try {
+    const sr = await query("SELECT * FROM strategies WHERE id = $1", [req.params.id]);
+    if (sr.rows.length === 0) return res.status(404).json({ error: "Stratégie introuvable" });
+    const strategy = sr.rows[0];
+    // RBAC: commercial can only see published+visible
+    if (!canEditStrategy(req) && (!strategy.agent_visible || strategy.status !== 'published')) {
+      return res.status(403).json({ error: "Stratégie non accessible" });
+    }
+    const ar = await query("SELECT * FROM strategy_actions WHERE strategy_id = $1 ORDER BY sort_order ASC, id ASC", [req.params.id]);
+    const dr = await query('SELECT id, name, file_name, file_type, file_size, created_at as "createdAt" FROM documents WHERE strategy_id = $1 ORDER BY created_at DESC', [req.params.id]);
+    res.json({ ...strategy, actions: ar.rows, documents: dr.rows });
+  } catch (err: any) { res.status(500).json({ error: err.message || "Server error" }); }
+});
+
+app.post("/api/strategies", authenticateToken, async (req: any, res) => {
+  if (!canEditStrategy(req)) return res.status(403).json({ error: "Forbidden" });
+  const { title, period, startDate, endDate, zone, city, targetSegment, targetIndustry, targetRevenue, currency, kpis, risks, description, status, agentVisible, actions } = req.body;
+  if (!title || !period) return res.status(400).json({ error: "Titre et période obligatoires" });
+  try {
+    const r = await query(
+      `INSERT INTO strategies (title, period, start_date, end_date, zone, city, target_segment, target_industry, target_revenue, currency, kpis, risks, description, status, agent_visible, created_by, created_by_name)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING *`,
+      [title, period, startDate || null, endDate || null, zone || 'CG', city || null, targetSegment || null, targetIndustry || null, targetRevenue || 0, currency || 'XAF', kpis || null, risks || null, description || null, status || 'draft', agentVisible !== false, req.user.uid, req.user.name || req.user.email || 'Admin']
+    );
+    const strategyId = r.rows[0].id;
+    if (Array.isArray(actions) && actions.length > 0) {
+      for (let i = 0; i < actions.length; i++) {
+        const a = actions[i];
+        await query(
+          "INSERT INTO strategy_actions (strategy_id, action, responsible, due_date, status, sort_order) VALUES ($1,$2,$3,$4,$5,$6)",
+          [strategyId, a.action, a.responsible || null, a.dueDate || null, a.status || 'todo', i]
+        );
+      }
+    }
+    res.status(201).json(r.rows[0]);
+  } catch (err: any) { console.error('strategy create error', err); res.status(500).json({ error: err.message || "Server error" }); }
+});
+
+app.put("/api/strategies/:id", authenticateToken, async (req: any, res) => {
+  if (!canEditStrategy(req)) return res.status(403).json({ error: "Forbidden" });
+  const { title, period, startDate, endDate, zone, city, targetSegment, targetIndustry, targetRevenue, currency, kpis, risks, description, status, agentVisible, actions } = req.body;
+  try {
+    await query(
+      `UPDATE strategies SET title=COALESCE($1,title), period=COALESCE($2,period), start_date=$3, end_date=$4, zone=COALESCE($5,zone), city=$6, target_segment=$7, target_industry=$8, target_revenue=COALESCE($9,target_revenue), currency=COALESCE($10,currency), kpis=$11, risks=$12, description=$13, status=COALESCE($14,status), agent_visible=COALESCE($15,agent_visible), updated_at=CURRENT_TIMESTAMP WHERE id=$16`,
+      [title, period, startDate || null, endDate || null, zone, city || null, targetSegment || null, targetIndustry || null, targetRevenue, currency, kpis || null, risks || null, description || null, status, agentVisible, req.params.id]
+    );
+    if (Array.isArray(actions)) {
+      await query("DELETE FROM strategy_actions WHERE strategy_id = $1", [req.params.id]);
+      for (let i = 0; i < actions.length; i++) {
+        const a = actions[i];
+        await query(
+          "INSERT INTO strategy_actions (strategy_id, action, responsible, due_date, status, sort_order) VALUES ($1,$2,$3,$4,$5,$6)",
+          [req.params.id, a.action, a.responsible || null, a.dueDate || null, a.status || 'todo', i]
+        );
+      }
+    }
+    const r = await query("SELECT * FROM strategies WHERE id = $1", [req.params.id]);
+    res.json(r.rows[0]);
+  } catch (err: any) { res.status(500).json({ error: err.message || "Server error" }); }
+});
+
+app.delete("/api/strategies/:id", authenticateToken, async (req: any, res) => {
+  if (!canEditStrategy(req)) return res.status(403).json({ error: "Forbidden" });
+  try {
+    await query("DELETE FROM documents WHERE strategy_id = $1", [req.params.id]);
+    await query("DELETE FROM strategies WHERE id = $1", [req.params.id]);
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message || "Server error" }); }
 });
 
 // =====================================================================
