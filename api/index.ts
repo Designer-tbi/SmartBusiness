@@ -2143,6 +2143,45 @@ app.get("/api/admin/user-activity", authenticateToken, async (req: any, res) => 
   } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 
+// =====================================================================
+// AGENT PAYMENTS DASHBOARD — paid quotes + commission + SmartDesk status
+// =====================================================================
+app.get("/api/agent/payments", authenticateToken, async (req: any, res) => {
+  try {
+    const isAdminLike = req.user.role === 'admin' || req.user.role === 'superadmin';
+    const params: any[] = [];
+    let whereAgent = "";
+    if (!isAdminLike) {
+      whereAgent = "AND q.agent_id = $1";
+      params.push(req.user.uid);
+    }
+    const sql = `
+      SELECT 
+        q.id, q.number, q.amount, q.date, q.agent_id,
+        q.payment_status, q.payment_id, q.payment_method, q.payment_date,
+        q.payment_amount, q.payment_currency, q.subscription_id,
+        c.name AS customer_name, c.email AS customer_email, c.company_name AS customer_company,
+        u.name AS agent_name,
+        (SELECT COUNT(*) FROM quote_items qi LEFT JOIN products p ON qi.product_id = p.id
+          WHERE qi.quote_id = q.id AND LOWER(COALESCE(p.name, qi.description, '')) LIKE '%smartdesk%') > 0 AS has_smartdesk,
+        (SELECT MAX(d.created_at) FROM documents d WHERE d.quote_id = q.id AND d.tag = 'smartdesk_provisioned') AS smartdesk_provisioned_at,
+        (SELECT cm.amount FROM commissions cm WHERE cm.invoice_id IN (SELECT i.id FROM invoices i WHERE i.quote_id = q.id) AND cm.agent_id = q.agent_id LIMIT 1) AS commission_amount,
+        (SELECT cm.status FROM commissions cm WHERE cm.invoice_id IN (SELECT i.id FROM invoices i WHERE i.quote_id = q.id) AND cm.agent_id = q.agent_id LIMIT 1) AS commission_status,
+        (SELECT cm.rate FROM commissions cm WHERE cm.invoice_id IN (SELECT i.id FROM invoices i WHERE i.quote_id = q.id) AND cm.agent_id = q.agent_id LIMIT 1) AS commission_rate
+      FROM quotes q
+      LEFT JOIN customers c ON q.customer_id = c.id
+      LEFT JOIN users u ON q.agent_id = u.uid
+      WHERE q.payment_status = 'PAID' ${whereAgent}
+      ORDER BY q.payment_date DESC NULLS LAST, q.id DESC
+    `;
+    const r = await query(sql, params);
+    res.json(r.rows);
+  } catch (err: any) {
+    console.error('agent/payments error', err);
+    res.status(500).json({ error: err.message || 'Server error' });
+  }
+});
+
 // Global error handler
 app.use((err: any, req: any, res: any, next: any) => {
   console.error("Unhandled error:", err);

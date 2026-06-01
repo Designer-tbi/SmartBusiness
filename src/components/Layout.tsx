@@ -26,7 +26,8 @@ import {
   PieChart,
   ChevronDown,
   ChevronRight,
-  Monitor
+  Monitor,
+  CreditCard
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 
@@ -68,6 +69,7 @@ export default function Layout() {
       children: [
         { name: 'Devis', href: '/quotes', icon: FileText },
         { name: 'Factures', href: '/invoices', icon: Receipt },
+        { name: 'Mes Paiements', href: '/payments', icon: CreditCard },
         { name: 'Commissions', href: '/commissions', icon: DollarSign },
         { name: 'Analyse Ventes', href: '/sales-analysis', icon: PieChart },
       ]

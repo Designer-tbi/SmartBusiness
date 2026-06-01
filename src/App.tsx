@@ -30,6 +30,7 @@ import Documents from './pages/Documents';
 import Sessions from './pages/Sessions';
 import SuperAdminDashboard from './pages/SuperAdminDashboard';
 import UserActivity from './pages/UserActivity';
+import AgentPayments from './pages/AgentPayments';
 import Layout from './components/Layout';
 
 const ProtectedRoute = ({ children, requiredRole }: { children: React.ReactNode, requiredRole?: 'admin' | 'agent' | 'superadmin' }) => {
@@ -76,6 +77,7 @@ export default function App() {
             <Route path="quotes" element={<Quotes />} />
             <Route path="invoices" element={<Invoices />} />
             <Route path="commissions" element={<Commissions />} />
+            <Route path="payments" element={<AgentPayments />} />
             <Route path="tracking" element={<Tracking />} />
             <Route path="activities" element={<Activities />} />
             <Route path="calendar" element={<Calendar />} />
