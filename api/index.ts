@@ -3,9 +3,9 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import cookieParser from "cookie-parser";
 
-import { query, ensureDbInitialized } from "./_lib/db";
-import { JWT_SECRET, authenticateToken } from "./_lib/auth";
-import { emailTransporter, FROM_EMAIL } from "./_lib/mailer";
+import { query, ensureDbInitialized } from "../lib/server/db";
+import { JWT_SECRET, authenticateToken } from "../lib/server/auth";
+import { emailTransporter, FROM_EMAIL } from "../lib/server/mailer";
 import {
   createActivity,
   autoCreateInvoiceFromQuote,
@@ -13,14 +13,14 @@ import {
   autoConvertLeadToCustomer,
   autoCreateOpportunityFromLead,
   autoSyncOpportunityFromQuote,
-} from "./_lib/automation";
+} from "../lib/server/automation";
 import {
   PAYPAL_BASE,
   getPayPalAccessToken,
   convertToPayPalCurrency,
   ensurePayPalPlanForProduct,
-} from "./_lib/paypal";
-import { handleSmartDeskProvisioningForQuote } from "./_lib/smartdesk";
+} from "../lib/server/paypal";
+import { handleSmartDeskProvisioningForQuote } from "../lib/server/smartdesk";
 
 // Create Express app
 const app = express();
