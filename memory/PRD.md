@@ -1,98 +1,108 @@
 # SmartBusiness CRM — PRD
 
-## Architecture
-- Frontend: React 19 + Vite + Tailwind (static on Vercel via `/dist`)
-- Backend: `api/index.ts` standalone Express serverless function (PostgreSQL only)
-- DB: PostgreSQL (Neon) — auto-init tables on first request
-- Auth: JWT cookies httpOnly, SameSite=Lax
-- Local dev fallback: `server.ts` with SQLite for development only
-- Production URL: https://www.tbi-crm.pro
+## Original problem statement
+Massive overhaul and debugging of the CRM application (SmartBusiness). Core requests:
+- Restore accidentally purged data (seed)
+- Fix broken UI buttons (Commissions, Objectives, Activities)
+- Build Agent & Admin Dashboards
+- Automate the entire CRM conversion pipeline (Lead → Customer → Quote → Invoice → Commission)
+- Integrate PayPal (one-time + subscriptions)
+- Agent data isolation (multi-agent SaaS)
+- Fix timezone calendar bugs
+- Country-specific UI settings (RDC, Congo, France, USD/XAF/CDF, phone codes)
+- Integrate SmartDesk API to auto-provision accounts + email credentials upon payment
+- Refactor large `api/index.ts` into modules
 
-## User Roles
-- `superadmin` — full access (eden@tbi-center.fr)
-- `admin` — full access except deactivating superadmin
-- `agent` — sees only own data (customers, leads, quotes, invoices, commissions, objectives)
+## Tech stack
+- Frontend: React 19 + Vite + TailwindCSS
+- Backend: Express running as Vercel Serverless Function (`api/index.ts`)
+- DB: PostgreSQL (Neon)
+- Email: Nodemailer + OVH SMTP
+- Payments: PayPal (REST API direct, Live mode)
+- External: SmartDesk API for account provisioning
 
-### CRM Automation Chain — FULL SYNC (Feb 2026)
-**Pipeline auto-synchronisé sur tous les modules :**
+## Production URL
+https://smart-business-sigma.vercel.app
 
-| Évènement | Conséquence automatique |
-|---|---|
-| Lead → statut **Qualifié** | ➜ Opportunité créée (stage='Découverte', proba=20%) + Activité "Qualifier" J+1 |
-| Lead → statut **Converti** | ➜ Client créé (héritage email/tel/adresse) + Opportunités liées rattachées + Activité "Onboarding" J+2 |
-| Client créé manuellement | ➜ Activité "Onboarding" RDV J+2 |
-| Devis **Signé** (admin ou public) | ➜ Lead converti (si applicable) ➜ Facture créée ➜ Opportunité = "Gagné" (proba=100%) ➜ Activité "Préparer mise en œuvre" J+1 |
-| Devis **Refusé** | ➜ Opportunité = "Perdu" + Activité "Relance commerciale" J+7 |
-| Facture **Payée** | ➜ Commission 20% créée pour l'agent |
-| Facture en attente après due_date | ➜ Statut auto = "En retard" (calculé sur GET /api/invoices) |
-| Objectif atteint (current ≥ target) | ➜ Statut auto = "Atteint" |
-| Objectif expiré (end_date passé, non atteint) | ➜ Statut auto = "Échoué" |
+## User language
+French (fr-FR)
 
-**Helpers centralisés** (`/app/api/index.ts`) :
-- `autoCreateInvoiceFromQuote(quoteId)` — idempotent
-- `autoCreateCommissionFromInvoice(invoiceId)` — idempotent
-- `autoConvertLeadToCustomer(leadId)` — crée client + active onboarding
-- `autoCreateOpportunityFromLead(leadId, agentId)` — idempotent
-- `autoSyncOpportunityFromQuote(quoteId, status)` — gère gagné/perdu
-- `createActivity(opts)` — programme activités automatiques
+## Architecture (after refactor 2026-02)
+```
+/app/
+├── api/
+│   ├── index.ts           # Routes only (1679 lines)
+│   └── _lib/
+│       ├── auth.ts        # JWT + authenticateToken
+│       ├── automation.ts  # CRM chain automation
+│       ├── db.ts          # Pool + ensureDbInitialized + schema
+│       ├── mailer.ts      # SMTP OVH
+│       ├── paypal.ts      # PayPal Live API helpers
+│       └── smartdesk.ts   # SmartDesk provisioning + welcome email
+├── src/
+│   ├── pages/             # React pages (Leads, Quotes, Dashboards, AgentPayments, ...)
+│   ├── lib/countryConfig  # XAF/CDF/USD/EUR routing
+│   └── ...
+```
 
-**Constantes globales** :
-- `COMMISSION_RATE = 20` (taux unique modifiable)
+## What's been implemented (CHANGELOG)
 
-## Implemented (Feb 2026)
-### CRM Automation Chain — NEW
-- **Devis Signé** (PUT admin ou public sign) → **Facture créée automatiquement** (statut "En attente")
-- **Facture marquée Payée** (PUT `/api/invoices/:id`) → **Commission 20% créée automatiquement**
-- Idempotent : pas de doublon si invoice/commission existe déjà
-- Helpers centralisés : `autoCreateInvoiceFromQuote()`, `autoCreateCommissionFromInvoice()`
-- Constante `COMMISSION_RATE = 20` (modifiable globalement)
-- Bouton "✓ Marquer comme payée" sur chaque facture déclenche auto-commission
+### Feb 2026
+- ✅ DB seeded with realistic demo data
+- ✅ Agent & Admin Dashboards
+- ✅ Automated CRM sync (Lead→Customer→Invoice→Commission at 20%)
+- ✅ Fix Lead conversion (phone NULL constraint, missing fields)
+- ✅ Fix Calendar timezone date shifting (noon UTC trick)
+- ✅ Public preview pages for Quotes & Invoices
+- ✅ PayPal Live integration (one-time + subscription) with signature gating
+- ✅ Fix delete cascade for Quotes/Invoices
+- ✅ Country-specific UI (phone codes, currencies, city dropdowns)
+- ✅ Agent data isolation (Portfolio, Leads, Opportunities by agent_id)
+- ✅ Comments sections (expandable in CRM lists)
+- ✅ RDC zone defaults to USD
+- ✅ SmartDesk auto-provisioning via EXTERNAL_API_KEY on payment
+- ✅ Manual "Re-provisionner" admin button
+- ✅ Fix PayPal 401 silent error (PAYPAL_MODE=live alignment + verbose errors + enableFunding:card)
+- ✅ **New page "Mes Paiements"** (`/payments`) — agent view of paid quotes + commissions + SmartDesk status with 20s polling
+- ✅ **Refactor `api/index.ts`**: 2192 → 1679 lines, extracted 6 helper modules (db, auth, mailer, automation, paypal, smartdesk). Pure refactor, 23/23 production tests pass.
 
-### Foundation
-- Vercel serverless deployment via `api/index.ts`
-- Auto DB init + admin seeding (eden@tbi-center.fr / loub@ki2014D)
-- Multi-tenant Demo (15-day trial) vs Production accounts
-- Multi-zone currency: CG/CM/GA/TD/CF/GQ → XAF, CD → CDF/USD, FR → EUR, etc.
-- Sessions tracking with IP + user-agent
+## Backlog / Roadmap
 
-### CRM Core
-- Portfolio (categories + items with NIU, address, contacts)
-- Leads → Opportunities → Customers conversion pipeline
-- Quotes with line items, VAT, discounts (line + global)
-- Quote email sending via OVH SMTP (Nodemailer)
-- Quote e-signature (public route + signature canvas)
-- Quote → Invoice conversion (signed quotes)
-- Invoices, Projects, Activities, Objectives, Commissions
-- Documents module (base64 storage, preview, download)
-- Reports module (agent submits, admin reviews + comments)
+### P1
+- Stats de conversion: tunnel Devis envoyés → signés → payés
 
-### Dashboards (Feb 2026 — NEW)
-- **Agent Dashboard**: CA encaissé, devis signés, taux conversion, pipeline (prospects/opp/clients), activités (appels/RDV), commissions
-- **Admin/Superadmin Dashboard**: équipe globale, top 5 agents, table de performance détaillée par agent, comparatif CA encaissé/signé
-- New endpoints: `/api/stats/agent`, `/api/stats/agents-overview`
+### P2
+- Badge visuel statut provisioning SmartDesk sur page Devis admin
+- Email automatique à l'agent quand son devis est payé
+- Webhooks PayPal pour gérer remboursements / disputes
+- Export CSV des paiements pour comptabilité
 
-### Demo Data Seeder (Feb 2026 — NEW)
-- `/api/admin/seed-demo` endpoint creates:
-  - 5 agents (3 CG/XAF + 2 CD/CDF, mix demo/prod) — password `Demo2026!`
-  - 5 categories + 7 portfolio items
-  - 10 products (mix XAF/CDF)
-  - 8 customers, 7 leads, 5 opportunities
-  - 8 quotes (signed/sent/draft/refused) with line items
-  - 4 invoices (mix paid/pending) auto-generated from signed quotes
-  - 25 activities (calls/RDV/email/réunion across agents)
-  - 15 objectives (revenue/calls/quotes per agent)
-  - 4 commissions, 3 projects
-- Idempotent on agents (checks email before insert)
-- Triggered via "🔄 Charger les données démo" button on admin dashboard
+### P3
+- Advanced Card Fields PayPal (formulaire carte inline sans popup) si compte ACDC éligible
+- Split frontend bundle (code splitting via dynamic imports) — bundle actuel 1.28MB
 
-### Bug Fixes (Feb 2026)
-- Fixed superadmin role check in: Dashboard, Objectives, Commissions, Catalog, Calls, Tracking
-- AuthContext role type extended to `'admin' | 'agent' | 'superadmin'`
-- Portfolio item type now includes `niu` field
+## Key API endpoints
+- `POST /api/auth/login` — JWT cookie 'token'
+- `GET /api/auth/me` — current user
+- `GET /api/customers|leads|opportunities|quotes|invoices|commissions` — auth, agent-isolated
+- `GET /api/agent/payments` — paid quotes + commission + SmartDesk status
+- `POST /api/quotes/:id/smartdesk/provision` — manual retry
+- `POST /api/public/quotes/:id/paypal/create-order` — PayPal one-time
+- `POST /api/public/quotes/:id/paypal/subscription-plan` — PayPal sub
+- `GET /api/public/paypal/config` — exposes clientId + mode
 
-## Backlog
-- P1: Quote text color tweaks in form (minor)
-- P1: File uploads via Vercel Blob (currently disabled in serverless)
-- P2: Refactor `/app/api/index.ts` (1000+ lines) into modular routes
-- P2: Cold start optimization
-- P2: Email reminders for expiring demo accounts
+## Env vars (Vercel)
+- `DATABASE_URL` (Neon)
+- `JWT_SECRET`
+- `PAYPAL_MODE=live`
+- `PAYPAL_CLIENT_ID` / `PAYPAL_CLIENT_SECRET` (Live)
+- `EXTERNAL_API_KEY` (SmartDesk)
+- `SMARTDESK_API_URL` (SmartDesk)
+- `SMTP_FROM` (optional, default demo@smart-desk.pro)
+
+## Test credentials
+See `/app/memory/test_credentials.md`
+
+## Regression test suite
+`/app/backend/tests/test_production_api.py` — 23 tests covering health, auth, all list endpoints, admin/superadmin, PayPal flow.
+Run: `cd /app && python -m pytest backend/tests/test_production_api.py -v`
