@@ -1019,14 +1019,19 @@ const PAYPAL_BASE = process.env.PAYPAL_MODE === 'live'
 async function getPayPalAccessToken(): Promise<string> {
   const id = process.env.PAYPAL_CLIENT_ID;
   const secret = process.env.PAYPAL_CLIENT_SECRET;
-  if (!id || !secret) throw new Error('PayPal credentials not configured');
-  const auth = Buffer.from(`${id}:${secret}`).toString('base64');
+  const mode = process.env.PAYPAL_MODE === 'live' ? 'live' : 'sandbox';
+  if (!id || !secret) throw new Error('PayPal credentials not configured (PAYPAL_CLIENT_ID / PAYPAL_CLIENT_SECRET manquants)');
+  const auth = Buffer.from(`${id.trim()}:${secret.trim()}`).toString('base64');
   const r = await fetch(`${PAYPAL_BASE}/v1/oauth2/token`, {
     method: 'POST',
     headers: { Authorization: `Basic ${auth}`, 'Content-Type': 'application/x-www-form-urlencoded' },
     body: 'grant_type=client_credentials'
   });
-  if (!r.ok) throw new Error('PayPal auth failed: ' + r.status);
+  if (!r.ok) {
+    const body = await r.text();
+    console.error('[PayPal] OAuth failed', r.status, body, 'mode=', mode, 'clientIdPrefix=', id.substring(0, 8));
+    throw new Error(`PayPal auth ${r.status} en mode ${mode}. Vérifiez que PAYPAL_CLIENT_ID/SECRET correspondent bien à des clés ${mode === 'live' ? 'Live (developer.paypal.com → Live)' : 'Sandbox'}.`);
+  }
   const data: any = await r.json();
   return data.access_token;
 }
