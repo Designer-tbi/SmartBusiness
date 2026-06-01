@@ -46,12 +46,16 @@ export default function QuotePublicView() {
   const handlePayPalCreateOrder = async () => {
     setProcessingPayment(true);
     try {
+      console.log('[PayPal] Creating order for quote', id);
       const r = await fetch(`/api/public/quotes/${id}/paypal/create-order`, { method: 'POST' });
       const data = await r.json();
+      console.log('[PayPal] create-order response', r.status, data);
       if (!r.ok) throw new Error(data.error || 'Erreur création commande');
+      if (!data.id) throw new Error('Réponse PayPal invalide: pas d\'identifiant de commande');
       return data.id;
     } catch (e: any) {
-      alert('Erreur: ' + e.message);
+      console.error('[PayPal] createOrder failed', e);
+      alert('Erreur lors de la création de la commande PayPal:\n\n' + e.message + '\n\nOuvrez la console (F12) pour plus de détails.');
       setProcessingPayment(false);
       throw e;
     }
@@ -59,8 +63,10 @@ export default function QuotePublicView() {
 
   const handlePayPalApprove = async (data: any) => {
     try {
+      console.log('[PayPal] Approving order', data.orderID);
       const r = await fetch(`/api/public/quotes/${id}/paypal/capture/${data.orderID}`, { method: 'POST' });
       const result = await r.json();
+      console.log('[PayPal] capture response', r.status, result);
       if (!r.ok) throw new Error(result.error || 'Capture échouée');
       // Update local state to reflect payment
       setQuote((prev: any) => ({ ...prev, payment_status: 'PAID', payment_id: result.transactionId, payment_amount: result.amount, payment_currency: result.currency }));
@@ -280,13 +286,18 @@ export default function QuotePublicView() {
                         />
                       </PayPalScriptProvider>
                     ) : (
-                      <PayPalScriptProvider options={{ clientId: paypalConfig.clientId, currency: 'EUR', intent: 'capture' }}>
+                      <PayPalScriptProvider options={{ clientId: paypalConfig.clientId, currency: 'EUR', intent: 'capture', enableFunding: 'card', disableFunding: 'paylater,credit', components: 'buttons' }}>
                         <PayPalButtons
                           style={{ layout: 'vertical', shape: 'rect', color: 'gold', label: 'pay' }}
                           createOrder={handlePayPalCreateOrder}
                           onApprove={handlePayPalApprove}
-                          onError={(err) => { alert('Erreur PayPal: ' + (err as any).message); setProcessingPayment(false); }}
-                          onCancel={() => setProcessingPayment(false)}
+                          onError={(err: any) => {
+                            console.error('[PayPal] onError', err);
+                            alert('Erreur PayPal:\n\n' + (err?.message || JSON.stringify(err)) + '\n\nOuvrez la console (F12 → onglet Console) pour copier l\'erreur complète.');
+                            setProcessingPayment(false);
+                          }}
+                          onCancel={() => { console.log('[PayPal] onCancel'); setProcessingPayment(false); }}
+                          onClick={(_d, actions) => { console.log('[PayPal] Button clicked'); return actions.resolve(); }}
                           disabled={processingPayment}
                         />
                       </PayPalScriptProvider>
