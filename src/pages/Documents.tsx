@@ -55,29 +55,61 @@ export default function Documents() {
   const handleFileUpload = useCallback(async (files: FileList | File[]) => {
     if (!files.length) return;
     setUploading(true);
+    const MAX_RAW_SIZE = 3.3 * 1024 * 1024; // 3.3 MB raw → ~4.4 MB after base64 (Vercel limit)
+    let successCount = 0;
+    let failedFiles: { name: string; reason: string }[] = [];
+
     for (const file of Array.from(files)) {
+      if (file.size > MAX_RAW_SIZE) {
+        failedFiles.push({ name: file.name, reason: `Trop volumineux (${(file.size / 1024 / 1024).toFixed(2)} MB, max 3.3 MB)` });
+        continue;
+      }
       try {
         const reader = new FileReader();
-        const fileData = await new Promise<string>((resolve) => {
+        const fileData = await new Promise<string>((resolve, reject) => {
+          reader.onerror = () => reject(new Error('Lecture fichier échouée'));
           reader.onload = () => resolve(reader.result as string);
           reader.readAsDataURL(file);
         });
         const docName = form.name || file.name.replace(/\.[^/.]+$/, '');
-        await fetch('/api/documents', {
+        const r = await fetch('/api/documents', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             name: docName,
             fileName: file.name,
-            fileType: file.type,
+            fileType: file.type || 'application/octet-stream',
             fileSize: file.size,
             fileData,
             notes: form.notes,
           }),
         });
-      } catch (err) { console.error('Upload error:', err); }
+        if (r.ok) {
+          successCount++;
+        } else {
+          const txt = await r.text();
+          console.error('[Documents] Upload failed', r.status, txt);
+          failedFiles.push({
+            name: file.name,
+            reason: r.status === 413
+              ? 'Payload Too Large (limite Vercel 4.5 MB en base64)'
+              : `HTTP ${r.status}: ${txt.substring(0, 150)}`,
+          });
+        }
+      } catch (err: any) {
+        console.error('[Documents] Upload exception:', err);
+        failedFiles.push({ name: file.name, reason: err.message || 'Erreur réseau' });
+      }
     }
     setUploading(false);
+
+    if (failedFiles.length > 0) {
+      const lines = failedFiles.map(f => `• ${f.name} → ${f.reason}`).join('\n');
+      alert(`⚠️ Upload partiel : ${successCount}/${files.length} fichiers réussis.\n\nÉchecs :\n${lines}\n\nConseil : Compressez les fichiers >3.3 MB (smallpdf.com, tinypng.com).`);
+    } else if (successCount > 0) {
+      // Soft confirmation (no alert, just refresh)
+      console.log(`[Documents] ${successCount} fichier(s) uploadé(s)`);
+    }
     setShowUpload(false);
     setForm({ name: '', notes: '' });
     fetchDocuments();

@@ -310,12 +310,24 @@ function StrategyWizard({ strategyId, zone, zoneCfg, onClose, onSaved }: any) {
       const saved = await r.json();
       // For new strategy with uploaded files, attach them
       if (!strategyId && documents.length > 0) {
-        for (const d of documents.filter(d => !d.id)) {
-          await fetch('/api/documents', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ...d, strategyId: saved.id }),
-          });
+        const pending = documents.filter((d: any) => !d.id);
+        let failed = 0;
+        for (const d of pending) {
+          try {
+            const ur = await fetch('/api/documents', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ ...d, strategyId: saved.id }),
+            });
+            if (!ur.ok) {
+              failed++;
+              const txt = await ur.text();
+              console.error('[Strategy] Upload doc failed', ur.status, txt);
+            }
+          } catch (e) { failed++; console.error('[Strategy] Upload doc exception', e); }
+        }
+        if (failed > 0) {
+          alert(`⚠️ La stratégie a été créée mais ${failed} document(s) n'ont pas pu être uploadés.\n\nCause probable : fichier trop volumineux pour Vercel (> 4.5 MB en base64).\n\nOuvrez la stratégie pour ré-uploader les fichiers manquants un par un.`);
         }
       }
       onSaved();
@@ -326,37 +338,57 @@ function StrategyWizard({ strategyId, zone, zoneCfg, onClose, onSaved }: any) {
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const maxSize = 4.5 * 1024 * 1024; // ~Vercel limit
+    // Base64 encoding adds ~33% overhead. Vercel body limit = 4.5MB, so raw file must be < 3.3MB to be safe.
+    const maxSize = 3.3 * 1024 * 1024;
     if (file.size > maxSize) {
-      alert(`⚠️ Fichier trop volumineux (${(file.size / 1024 / 1024).toFixed(1)} MB). Maximum 4.5 MB par fichier sur Vercel. Compressez votre fichier ou divisez-le en plusieurs parties.`);
+      alert(`⚠️ Fichier trop volumineux (${(file.size / 1024 / 1024).toFixed(2)} MB).\n\nMaximum 3.3 MB par fichier (limite Vercel après encodage base64).\n\nSolutions :\n• Compressez le PDF avec smallpdf.com\n• Réduisez la qualité de l'image\n• Divisez le document en plusieurs parties`);
       e.target.value = '';
       return;
     }
     setUploading(true);
     const reader = new FileReader();
+    reader.onerror = () => { alert('Erreur lecture fichier'); setUploading(false); e.target.value = ''; };
     reader.onload = async () => {
-      const fileData = reader.result as string;
-      const payload = {
-        name: file.name,
-        fileName: file.name,
-        fileType: file.type,
-        fileSize: file.size,
-        fileData,
-        strategyId: strategyId || null,
-      };
-      if (strategyId) {
-        // Persist immediately
-        const r = await fetch('/api/documents', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-        if (r.ok) {
-          const saved = await r.json();
-          setDocuments([...documents, saved]);
-        } else { alert('Erreur upload'); }
-      } else {
-        // Defer until strategy created
-        setDocuments([...documents, payload]);
+      try {
+        const fileData = reader.result as string;
+        const payload = {
+          name: file.name,
+          fileName: file.name,
+          fileType: file.type || 'application/octet-stream',
+          fileSize: file.size,
+          fileData,
+          strategyId: strategyId || null,
+        };
+        if (strategyId) {
+          // Persist immediately
+          const r = await fetch('/api/documents', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          if (r.ok) {
+            const saved = await r.json();
+            setDocuments([...documents, saved]);
+          } else {
+            const txt = await r.text();
+            console.error('[Upload] Failed', r.status, txt);
+            if (r.status === 413) {
+              alert('⚠️ Fichier rejeté par Vercel (Payload Too Large).\n\nLe fichier en base64 dépasse 4.5 MB. Réduisez la taille du fichier original (PDF/image compressé).');
+            } else {
+              alert(`Erreur upload (${r.status}): ${txt.substring(0, 300)}`);
+            }
+          }
+        } else {
+          // Defer until strategy created
+          setDocuments([...documents, payload]);
+        }
+      } catch (err: any) {
+        console.error('[Upload] Exception', err);
+        alert('Erreur upload: ' + err.message);
+      } finally {
+        setUploading(false);
+        e.target.value = '';
       }
-      setUploading(false);
-      e.target.value = '';
     };
     reader.readAsDataURL(file);
   };
@@ -631,7 +663,7 @@ function Step4Documents({ documents, uploading, handleFile, removeDoc, form, set
   return (
     <div className="space-y-5">
       <HelpBox icon={<Upload size={16} />} title="Documents joints">
-        Ajoutez vos supports : <strong>PDF</strong>, <strong>Word</strong>, <strong>Excel</strong>, <strong>PowerPoint</strong>, <strong>images</strong> (max <strong>4.5 MB</strong> par fichier — limite Vercel).<br />
+        Ajoutez vos supports : <strong>PDF</strong>, <strong>Word</strong>, <strong>Excel</strong>, <strong>PowerPoint</strong>, <strong>images</strong> (max <strong>3.3 MB</strong> par fichier — limite Vercel après encodage base64).<br />
         Les fichiers sont stockés directement dans la base PostgreSQL et téléchargeables à tout moment.
       </HelpBox>
 
@@ -643,7 +675,7 @@ function Step4Documents({ documents, uploading, handleFile, removeDoc, form, set
             {uploading ? 'Upload en cours...' : '📎 Sélectionner un fichier'}
           </span>
         </label>
-        <p className="text-xs text-slate-500 mt-3">PDF, DOCX, XLSX, PPTX, JPG, PNG — max 4.5 MB / fichier</p>
+        <p className="text-xs text-slate-500 mt-3">PDF, DOCX, XLSX, PPTX, JPG, PNG — max 3.3 MB / fichier (limite Vercel)</p>
       </div>
 
       {documents.length > 0 && (
