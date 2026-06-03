@@ -153,6 +153,29 @@ async function ensureDbInitialized() {
       )`,
       "ALTER TABLE documents ADD COLUMN IF NOT EXISTS strategy_id INTEGER",
       "CREATE INDEX IF NOT EXISTS idx_documents_strategy ON documents(strategy_id)",
+      // === Chunked uploads (bypass Vercel 4.5MB body limit) ===
+      `CREATE TABLE IF NOT EXISTS document_uploads (
+        upload_id TEXT PRIMARY KEY,
+        name TEXT,
+        file_name TEXT,
+        file_type TEXT,
+        total_size BIGINT,
+        total_chunks INTEGER NOT NULL,
+        received_chunks INTEGER NOT NULL DEFAULT 0,
+        strategy_id INTEGER,
+        customer_id INTEGER,
+        quote_id INTEGER,
+        invoice_id INTEGER,
+        uploaded_by TEXT,
+        notes TEXT,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      )`,
+      `CREATE TABLE IF NOT EXISTS document_upload_chunks (
+        upload_id TEXT NOT NULL REFERENCES document_uploads(upload_id) ON DELETE CASCADE,
+        chunk_index INTEGER NOT NULL,
+        chunk_data TEXT NOT NULL,
+        PRIMARY KEY (upload_id, chunk_index)
+      )`,
     ];
     for (const s of schema) { await query(s); }
     // Seed superadmin
@@ -2105,6 +2128,91 @@ app.delete("/api/documents/:id", authenticateToken, async (req, res) => {
     await query("DELETE FROM documents WHERE id = $1", [req.params.id]);
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: "Server error" }); }
+});
+
+// =====================================================================
+// CHUNKED UPLOAD — bypass Vercel 4.5MB body limit by splitting files
+// =====================================================================
+// Step 1: init upload session
+app.post("/api/documents/chunked/init", authenticateToken, async (req: any, res) => {
+  const { name, fileName, fileType, totalSize, totalChunks, strategyId, customerId, quoteId, invoiceId, notes } = req.body;
+  if (!fileName || !totalChunks || totalChunks < 1) return res.status(400).json({ error: "fileName et totalChunks requis" });
+  if (totalChunks > 500) return res.status(400).json({ error: "Trop de chunks (max 500 = ~1 GB)" });
+  const uploadId = `up_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
+  try {
+    await query(
+      `INSERT INTO document_uploads (upload_id, name, file_name, file_type, total_size, total_chunks, strategy_id, customer_id, quote_id, invoice_id, uploaded_by, notes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+      [uploadId, name || fileName, fileName, fileType || 'application/octet-stream', totalSize || 0, totalChunks, strategyId || null, customerId || null, quoteId || null, invoiceId || null, req.user.uid, notes || null]
+    );
+    res.json({ uploadId, totalChunks });
+  } catch (err: any) {
+    console.error('[Upload] Init error:', err);
+    res.status(500).json({ error: err.message || "Server error" });
+  }
+});
+
+// Step 2: upload a single chunk (max ~3.5MB per chunk)
+app.post("/api/documents/chunked/:uploadId/chunk", authenticateToken, async (req: any, res) => {
+  const { uploadId } = req.params;
+  const { chunkIndex, chunkData } = req.body;
+  if (chunkIndex === undefined || !chunkData) return res.status(400).json({ error: "chunkIndex et chunkData requis" });
+  try {
+    const ur = await query("SELECT total_chunks, received_chunks FROM document_uploads WHERE upload_id = $1", [uploadId]);
+    if (ur.rows.length === 0) return res.status(404).json({ error: "Upload session not found" });
+    if (chunkIndex < 0 || chunkIndex >= ur.rows[0].total_chunks) return res.status(400).json({ error: "chunkIndex hors limites" });
+    // Insert or replace this chunk
+    await query(
+      `INSERT INTO document_upload_chunks (upload_id, chunk_index, chunk_data) VALUES ($1,$2,$3)
+       ON CONFLICT (upload_id, chunk_index) DO UPDATE SET chunk_data = EXCLUDED.chunk_data`,
+      [uploadId, chunkIndex, chunkData]
+    );
+    // Recompute received count from actual rows (idempotent)
+    const cr = await query("SELECT COUNT(*) AS c FROM document_upload_chunks WHERE upload_id = $1", [uploadId]);
+    const received = Number(cr.rows[0].c);
+    await query("UPDATE document_uploads SET received_chunks = $1 WHERE upload_id = $2", [received, uploadId]);
+    res.json({ received, total: ur.rows[0].total_chunks });
+  } catch (err: any) {
+    console.error('[Upload] Chunk error:', err);
+    res.status(500).json({ error: err.message || "Server error" });
+  }
+});
+
+// Step 3: finalize — concat chunks → create final document
+app.post("/api/documents/chunked/:uploadId/finalize", authenticateToken, async (req: any, res) => {
+  const { uploadId } = req.params;
+  try {
+    const ur = await query("SELECT * FROM document_uploads WHERE upload_id = $1", [uploadId]);
+    if (ur.rows.length === 0) return res.status(404).json({ error: "Upload session not found" });
+    const sess = ur.rows[0];
+    if (sess.received_chunks !== sess.total_chunks) {
+      return res.status(400).json({ error: `Chunks incomplets: ${sess.received_chunks}/${sess.total_chunks}` });
+    }
+    // Concat all chunks in order
+    const chunks = await query("SELECT chunk_data FROM document_upload_chunks WHERE upload_id = $1 ORDER BY chunk_index ASC", [uploadId]);
+    const fileData = chunks.rows.map((c: any) => c.chunk_data).join('');
+    // Insert into documents
+    const dr = await query(
+      `INSERT INTO documents (name, file_name, file_type, file_size, file_data, customer_id, quote_id, invoice_id, strategy_id, uploaded_by, notes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+       RETURNING id, name, file_name, file_type, file_size, customer_id, quote_id, invoice_id, strategy_id, uploaded_by, notes, created_at as "createdAt"`,
+      [sess.name, sess.file_name, sess.file_type, sess.total_size, fileData, sess.customer_id, sess.quote_id, sess.invoice_id, sess.strategy_id, sess.uploaded_by, sess.notes]
+    );
+    // Cleanup
+    await query("DELETE FROM document_uploads WHERE upload_id = $1", [uploadId]);
+    res.json(dr.rows[0]);
+  } catch (err: any) {
+    console.error('[Upload] Finalize error:', err);
+    res.status(500).json({ error: err.message || "Server error" });
+  }
+});
+
+// Optional: abort/cleanup upload
+app.delete("/api/documents/chunked/:uploadId", authenticateToken, async (req: any, res) => {
+  try {
+    await query("DELETE FROM document_uploads WHERE upload_id = $1", [req.params.uploadId]);
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message || "Server error" }); }
 });
 
 // Reports - Agents submit, Admin reviews

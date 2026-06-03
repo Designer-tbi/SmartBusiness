@@ -27,6 +27,7 @@ import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { useAuth } from '../contexts/AuthContext';
 import { formatCurrency, getZoneConfig, getCurrencyLabel } from '../lib/countryConfig';
+import { uploadFileChunked } from '../lib/chunkedUpload';
 
 type StrategyAction = {
   id?: number;
@@ -257,6 +258,7 @@ function StrategyWizard({ strategyId, zone, zoneCfg, onClose, onSaved }: any) {
   });
   const [documents, setDocuments] = useState<any[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<{ pct: number; label: string } | null>(null);
 
   useEffect(() => {
     if (strategyId) {
@@ -308,26 +310,17 @@ function StrategyWizard({ strategyId, zone, zoneCfg, onClose, onSaved }: any) {
       const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       if (!r.ok) throw new Error((await r.json()).error || 'Erreur enregistrement');
       const saved = await r.json();
-      // For new strategy with uploaded files, attach them
+      // For new strategy with pending uploaded files, attach them now via chunked upload
       if (!strategyId && documents.length > 0) {
-        const pending = documents.filter((d: any) => !d.id);
+        const pending = documents.filter((d: any) => !d.id && d._pendingFile instanceof File);
         let failed = 0;
         for (const d of pending) {
           try {
-            const ur = await fetch('/api/documents', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ ...d, strategyId: saved.id }),
-            });
-            if (!ur.ok) {
-              failed++;
-              const txt = await ur.text();
-              console.error('[Strategy] Upload doc failed', ur.status, txt);
-            }
-          } catch (e) { failed++; console.error('[Strategy] Upload doc exception', e); }
+            await uploadFileChunked(d._pendingFile, { name: d._pendingFile.name, strategyId: saved.id });
+          } catch (e) { failed++; console.error('[Strategy] Upload doc failed', e); }
         }
         if (failed > 0) {
-          alert(`⚠️ La stratégie a été créée mais ${failed} document(s) n'ont pas pu être uploadés.\n\nCause probable : fichier trop volumineux pour Vercel (> 4.5 MB en base64).\n\nOuvrez la stratégie pour ré-uploader les fichiers manquants un par un.`);
+          alert(`⚠️ La stratégie a été créée mais ${failed} document(s) n'ont pas pu être uploadés.\nOuvrez la stratégie pour réessayer.`);
         }
       }
       onSaved();
@@ -338,59 +331,40 @@ function StrategyWizard({ strategyId, zone, zoneCfg, onClose, onSaved }: any) {
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    // Base64 encoding adds ~33% overhead. Vercel body limit = 4.5MB, so raw file must be < 3.3MB to be safe.
-    const maxSize = 3.3 * 1024 * 1024;
-    if (file.size > maxSize) {
-      alert(`⚠️ Fichier trop volumineux (${(file.size / 1024 / 1024).toFixed(2)} MB).\n\nMaximum 3.3 MB par fichier (limite Vercel après encodage base64).\n\nSolutions :\n• Compressez le PDF avec smallpdf.com\n• Réduisez la qualité de l'image\n• Divisez le document en plusieurs parties`);
+    // 100 MB limit (Postgres can hold it, but practical UX max)
+    const MAX_SIZE = 100 * 1024 * 1024;
+    if (file.size > MAX_SIZE) {
+      alert(`⚠️ Fichier trop volumineux (${(file.size / 1024 / 1024).toFixed(2)} MB).\n\nMaximum 100 MB par fichier.`);
       e.target.value = '';
       return;
     }
     setUploading(true);
-    const reader = new FileReader();
-    reader.onerror = () => { alert('Erreur lecture fichier'); setUploading(false); e.target.value = ''; };
-    reader.onload = async () => {
-      try {
-        const fileData = reader.result as string;
-        const payload = {
+    setUploadProgress({ pct: 0, label: 'Préparation…' });
+    try {
+      if (strategyId) {
+        // Persist immediately via chunked upload
+        const saved = await uploadFileChunked(file, { name: file.name, strategyId }, (pct, label) => {
+          setUploadProgress({ pct, label });
+        });
+        setDocuments([...documents, saved]);
+      } else {
+        // Defer until strategy created — store File ref locally
+        setDocuments([...documents, {
+          _pendingFile: file,
           name: file.name,
-          fileName: file.name,
-          fileType: file.type || 'application/octet-stream',
-          fileSize: file.size,
-          fileData,
-          strategyId: strategyId || null,
-        };
-        if (strategyId) {
-          // Persist immediately
-          const r = await fetch('/api/documents', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-          });
-          if (r.ok) {
-            const saved = await r.json();
-            setDocuments([...documents, saved]);
-          } else {
-            const txt = await r.text();
-            console.error('[Upload] Failed', r.status, txt);
-            if (r.status === 413) {
-              alert('⚠️ Fichier rejeté par Vercel (Payload Too Large).\n\nLe fichier en base64 dépasse 4.5 MB. Réduisez la taille du fichier original (PDF/image compressé).');
-            } else {
-              alert(`Erreur upload (${r.status}): ${txt.substring(0, 300)}`);
-            }
-          }
-        } else {
-          // Defer until strategy created
-          setDocuments([...documents, payload]);
-        }
-      } catch (err: any) {
-        console.error('[Upload] Exception', err);
-        alert('Erreur upload: ' + err.message);
-      } finally {
-        setUploading(false);
-        e.target.value = '';
+          file_name: file.name,
+          file_type: file.type,
+          file_size: file.size,
+        }]);
       }
-    };
-    reader.readAsDataURL(file);
+    } catch (err: any) {
+      console.error('[Upload] Exception', err);
+      alert('Erreur upload: ' + err.message);
+    } finally {
+      setUploading(false);
+      setUploadProgress(null);
+      e.target.value = '';
+    }
   };
 
   const removeDoc = async (doc: any, idx: number) => {
@@ -444,7 +418,7 @@ function StrategyWizard({ strategyId, zone, zoneCfg, onClose, onSaved }: any) {
             <Step3Actions form={form} addAction={addAction} removeAction={removeAction} updateAction={updateAction} />
           )}
           {step === 4 && (
-            <Step4Documents documents={documents} uploading={uploading} handleFile={handleFile} removeDoc={removeDoc} form={form} setForm={setForm} />
+            <Step4Documents documents={documents} uploading={uploading} uploadProgress={uploadProgress} handleFile={handleFile} removeDoc={removeDoc} form={form} setForm={setForm} />
           )}
         </div>
 
@@ -659,12 +633,12 @@ function Step3Actions({ form, addAction, removeAction, updateAction }: any) {
 }
 
 // === STEP 4: DOCUMENTS + PUBLISH ===
-function Step4Documents({ documents, uploading, handleFile, removeDoc, form, setForm }: any) {
+function Step4Documents({ documents, uploading, uploadProgress, handleFile, removeDoc, form, setForm }: any) {
   return (
     <div className="space-y-5">
       <HelpBox icon={<Upload size={16} />} title="Documents joints">
-        Ajoutez vos supports : <strong>PDF</strong>, <strong>Word</strong>, <strong>Excel</strong>, <strong>PowerPoint</strong>, <strong>images</strong> (max <strong>3.3 MB</strong> par fichier — limite Vercel après encodage base64).<br />
-        Les fichiers sont stockés directement dans la base PostgreSQL et téléchargeables à tout moment.
+        Ajoutez vos supports : <strong>PDF</strong>, <strong>Word</strong>, <strong>Excel</strong>, <strong>PowerPoint</strong>, <strong>images</strong>, vidéos (jusqu'à <strong>100 MB</strong> par fichier).<br />
+        Les gros fichiers sont automatiquement découpés en morceaux de 2 MB et stockés dans PostgreSQL.
       </HelpBox>
 
       <div className="border-2 border-dashed border-indigo-300 rounded-xl p-6 text-center bg-indigo-50/40">
@@ -675,7 +649,16 @@ function Step4Documents({ documents, uploading, handleFile, removeDoc, form, set
             {uploading ? 'Upload en cours...' : '📎 Sélectionner un fichier'}
           </span>
         </label>
-        <p className="text-xs text-slate-500 mt-3">PDF, DOCX, XLSX, PPTX, JPG, PNG — max 3.3 MB / fichier (limite Vercel)</p>
+        <p className="text-xs text-slate-500 mt-3">PDF, DOCX, XLSX, PPTX, JPG, PNG, MP4 — jusqu'à 100 MB / fichier</p>
+        {uploading && uploadProgress && (
+          <div className="mt-4 space-y-1 bg-white border border-indigo-200 rounded-lg p-3 text-left">
+            <p className="text-xs text-indigo-700 font-medium">{uploadProgress.label}</p>
+            <div className="h-2 bg-indigo-100 rounded-full overflow-hidden">
+              <div className="h-full bg-indigo-600 transition-all" style={{ width: `${uploadProgress.pct}%` }} />
+            </div>
+            <p className="text-right text-[10px] text-indigo-500">{uploadProgress.pct}%</p>
+          </div>
+        )}
       </div>
 
       {documents.length > 0 && (

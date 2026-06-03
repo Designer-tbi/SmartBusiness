@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Files, Upload, Trash2, Download, Eye, Search, FileText, Image, FileSpreadsheet, File, X } from 'lucide-react';
+import { uploadFileChunked } from '../lib/chunkedUpload';
 
 interface Document {
   id: number;
@@ -36,6 +37,7 @@ export default function Documents() {
   const [showUpload, setShowUpload] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<{ pct: number; label: string } | null>(null);
   const [previewDoc, setPreviewDoc] = useState<Document | null>(null);
   const [previewData, setPreviewData] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -55,60 +57,28 @@ export default function Documents() {
   const handleFileUpload = useCallback(async (files: FileList | File[]) => {
     if (!files.length) return;
     setUploading(true);
-    const MAX_RAW_SIZE = 3.3 * 1024 * 1024; // 3.3 MB raw → ~4.4 MB after base64 (Vercel limit)
     let successCount = 0;
     let failedFiles: { name: string; reason: string }[] = [];
-
-    for (const file of Array.from(files)) {
-      if (file.size > MAX_RAW_SIZE) {
-        failedFiles.push({ name: file.name, reason: `Trop volumineux (${(file.size / 1024 / 1024).toFixed(2)} MB, max 3.3 MB)` });
-        continue;
-      }
+    const list = Array.from(files);
+    for (let idx = 0; idx < list.length; idx++) {
+      const file = list[idx];
       try {
-        const reader = new FileReader();
-        const fileData = await new Promise<string>((resolve, reject) => {
-          reader.onerror = () => reject(new Error('Lecture fichier échouée'));
-          reader.onload = () => resolve(reader.result as string);
-          reader.readAsDataURL(file);
-        });
         const docName = form.name || file.name.replace(/\.[^/.]+$/, '');
-        const r = await fetch('/api/documents', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: docName,
-            fileName: file.name,
-            fileType: file.type || 'application/octet-stream',
-            fileSize: file.size,
-            fileData,
-            notes: form.notes,
-          }),
+        await uploadFileChunked(file, { name: docName, notes: form.notes }, (pct, label) => {
+          setUploadProgress({ pct, label: `${file.name} — ${label} (${idx + 1}/${list.length})` });
         });
-        if (r.ok) {
-          successCount++;
-        } else {
-          const txt = await r.text();
-          console.error('[Documents] Upload failed', r.status, txt);
-          failedFiles.push({
-            name: file.name,
-            reason: r.status === 413
-              ? 'Payload Too Large (limite Vercel 4.5 MB en base64)'
-              : `HTTP ${r.status}: ${txt.substring(0, 150)}`,
-          });
-        }
+        successCount++;
       } catch (err: any) {
         console.error('[Documents] Upload exception:', err);
         failedFiles.push({ name: file.name, reason: err.message || 'Erreur réseau' });
       }
     }
+    setUploadProgress(null);
     setUploading(false);
 
     if (failedFiles.length > 0) {
       const lines = failedFiles.map(f => `• ${f.name} → ${f.reason}`).join('\n');
-      alert(`⚠️ Upload partiel : ${successCount}/${files.length} fichiers réussis.\n\nÉchecs :\n${lines}\n\nConseil : Compressez les fichiers >3.3 MB (smallpdf.com, tinypng.com).`);
-    } else if (successCount > 0) {
-      // Soft confirmation (no alert, just refresh)
-      console.log(`[Documents] ${successCount} fichier(s) uploadé(s)`);
+      alert(`⚠️ Upload partiel : ${successCount}/${list.length} fichiers réussis.\n\nÉchecs :\n${lines}`);
     }
     setShowUpload(false);
     setForm({ name: '', notes: '' });
@@ -299,7 +269,15 @@ export default function Documents() {
                   onChange={e => e.target.files && handleFileUpload(e.target.files)}
                 />
               </div>
-              {uploading && <p className="text-center text-sm text-indigo-600 font-medium">Upload en cours...</p>}
+              {uploading && (
+                <div className="space-y-1 bg-indigo-50 border border-indigo-200 rounded-lg p-3">
+                  <p className="text-center text-sm text-indigo-700 font-medium">{uploadProgress?.label || 'Upload en cours…'}</p>
+                  <div className="h-2 bg-indigo-100 rounded-full overflow-hidden">
+                    <div className="h-full bg-indigo-600 transition-all" style={{ width: `${uploadProgress?.pct || 0}%` }} />
+                  </div>
+                  <p className="text-center text-xs text-indigo-500">{uploadProgress?.pct || 0}%</p>
+                </div>
+              )}
             </div>
           </div>
         </div>
