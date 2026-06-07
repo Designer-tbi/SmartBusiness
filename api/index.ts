@@ -106,6 +106,18 @@ async function ensureDbInitialized() {
       "ALTER TABLE leads ADD COLUMN IF NOT EXISTS currency TEXT",
       "ALTER TABLE customers ADD COLUMN IF NOT EXISTS currency TEXT",
       "ALTER TABLE opportunities ADD COLUMN IF NOT EXISTS currency TEXT",
+      `CREATE TABLE IF NOT EXISTS opportunity_items (
+        id SERIAL PRIMARY KEY,
+        opportunity_id INTEGER NOT NULL REFERENCES opportunities(id) ON DELETE CASCADE,
+        product_id INTEGER REFERENCES products(id),
+        description TEXT NOT NULL,
+        quantity NUMERIC NOT NULL DEFAULT 1,
+        unit_price NUMERIC NOT NULL DEFAULT 0,
+        total_price NUMERIC NOT NULL DEFAULT 0,
+        sort_order INTEGER DEFAULT 0,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      )`,
+      "CREATE INDEX IF NOT EXISTS idx_opportunity_items_opp ON opportunity_items(opportunity_id)",
       `CREATE TABLE IF NOT EXISTS comments (
         id SERIAL PRIMARY KEY,
         entity_type TEXT NOT NULL,
@@ -639,7 +651,7 @@ app.delete("/api/leads/:id", authenticateToken, async (req, res) => {
 // Opportunities
 app.get("/api/opportunities", authenticateToken, async (req: any, res) => {
   try {
-    let q = 'SELECT o.id, o.customer_id as "customerId", o.lead_id as "leadId", o.title, o.amount, o.currency, o.stage, o.probability, o.expected_close_date as "expectedCloseDate", o.notes, o.created_at as "createdAt", o.updated_at as "updatedAt", c.name as "customerName", c.agent_id as "customerAgentId", l.agent_id as "leadAgentId", CASE WHEN l.type = \'company\' THEN l.company_name ELSE COALESCE(l.first_name,\'\') || \' \' || COALESCE(l.last_name,\'\') END as "leadName" FROM opportunities o LEFT JOIN customers c ON o.customer_id = c.id LEFT JOIN leads l ON o.lead_id = l.id';
+    let q = 'SELECT o.id, o.customer_id as "customerId", o.lead_id as "leadId", o.title, o.amount, o.currency, o.stage, o.probability, o.expected_close_date as "expectedCloseDate", o.notes, o.created_at as "createdAt", o.updated_at as "updatedAt", c.name as "customerName", c.agent_id as "customerAgentId", l.agent_id as "leadAgentId", CASE WHEN l.type = \'company\' THEN l.company_name ELSE COALESCE(l.first_name,\'\') || \' \' || COALESCE(l.last_name,\'\') END as "leadName", (SELECT COUNT(*) FROM opportunity_items WHERE opportunity_id = o.id) AS "itemsCount" FROM opportunities o LEFT JOIN customers c ON o.customer_id = c.id LEFT JOIN leads l ON o.lead_id = l.id';
     let params: any[] = [];
     if (req.user.role !== 'admin' && req.user.role !== 'superadmin') {
       q += ' WHERE c.agent_id = $1 OR l.agent_id = $1';
@@ -649,20 +661,58 @@ app.get("/api/opportunities", authenticateToken, async (req: any, res) => {
     res.json((await query(q, params)).rows);
   } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
-app.post("/api/opportunities", authenticateToken, async (req: any, res) => {
-  const { customerId, leadId, title, amount, currency, stage, probability, expectedCloseDate, notes } = req.body;
+
+// Get one opportunity with items (for editing)
+app.get("/api/opportunities/:id", authenticateToken, async (req, res) => {
   try {
-    const result = await query('INSERT INTO opportunities (customer_id, lead_id, title, amount, currency, stage, probability, expected_close_date, notes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id, customer_id as "customerId", lead_id as "leadId", title, amount, currency, stage, probability, expected_close_date as "expectedCloseDate", notes, created_at as "createdAt"', [customerId || null, leadId || null, title, amount, currency || null, stage || 'Prospection', probability, expectedCloseDate, notes]);
-    res.status(201).json(result.rows[0]);
+    const or = await query('SELECT o.id, o.customer_id as "customerId", o.lead_id as "leadId", o.title, o.amount, o.currency, o.stage, o.probability, o.expected_close_date as "expectedCloseDate", o.notes FROM opportunities o WHERE o.id = $1', [req.params.id]);
+    if (or.rows.length === 0) return res.status(404).json({ error: "Not found" });
+    const ir = await query('SELECT id, product_id as "productId", description, quantity, unit_price as "unitPrice", total_price as "totalPrice", sort_order as "sortOrder" FROM opportunity_items WHERE opportunity_id = $1 ORDER BY sort_order ASC, id ASC', [req.params.id]);
+    res.json({ ...or.rows[0], items: ir.rows });
   } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
-app.put("/api/opportunities/:id", authenticateToken, async (req, res) => {
-  const { id } = req.params; const { customerId, leadId, title, amount, currency, stage, probability, expectedCloseDate, notes } = req.body;
+
+async function saveOpportunityItems(opportunityId: number, items: any[]) {
+  if (!Array.isArray(items)) return;
+  await query("DELETE FROM opportunity_items WHERE opportunity_id = $1", [opportunityId]);
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
+    const qty = Number(it.quantity) || 1;
+    const unit = Number(it.unitPrice) || 0;
+    const total = qty * unit;
+    await query(
+      "INSERT INTO opportunity_items (opportunity_id, product_id, description, quantity, unit_price, total_price, sort_order) VALUES ($1,$2,$3,$4,$5,$6,$7)",
+      [opportunityId, it.productId || null, it.description || '', qty, unit, total, i]
+    );
+  }
+}
+
+app.post("/api/opportunities", authenticateToken, async (req: any, res) => {
+  const { customerId, leadId, title, amount, currency, stage, probability, expectedCloseDate, notes, items } = req.body;
   try {
-    const result = await query('UPDATE opportunities SET customer_id=$1, lead_id=$2, title=$3, amount=$4, currency=$5, stage=$6, probability=$7, expected_close_date=$8, notes=$9, updated_at=CURRENT_TIMESTAMP WHERE id=$10 RETURNING id, customer_id as "customerId", lead_id as "leadId", title, amount, currency, stage, probability, expected_close_date as "expectedCloseDate", notes, updated_at as "updatedAt"', [customerId || null, leadId || null, title, amount, currency || null, stage, probability, expectedCloseDate, notes, id]);
+    // If items provided, compute amount as their sum (override client value for consistency)
+    let finalAmount = Number(amount) || 0;
+    if (Array.isArray(items) && items.length > 0) {
+      finalAmount = items.reduce((acc: number, it: any) => acc + (Number(it.quantity) || 1) * (Number(it.unitPrice) || 0), 0);
+    }
+    const result = await query('INSERT INTO opportunities (customer_id, lead_id, title, amount, currency, stage, probability, expected_close_date, notes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id, customer_id as "customerId", lead_id as "leadId", title, amount, currency, stage, probability, expected_close_date as "expectedCloseDate", notes, created_at as "createdAt"', [customerId || null, leadId || null, title, finalAmount, currency || null, stage || 'Prospection', probability, expectedCloseDate, notes]);
+    const opp = result.rows[0];
+    await saveOpportunityItems(opp.id, items || []);
+    res.status(201).json(opp);
+  } catch (err: any) { console.error('opp create error', err); res.status(500).json({ error: err.message || "Server error" }); }
+});
+app.put("/api/opportunities/:id", authenticateToken, async (req, res) => {
+  const { id } = req.params; const { customerId, leadId, title, amount, currency, stage, probability, expectedCloseDate, notes, items } = req.body;
+  try {
+    let finalAmount = Number(amount) || 0;
+    if (Array.isArray(items) && items.length > 0) {
+      finalAmount = items.reduce((acc: number, it: any) => acc + (Number(it.quantity) || 1) * (Number(it.unitPrice) || 0), 0);
+    }
+    const result = await query('UPDATE opportunities SET customer_id=$1, lead_id=$2, title=$3, amount=$4, currency=$5, stage=$6, probability=$7, expected_close_date=$8, notes=$9, updated_at=CURRENT_TIMESTAMP WHERE id=$10 RETURNING id, customer_id as "customerId", lead_id as "leadId", title, amount, currency, stage, probability, expected_close_date as "expectedCloseDate", notes, updated_at as "updatedAt"', [customerId || null, leadId || null, title, finalAmount, currency || null, stage, probability, expectedCloseDate, notes, id]);
     if (result.rows.length === 0) return res.status(404).json({ error: "Opportunity not found" });
+    if (items !== undefined) await saveOpportunityItems(Number(id), items || []);
     res.json(result.rows[0]);
-  } catch (err) { res.status(500).json({ error: "Server error" }); }
+  } catch (err: any) { console.error('opp update error', err); res.status(500).json({ error: err.message || "Server error" }); }
 });
 app.delete("/api/opportunities/:id", authenticateToken, async (req, res) => {
   try { await query("DELETE FROM opportunities WHERE id = $1", [req.params.id]); res.json({ success: true }); } catch (err) { res.status(500).json({ error: "Server error" }); }

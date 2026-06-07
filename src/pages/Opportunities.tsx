@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
-import { Target, Plus, Search, Trash2, Edit2, Filter, DollarSign, Calendar, TrendingUp, UserCheck, UserPlus, MessageSquare } from 'lucide-react';
+import { Target, Plus, Search, Trash2, Edit2, Filter, DollarSign, Calendar, TrendingUp, UserCheck, UserPlus, MessageSquare, Package, X, Grid3x3, List as ListIcon } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { formatCurrency, getCurrencyLabel } from '../lib/countryConfig';
 import CurrencySelector from '../components/CurrencySelector';
 import CommentsSection from '../components/CommentsSection';
+
+type OppItem = { productId?: number | null; description: string; quantity: number; unitPrice: number };
 
 export default function Opportunities() {
   const { profile } = useAuth();
@@ -14,48 +16,42 @@ export default function Opportunities() {
   const [expandedComments, setExpandedComments] = useState<number | null>(null);
   const [customers, setCustomers] = useState<any[]>([]);
   const [leads, setLeads] = useState<any[]>([]);
+  const [products, setProducts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editingOpportunity, setEditingOpportunity] = useState<any>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [stageFilter, setStageFilter] = useState('all');
+  const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
 
   // Form state
   const [customerId, setCustomerId] = useState('');
   const [leadId, setLeadId] = useState('');
   const [title, setTitle] = useState('');
-  const [amount, setAmount] = useState('');
+  const [items, setItems] = useState<OppItem[]>([]);
   const [currency, setCurrency] = useState<string>('');
   const [stage, setStage] = useState('Prospection');
   const [probability, setProbability] = useState('20');
   const [expectedCloseDate, setExpectedCloseDate] = useState('');
   const [notes, setNotes] = useState('');
 
+  const totalAmount = items.reduce((acc, it) => acc + (Number(it.quantity) || 1) * (Number(it.unitPrice) || 0), 0);
+
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const fetchData = async () => {
     try {
-      const [oppsRes, custRes, leadsRes] = await Promise.all([
+      const [oppsRes, custRes, leadsRes, productsRes] = await Promise.all([
         fetch('/api/opportunities'),
         fetch('/api/customers'),
-        fetch('/api/leads')
+        fetch('/api/leads'),
+        fetch('/api/products'),
       ]);
-      
-      if (oppsRes.ok) {
-        const oppsData = await oppsRes.json();
-        setOpportunities(oppsData);
-      }
-      
-      if (custRes.ok) {
-        const custData = await custRes.json();
-        setCustomers(custData);
-      }
-
-      if (leadsRes.ok) {
-        const leadsData = await leadsRes.json();
-        setLeads(leadsData);
-      }
+      if (oppsRes.ok) setOpportunities(await oppsRes.json());
+      if (custRes.ok) setCustomers(await custRes.json());
+      if (leadsRes.ok) setLeads(await leadsRes.json());
+      if (productsRes.ok) setProducts(await productsRes.json());
     } catch (error) {
       console.error("Error fetching data:", error);
     } finally {
@@ -71,7 +67,7 @@ export default function Opportunities() {
     setCustomerId('');
     setLeadId('');
     setTitle('');
-    setAmount('');
+    setItems([]);
     setCurrency('');
     setStage('Prospection');
     setProbability('20');
@@ -81,12 +77,11 @@ export default function Opportunities() {
     setError(null);
   };
 
-  const handleEdit = (opp: any) => {
+  const handleEdit = async (opp: any) => {
     setEditingOpportunity(opp);
     setCustomerId(opp.customerId ? opp.customerId.toString() : '');
     setLeadId(opp.leadId ? opp.leadId.toString() : '');
     setTitle(opp.title);
-    setAmount(opp.amount.toString());
     setCurrency(opp.currency || '');
     setStage(opp.stage);
     setProbability(opp.probability.toString());
@@ -94,6 +89,36 @@ export default function Opportunities() {
     setNotes(opp.notes || '');
     setError(null);
     setShowModal(true);
+    // Fetch full opportunity (with items)
+    try {
+      const r = await fetch(`/api/opportunities/${opp.id}`);
+      if (r.ok) {
+        const data = await r.json();
+        setItems((data.items || []).map((it: any) => ({
+          productId: it.productId,
+          description: it.description,
+          quantity: Number(it.quantity) || 1,
+          unitPrice: Number(it.unitPrice) || 0,
+        })));
+      }
+    } catch (e) { console.error('Failed to load opportunity items', e); }
+  };
+
+  const addItem = (productId?: number) => {
+    if (productId) {
+      const p = products.find((p: any) => p.id === productId);
+      if (p) {
+        setItems([...items, { productId: p.id, description: p.name, quantity: 1, unitPrice: Number(p.price) || 0 }]);
+        return;
+      }
+    }
+    setItems([...items, { productId: null, description: '', quantity: 1, unitPrice: 0 }]);
+  };
+  const removeItem = (i: number) => setItems(items.filter((_, idx) => idx !== i));
+  const updateItem = (i: number, patch: Partial<OppItem>) => {
+    const arr = [...items];
+    arr[i] = { ...arr[i], ...patch };
+    setItems(arr);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -101,16 +126,18 @@ export default function Opportunities() {
     setIsSubmitting(true);
     setError(null);
 
+    const cleanItems = items.filter(it => it.description?.trim());
     const payload = {
       customerId: customerId ? parseInt(customerId) : null,
       leadId: leadId ? parseInt(leadId) : null,
       title,
-      amount: parseFloat(amount),
+      amount: totalAmount,
       currency: currency || null,
       stage,
       probability: parseInt(probability),
       expectedCloseDate: expectedCloseDate || null,
       notes: notes || null,
+      items: cleanItems,
     };
 
     try {
@@ -272,9 +299,42 @@ export default function Opportunities() {
             <option value="Gagnée">Gagnée</option>
             <option value="Perdue">Perdue</option>
           </select>
+          <div className="flex items-center bg-slate-100 rounded-xl p-1" data-testid="view-mode-toggle">
+            <button
+              type="button"
+              onClick={() => setViewMode('grid')}
+              data-testid="view-grid-btn"
+              className={`p-2 rounded-lg transition-all ${viewMode === 'grid' ? 'bg-white text-indigo-600 shadow' : 'text-slate-500 hover:text-slate-700'}`}
+              title="Vue grille"
+            >
+              <Grid3x3 size={18} />
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('table')}
+              data-testid="view-table-btn"
+              className={`p-2 rounded-lg transition-all ${viewMode === 'table' ? 'bg-white text-indigo-600 shadow' : 'text-slate-500 hover:text-slate-700'}`}
+              title="Vue tableau"
+            >
+              <ListIcon size={18} />
+            </button>
+          </div>
         </div>
       </div>
 
+      {viewMode === 'grid' ? (
+        <OpportunitiesGrid
+          opportunities={filteredOpportunities}
+          userZone={userZone}
+          getStageColor={getStageColor}
+          onEdit={handleEdit}
+          onDelete={handleDelete}
+          onConvertToLead={handleConvertToLead}
+          onConvertToCustomer={handleConvertToCustomer}
+          expandedComments={expandedComments}
+          setExpandedComments={setExpandedComments}
+        />
+      ) : (
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm text-slate-600">
@@ -397,6 +457,7 @@ export default function Opportunities() {
           </table>
         </div>
       </div>
+      )}
 
       {showModal && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -467,16 +528,96 @@ export default function Opportunities() {
                   </div>
                 </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Montant</label>
-                  <input
-                    type="number"
-                    required
-                    value={amount}
-                    onChange={(e) => setAmount(e.target.value)}
-                    className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
-                    placeholder="0"
-                  />
+                <div className="md:col-span-2">
+                  <div className="bg-gradient-to-br from-indigo-50 to-purple-50 rounded-2xl border-2 border-indigo-200 p-4 space-y-4">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      <label className="flex items-center gap-2 text-sm font-bold text-indigo-900">
+                        <Package size={18} /> Sélectionner les produits / services
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <select
+                          onChange={(e) => { if (e.target.value) { addItem(Number(e.target.value)); e.target.value = ''; } }}
+                          data-testid="opp-product-picker"
+                          className="px-3 py-2 bg-white border border-indigo-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+                        >
+                          <option value="">+ Ajouter un produit du catalogue…</option>
+                          {products.map((p: any) => (
+                            <option key={p.id} value={p.id}>
+                              {p.name} — {formatCurrency(p.price, userZone)}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          onClick={() => addItem()}
+                          data-testid="opp-add-custom-item-btn"
+                          className="px-3 py-2 bg-white border border-indigo-200 rounded-lg text-sm hover:bg-indigo-50 text-indigo-700 font-medium"
+                          title="Ligne personnalisée"
+                        >
+                          + Personnalisée
+                        </button>
+                      </div>
+                    </div>
+
+                    {items.length === 0 ? (
+                      <div className="text-center py-6 text-slate-500 text-sm italic">
+                        Aucun produit sélectionné. Ajoutez-en un depuis le catalogue ou créez une ligne personnalisée.
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {items.map((it, i) => {
+                          const lineTotal = (Number(it.quantity) || 1) * (Number(it.unitPrice) || 0);
+                          return (
+                            <div key={i} className="bg-white rounded-xl p-3 border border-slate-200 grid grid-cols-12 gap-2 items-center" data-testid={`opp-item-row-${i}`}>
+                              <input
+                                type="text"
+                                value={it.description}
+                                onChange={(e) => updateItem(i, { description: e.target.value })}
+                                placeholder="Description"
+                                className="col-span-12 md:col-span-5 px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500/30 outline-none"
+                              />
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                value={it.quantity}
+                                onChange={(e) => updateItem(i, { quantity: Number(e.target.value) })}
+                                placeholder="Qté"
+                                className="col-span-3 md:col-span-2 px-2 py-1.5 border border-slate-200 rounded-lg text-sm text-center focus:ring-2 focus:ring-indigo-500/30 outline-none"
+                              />
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                value={it.unitPrice}
+                                onChange={(e) => updateItem(i, { unitPrice: Number(e.target.value) })}
+                                placeholder="P.U."
+                                className="col-span-5 md:col-span-2 px-2 py-1.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500/30 outline-none"
+                              />
+                              <div className="col-span-3 md:col-span-2 text-right text-sm font-semibold text-slate-800">
+                                {formatCurrency(lineTotal, userZone)}
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => removeItem(i)}
+                                className="col-span-1 text-red-500 hover:text-red-700 flex items-center justify-center"
+                                title="Supprimer"
+                              >
+                                <X size={18} />
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    <div className="flex items-center justify-between pt-3 border-t-2 border-dashed border-indigo-300">
+                      <span className="text-sm font-bold text-slate-700">💰 Montant total estimé</span>
+                      <span className="text-2xl font-bold text-indigo-700" data-testid="opp-total-amount">
+                        {formatCurrency(totalAmount, userZone)}
+                      </span>
+                    </div>
+                  </div>
                 </div>
 
                 <div>
@@ -555,6 +696,105 @@ export default function Opportunities() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ============================================================================
+// GRID VIEW COMPONENT
+// ============================================================================
+function OpportunitiesGrid({ opportunities, userZone, getStageColor, onEdit, onDelete, onConvertToLead, onConvertToCustomer, expandedComments, setExpandedComments }: any) {
+  if (opportunities.length === 0) {
+    return (
+      <div className="bg-white rounded-xl shadow-sm border-2 border-dashed border-slate-200 p-12 text-center">
+        <Target size={48} className="mx-auto text-slate-300 mb-3" />
+        <p className="text-slate-500">Aucune opportunité trouvée.</p>
+      </div>
+    );
+  }
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4" data-testid="opportunities-grid">
+      {opportunities.map((opp: any) => (
+        <div key={opp.id} className="bg-white rounded-2xl shadow-sm border border-slate-200 hover:shadow-lg hover:border-indigo-200 transition-all overflow-hidden flex flex-col" data-testid={`opp-card-${opp.id}`}>
+          <div className="p-4 bg-gradient-to-br from-slate-50 to-indigo-50/40 border-b border-slate-100">
+            <div className="flex items-start justify-between gap-2 mb-2">
+              <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${getStageColor(opp.stage)}`}>
+                {opp.stage}
+              </span>
+              <span className="text-[10px] text-slate-400">#{opp.id}</span>
+            </div>
+            <h3 className="font-bold text-slate-800 text-base line-clamp-2 mb-1">{opp.title}</h3>
+            <p className="text-xs text-slate-600 line-clamp-1">
+              {opp.customerName ? (
+                <>👤 {opp.customerName}</>
+              ) : opp.leadName ? (
+                <span className="italic">🌱 {opp.leadName} <span className="text-slate-400">(Prospect)</span></span>
+              ) : (
+                <span className="text-slate-400 italic">Non assigné</span>
+              )}
+            </p>
+          </div>
+          <div className="p-4 space-y-3 flex-1">
+            <div className="flex items-baseline justify-between">
+              <span className="text-xs text-slate-500 font-medium">Montant</span>
+              <span className="text-lg font-bold text-slate-900">{formatCurrency(opp.amount, userZone)}</span>
+            </div>
+            {opp.itemsCount > 0 && (
+              <div className="flex items-center gap-1.5 text-[11px] text-indigo-600 bg-indigo-50 px-2 py-1 rounded-full w-fit">
+                <Package size={12} /> {opp.itemsCount} produit{opp.itemsCount > 1 ? 's' : ''}
+              </div>
+            )}
+            <div className="space-y-1.5">
+              <div className="flex justify-between text-xs text-slate-500">
+                <span>Probabilité</span>
+                <span className="font-bold text-slate-700">{opp.probability}%</span>
+              </div>
+              <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                <div className="h-full bg-gradient-to-r from-indigo-500 to-purple-500 transition-all" style={{ width: `${opp.probability}%` }} />
+              </div>
+            </div>
+            {opp.expectedCloseDate && (
+              <div className="flex items-center gap-1.5 text-xs text-slate-600">
+                <Calendar size={12} className="text-slate-400" />
+                Clôture : {format(new Date(opp.expectedCloseDate), 'dd MMM yyyy', { locale: fr })}
+              </div>
+            )}
+          </div>
+          <div className="p-3 bg-slate-50 border-t border-slate-100 flex flex-wrap gap-1.5 items-center">
+            <button
+              onClick={() => setExpandedComments(expandedComments === opp.id ? null : opp.id)}
+              className="p-2 text-slate-500 hover:text-indigo-600 hover:bg-white rounded-lg transition-all"
+              title="Commentaires"
+              data-testid={`opp-grid-comments-${opp.id}`}
+            >
+              <MessageSquare size={15} />
+            </button>
+            {opp.stage !== 'Gagnée' && (
+              <>
+                <button onClick={() => onConvertToLead(opp)} className="p-2 text-slate-500 hover:text-blue-600 hover:bg-white rounded-lg transition-all" title="Convertir en Lead">
+                  <UserPlus size={15} />
+                </button>
+                <button onClick={() => onConvertToCustomer(opp.id)} className="p-2 text-slate-500 hover:text-emerald-600 hover:bg-white rounded-lg transition-all" title="Gagner & Convertir">
+                  <UserCheck size={15} />
+                </button>
+              </>
+            )}
+            <div className="ml-auto flex gap-1.5">
+              <button onClick={() => onEdit(opp)} className="p-2 text-slate-500 hover:text-indigo-600 hover:bg-white rounded-lg transition-all" title="Modifier" data-testid={`opp-edit-${opp.id}`}>
+                <Edit2 size={15} />
+              </button>
+              <button onClick={() => onDelete(opp.id)} className="p-2 text-slate-500 hover:text-red-600 hover:bg-white rounded-lg transition-all" title="Supprimer">
+                <Trash2 size={15} />
+              </button>
+            </div>
+          </div>
+          {expandedComments === opp.id && (
+            <div className="p-3 border-t border-slate-100 bg-slate-50/50">
+              <CommentsSection entityType="opportunity" entityId={opp.id} compact />
+            </div>
+          )}
+        </div>
+      ))}
     </div>
   );
 }
