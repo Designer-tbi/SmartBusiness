@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Search, Folder, Loader2, AlertCircle, ChevronLeft, Building2, Phone, Mail, Globe, MapPin, Hash, Map as MapIcon, List, UserPlus, ArrowRight, Trash2, Edit2 } from 'lucide-react';
+import { Plus, Search, Folder, Loader2, AlertCircle, ChevronLeft, Building2, Phone, Mail, Globe, MapPin, Hash, Map as MapIcon, List, UserPlus, ArrowRight, Trash2, Edit2, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import MapView from '../components/MapView';
 import { useAuth } from '../contexts/AuthContext';
@@ -68,6 +68,7 @@ export default function Portfolio() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [isAddingCategory, setIsAddingCategory] = useState(false);
   const [isAddingItem, setIsAddingItem] = useState(false);
   const [editingItemId, setEditingItemId] = useState<number | null>(null);
@@ -236,10 +237,23 @@ export default function Portfolio() {
     cat.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const filteredItems = items.filter(item => 
-    item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    item.sub_type?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    item.city?.toLowerCase().includes(searchQuery.toLowerCase())
+  const filteredItems = items.filter(item => {
+    const matchesSearch =
+      item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      item.sub_type?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      item.city?.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesStatus = !statusFilter || (item.status || 'nouveau') === statusFilter;
+    return matchesSearch && matchesStatus;
+  });
+
+  // Counters for status chips (computed on UN-filtered items so users see total counts)
+  const statusCounts = items.reduce(
+    (acc, it) => {
+      const s = (it.status || 'nouveau') as keyof typeof acc;
+      if (s in acc) acc[s] = (acc[s] || 0) + 1;
+      return acc;
+    },
+    { nouveau: 0, suivi: 0, en_cours: 0, termine: 0 } as Record<string, number>
   );
 
   const handleConvertToOpportunity = async (item: PortfolioItem) => {
@@ -451,18 +465,29 @@ export default function Portfolio() {
         </div>
       )}
 
-      {/* Add/Edit Item Form */}
+      {/* Add/Edit Item Form — MODAL POPUP */}
       {isAddingItem && (selectedCategory || viewAll) && (
-        <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm" data-testid="portfolio-item-form">
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="text-lg font-bold text-slate-800">
-              {editingItemId ? '✏️ Modifier l\'établissement' : '➕ Nouvel établissement'}
-            </h3>
-            {editingItemId && (
-              <span className="text-xs px-2 py-1 bg-amber-100 text-amber-700 rounded-full font-bold uppercase tracking-wider">Mode édition</span>
-            )}
-          </div>
-          <form onSubmit={handleAddItem} className="space-y-4">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={(e) => { if (e.target === e.currentTarget) { setIsAddingItem(false); setEditingItemId(null); setNewItem({ name: '', sub_type: '', address: '', city: '', bp: '', tel: '', fax: '', mail: '', web: '', niu: '', status: 'nouveau' }); } }}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[92vh] flex flex-col overflow-hidden" data-testid="portfolio-item-form">
+            <div className="p-6 border-b border-slate-100 bg-gradient-to-r from-indigo-50 to-purple-50 flex justify-between items-center">
+              <div className="flex items-center gap-3">
+                <h3 className="text-xl font-bold text-slate-800">
+                  {editingItemId ? '✏️ Modifier l\'établissement' : '➕ Nouvel établissement'}
+                </h3>
+                {editingItemId && (
+                  <span className="text-xs px-2 py-1 bg-amber-100 text-amber-700 rounded-full font-bold uppercase tracking-wider">Mode édition</span>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => { setIsAddingItem(false); setEditingItemId(null); setNewItem({ name: '', sub_type: '', address: '', city: '', bp: '', tel: '', fax: '', mail: '', web: '', niu: '', status: 'nouveau' }); }}
+                className="p-2 hover:bg-white rounded-full transition-all text-slate-400"
+                title="Fermer"
+              >
+                <X size={24} />
+              </button>
+            </div>
+            <form onSubmit={handleAddItem} className="flex-1 overflow-y-auto p-6 space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {viewAll && !selectedCategory && (
                 <div>
@@ -593,16 +618,18 @@ export default function Portfolio() {
                 />
               </div>
             </div>
-            <div className="flex justify-end gap-2 pt-4">
+            </form>
+            <div className="p-4 border-t border-slate-100 bg-slate-50 flex justify-end gap-2">
               <button
                 type="button"
                 onClick={() => { setIsAddingItem(false); setEditingItemId(null); setNewItem({ name: '', sub_type: '', address: '', city: '', bp: '', tel: '', fax: '', mail: '', web: '', niu: '', status: 'nouveau' }); }}
-                className="px-6 py-2 border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50 transition-colors"
+                className="px-6 py-2 border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-100 transition-colors"
               >
                 Annuler
               </button>
               <button
-                type="submit"
+                type="button"
+                onClick={() => handleAddItem({ preventDefault: () => {} } as any)}
                 disabled={submitting || !newItem.name.trim()}
                 data-testid="portfolio-item-save-btn"
                 className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50 flex items-center gap-2"
@@ -611,7 +638,7 @@ export default function Portfolio() {
                 {editingItemId ? 'Mettre à jour' : 'Enregistrer'}
               </button>
             </div>
-          </form>
+          </div>
         </div>
       )}
 
@@ -645,6 +672,65 @@ export default function Portfolio() {
       {/* Items List */}
       {(selectedCategory || viewAll) && (
         <div className="space-y-4">
+          {/* Status Filter Chips */}
+          <div className="flex flex-wrap items-center gap-2" data-testid="status-filter-chips">
+            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider mr-1">Filtrer par suivi :</span>
+            <button
+              onClick={() => setStatusFilter(null)}
+              className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all ${
+                statusFilter === null
+                  ? 'bg-slate-800 text-white shadow-lg scale-105'
+                  : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
+              }`}
+              data-testid="chip-all"
+            >
+              Tous · {items.length}
+            </button>
+            <button
+              onClick={() => setStatusFilter('nouveau')}
+              data-testid="chip-nouveau"
+              className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all flex items-center gap-1 ${
+                statusFilter === 'nouveau'
+                  ? 'bg-blue-600 text-white shadow-lg scale-105 ring-2 ring-blue-300'
+                  : 'bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100'
+              }`}
+            >
+              🆕 Nouveau · {statusCounts.nouveau}
+            </button>
+            <button
+              onClick={() => setStatusFilter('suivi')}
+              data-testid="chip-suivi"
+              className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all flex items-center gap-1 ${
+                statusFilter === 'suivi'
+                  ? 'bg-amber-500 text-white shadow-lg scale-105 ring-2 ring-amber-300'
+                  : 'bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100'
+              }`}
+            >
+              🔔 En suivi · {statusCounts.suivi}
+            </button>
+            <button
+              onClick={() => setStatusFilter('en_cours')}
+              data-testid="chip-en-cours"
+              className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all flex items-center gap-1 ${
+                statusFilter === 'en_cours'
+                  ? 'bg-violet-600 text-white shadow-lg scale-105 ring-2 ring-violet-300'
+                  : 'bg-violet-50 text-violet-700 border border-violet-200 hover:bg-violet-100'
+              }`}
+            >
+              ⚡ En cours · {statusCounts.en_cours}
+            </button>
+            <button
+              onClick={() => setStatusFilter('termine')}
+              data-testid="chip-termine"
+              className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all flex items-center gap-1 ${
+                statusFilter === 'termine'
+                  ? 'bg-emerald-600 text-white shadow-lg scale-105 ring-2 ring-emerald-300'
+                  : 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100'
+              }`}
+            >
+              ✅ Terminé · {statusCounts.termine}
+            </button>
+          </div>
           {loading && items.length === 0 ? (
             <div className="flex justify-center py-12">
               <Loader2 className="animate-spin text-indigo-500" size={32} />
