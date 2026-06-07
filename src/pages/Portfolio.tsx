@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Search, Folder, Loader2, AlertCircle, ChevronLeft, Building2, Phone, Mail, Globe, MapPin, Hash, Map as MapIcon, List, UserPlus, ArrowRight, Trash2 } from 'lucide-react';
+import { Plus, Search, Folder, Loader2, AlertCircle, ChevronLeft, Building2, Phone, Mail, Globe, MapPin, Hash, Map as MapIcon, List, UserPlus, ArrowRight, Trash2, Edit2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import MapView from '../components/MapView';
 import { useAuth } from '../contexts/AuthContext';
@@ -26,7 +26,33 @@ interface PortfolioItem {
   mail?: string;
   web?: string;
   niu?: string;
+  status?: 'nouveau' | 'suivi' | 'en_cours' | 'termine';
   created_at: string;
+}
+
+// === Status mapping for visual badges ===
+const STATUS_CONFIG: Record<string, { label: string; bg: string; text: string; pulseColor: string; ring: string }> = {
+  nouveau:    { label: 'Nouveau prospect', bg: 'bg-blue-500',    text: 'text-white', pulseColor: 'bg-blue-400',    ring: 'ring-blue-400/40' },
+  suivi:      { label: 'En suivi',         bg: 'bg-amber-500',   text: 'text-white', pulseColor: 'bg-amber-300',   ring: 'ring-amber-400/40' },
+  en_cours:   { label: 'En cours',         bg: 'bg-violet-600',  text: 'text-white', pulseColor: 'bg-violet-400',  ring: 'ring-violet-400/40' },
+  termine:    { label: 'Terminé',          bg: 'bg-emerald-600', text: 'text-white', pulseColor: 'bg-emerald-300', ring: 'ring-emerald-400/40' },
+};
+
+function StatusBadge({ status }: { status?: string }) {
+  const cfg = STATUS_CONFIG[status || 'nouveau'] || STATUS_CONFIG.nouveau;
+  const isActive = status !== 'termine';
+  return (
+    <div className={`absolute top-3 right-3 z-10 ${cfg.bg} ${cfg.text} px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider shadow-lg flex items-center gap-1.5 ring-2 ${cfg.ring}`}>
+      {isActive && (
+        <span className="relative flex h-2 w-2">
+          <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${cfg.pulseColor} opacity-75`}></span>
+          <span className={`relative inline-flex rounded-full h-2 w-2 ${cfg.pulseColor}`}></span>
+        </span>
+      )}
+      {status === 'termine' && <span className="text-[12px]">✓</span>}
+      <span>{cfg.label}</span>
+    </div>
+  );
 }
 
 export default function Portfolio() {
@@ -44,6 +70,7 @@ export default function Portfolio() {
   const [searchQuery, setSearchQuery] = useState('');
   const [isAddingCategory, setIsAddingCategory] = useState(false);
   const [isAddingItem, setIsAddingItem] = useState(false);
+  const [editingItemId, setEditingItemId] = useState<number | null>(null);
   const [selectedCategoryForAdd, setSelectedCategoryForAdd] = useState<number | null>(null);
   const [newCategoryName, setNewCategoryName] = useState('');
   const [newItem, setNewItem] = useState({
@@ -56,7 +83,8 @@ export default function Portfolio() {
     fax: '',
     mail: '',
     web: '',
-    niu: ''
+    niu: '',
+    status: 'nouveau',
   });
   const [submitting, setSubmitting] = useState(false);
 
@@ -145,13 +173,15 @@ export default function Portfolio() {
 
     try {
       setSubmitting(true);
-      const response = await fetch('/api/portfolio-items', {
-        method: 'POST',
+      const url = editingItemId ? `/api/portfolio-items/${editingItemId}` : '/api/portfolio-items';
+      const method = editingItemId ? 'PUT' : 'POST';
+      const response = await fetch(url, {
+        method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...newItem, category_id: categoryId }),
       });
 
-      if (!response.ok) throw new Error('Erreur lors de l\'ajout de l\'élément');
+      if (!response.ok) throw new Error('Erreur lors de l\'enregistrement');
       
       if (selectedCategory) {
         await fetchItems(selectedCategory.id);
@@ -168,15 +198,38 @@ export default function Portfolio() {
         fax: '',
         mail: '',
         web: '',
-        niu: ''
+        niu: '',
+        status: 'nouveau',
       });
       setSelectedCategoryForAdd(null);
       setIsAddingItem(false);
+      setEditingItemId(null);
     } catch (err: any) {
       alert(err.message);
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const handleEditItem = (item: PortfolioItem) => {
+    setNewItem({
+      name: item.name || '',
+      sub_type: item.sub_type || '',
+      address: item.address || '',
+      city: item.city || '',
+      bp: item.bp || '',
+      tel: item.tel || '',
+      fax: item.fax || '',
+      mail: item.mail || '',
+      web: item.web || '',
+      niu: item.niu || '',
+      status: item.status || 'nouveau',
+    });
+    setEditingItemId(item.id);
+    setSelectedCategoryForAdd(item.category_id);
+    setIsAddingItem(true);
+    // Scroll to top so user sees the form
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const filteredCategories = categories.filter(cat => 
@@ -398,9 +451,17 @@ export default function Portfolio() {
         </div>
       )}
 
-      {/* Add Item Form */}
+      {/* Add/Edit Item Form */}
       {isAddingItem && (selectedCategory || viewAll) && (
-        <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+        <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm" data-testid="portfolio-item-form">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-lg font-bold text-slate-800">
+              {editingItemId ? '✏️ Modifier l\'établissement' : '➕ Nouvel établissement'}
+            </h3>
+            {editingItemId && (
+              <span className="text-xs px-2 py-1 bg-amber-100 text-amber-700 rounded-full font-bold uppercase tracking-wider">Mode édition</span>
+            )}
+          </div>
           <form onSubmit={handleAddItem} className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {viewAll && !selectedCategory && (
@@ -425,7 +486,27 @@ export default function Portfolio() {
                   value={newItem.name}
                   onChange={(e) => setNewItem({...newItem, name: e.target.value})}
                   className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+                  data-testid="portfolio-item-name-input"
                 />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">📊 Suivi commercial</label>
+                <select
+                  value={newItem.status}
+                  onChange={(e) => setNewItem({...newItem, status: e.target.value})}
+                  data-testid="portfolio-item-status-select"
+                  className={`w-full px-4 py-2.5 bg-white border-2 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all font-bold ${
+                    newItem.status === 'nouveau' ? 'border-blue-400 text-blue-700' :
+                    newItem.status === 'suivi' ? 'border-amber-400 text-amber-700' :
+                    newItem.status === 'en_cours' ? 'border-violet-400 text-violet-700' :
+                    'border-emerald-400 text-emerald-700'
+                  }`}
+                >
+                  <option value="nouveau">🆕 Nouveau prospect</option>
+                  <option value="suivi">🔔 En suivi</option>
+                  <option value="en_cours">⚡ En cours</option>
+                  <option value="termine">✅ Terminé</option>
+                </select>
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1.5">Type / Sous-catégorie</label>
@@ -515,7 +596,7 @@ export default function Portfolio() {
             <div className="flex justify-end gap-2 pt-4">
               <button
                 type="button"
-                onClick={() => setIsAddingItem(false)}
+                onClick={() => { setIsAddingItem(false); setEditingItemId(null); setNewItem({ name: '', sub_type: '', address: '', city: '', bp: '', tel: '', fax: '', mail: '', web: '', niu: '', status: 'nouveau' }); }}
                 className="px-6 py-2 border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50 transition-colors"
               >
                 Annuler
@@ -523,10 +604,11 @@ export default function Portfolio() {
               <button
                 type="submit"
                 disabled={submitting || !newItem.name.trim()}
+                data-testid="portfolio-item-save-btn"
                 className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50 flex items-center gap-2"
               >
                 {submitting && <Loader2 className="animate-spin" size={18} />}
-                Enregistrer
+                {editingItemId ? 'Mettre à jour' : 'Enregistrer'}
               </button>
             </div>
           </form>
@@ -572,7 +654,8 @@ export default function Portfolio() {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {filteredItems.map((item) => (
-                <div key={item.id} className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-all flex flex-col h-full">
+                <div key={item.id} className="relative bg-white p-6 rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-all flex flex-col h-full" data-testid={`portfolio-card-${item.id}`}>
+                  <StatusBadge status={item.status} />
                   <div className="flex flex-col h-full gap-4">
                     <div className="space-y-3 flex-1">
                       <div>
@@ -659,6 +742,14 @@ export default function Portfolio() {
                         <UserPlus size={16} />
                         Convertir
                         <ArrowRight size={14} />
+                      </button>
+                      <button
+                        onClick={() => handleEditItem(item)}
+                        data-testid={`edit-item-${item.id}`}
+                        className="p-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition-colors"
+                        title="Modifier"
+                      >
+                        <Edit2 size={16} />
                       </button>
                       <button
                         onClick={() => handleDeleteItem(item.id)}

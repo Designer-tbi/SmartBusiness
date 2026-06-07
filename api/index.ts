@@ -102,6 +102,7 @@ async function ensureDbInitialized() {
       "ALTER TABLE products ADD COLUMN IF NOT EXISTS paypal_plan_id TEXT DEFAULT NULL",
       "ALTER TABLE quotes ADD COLUMN IF NOT EXISTS subscription_id TEXT DEFAULT NULL",
       "ALTER TABLE portfolio_items ADD COLUMN IF NOT EXISTS agent_id TEXT",
+      "ALTER TABLE portfolio_items ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'nouveau'",
       "ALTER TABLE leads ADD COLUMN IF NOT EXISTS currency TEXT",
       "ALTER TABLE customers ADD COLUMN IF NOT EXISTS currency TEXT",
       "ALTER TABLE opportunities ADD COLUMN IF NOT EXISTS currency TEXT",
@@ -327,9 +328,25 @@ app.get("/api/categories/:categoryId/items", authenticateToken, async (req: any,
   } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 app.post("/api/portfolio-items", authenticateToken, async (req: any, res) => {
-  const { category_id, name, sub_type, address, city, bp, tel, fax, mail, web, niu } = req.body;
+  const { category_id, name, sub_type, address, city, bp, tel, fax, mail, web, niu, status } = req.body;
   if (!category_id || !name) return res.status(400).json({ error: "Category ID and Name are required" });
-  try { res.status(201).json((await query("INSERT INTO portfolio_items (category_id, name, sub_type, address, city, bp, tel, fax, mail, web, niu, agent_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *", [category_id, name, sub_type, address, city, bp, tel, fax, mail, web, niu, req.user.uid])).rows[0]); } catch (err) { res.status(500).json({ error: "Server error" }); }
+  try { res.status(201).json((await query("INSERT INTO portfolio_items (category_id, name, sub_type, address, city, bp, tel, fax, mail, web, niu, status, agent_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *", [category_id, name, sub_type, address, city, bp, tel, fax, mail, web, niu, status || 'nouveau', req.user.uid])).rows[0]); } catch (err) { res.status(500).json({ error: "Server error" }); }
+});
+app.put("/api/portfolio-items/:id", authenticateToken, async (req: any, res) => {
+  const { category_id, name, sub_type, address, city, bp, tel, fax, mail, web, niu, status } = req.body;
+  try {
+    const r = await query(
+      `UPDATE portfolio_items SET
+         category_id=COALESCE($1, category_id),
+         name=COALESCE($2, name),
+         sub_type=$3, address=$4, city=$5, bp=$6, tel=$7, fax=$8, mail=$9, web=$10, niu=$11,
+         status=COALESCE($12, status)
+       WHERE id=$13 RETURNING *`,
+      [category_id || null, name || null, sub_type || null, address || null, city || null, bp || null, tel || null, fax || null, mail || null, web || null, niu || null, status || null, req.params.id]
+    );
+    if (r.rows.length === 0) return res.status(404).json({ error: "Not found" });
+    res.json(r.rows[0]);
+  } catch (err: any) { res.status(500).json({ error: err.message || "Server error" }); }
 });
 app.delete("/api/portfolio-items/:id", authenticateToken, async (req, res) => {
   try { await query("DELETE FROM portfolio_items WHERE id = $1", [req.params.id]); res.json({ success: true }); } catch (err) { res.status(500).json({ error: "Server error" }); }
@@ -643,7 +660,17 @@ app.get("/api/comments/:entityType/:entityId", authenticateToken, async (req, re
   const { entityType, entityId } = req.params;
   if (!COMMENT_ENTITIES.includes(entityType)) return res.status(400).json({ error: "Invalid entity" });
   try {
-    const r = await query("SELECT * FROM comments WHERE entity_type = $1 AND entity_id = $2 ORDER BY created_at DESC", [entityType, entityId]);
+    // Backfill: enrich old comments whose author_name is generic by joining users on author_id
+    const r = await query(
+      `SELECT c.id, c.entity_type, c.entity_id, c.author_id,
+              COALESCE(NULLIF(c.author_name, 'Utilisateur'), u.name, u.email, 'Utilisateur') AS author_name,
+              c.content, c.created_at
+       FROM comments c
+       LEFT JOIN users u ON c.author_id = u.uid
+       WHERE c.entity_type = $1 AND c.entity_id = $2
+       ORDER BY c.created_at DESC`,
+      [entityType, entityId]
+    );
     res.json(r.rows);
   } catch (err: any) { res.status(500).json({ error: "Server error: " + err.message }); }
 });
@@ -652,8 +679,11 @@ app.post("/api/comments/:entityType/:entityId", authenticateToken, async (req: a
   if (!COMMENT_ENTITIES.includes(entityType)) return res.status(400).json({ error: "Invalid entity" });
   if (!content || !content.trim()) return res.status(400).json({ error: "Commentaire vide" });
   try {
+    // Lookup author full name from DB (JWT only has uid + role)
+    const ur = await query("SELECT name, email FROM users WHERE uid = $1", [req.user.uid]);
+    const authorName = ur.rows[0]?.name || ur.rows[0]?.email || 'Utilisateur';
     const r = await query("INSERT INTO comments (entity_type, entity_id, author_id, author_name, content) VALUES ($1,$2,$3,$4,$5) RETURNING *",
-      [entityType, entityId, req.user.uid, req.user.name || req.user.email || 'Utilisateur', content.trim()]);
+      [entityType, entityId, req.user.uid, authorName, content.trim()]);
     res.status(201).json(r.rows[0]);
   } catch (err: any) { res.status(500).json({ error: "Server error: " + err.message }); }
 });
