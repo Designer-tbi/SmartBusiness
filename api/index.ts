@@ -333,18 +333,34 @@ app.post("/api/portfolio-items", authenticateToken, async (req: any, res) => {
   try { res.status(201).json((await query("INSERT INTO portfolio_items (category_id, name, sub_type, address, city, bp, tel, fax, mail, web, niu, status, agent_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *", [category_id, name, sub_type, address, city, bp, tel, fax, mail, web, niu, status || 'nouveau', req.user.uid])).rows[0]); } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 app.put("/api/portfolio-items/:id", authenticateToken, async (req: any, res) => {
-  const { category_id, name, sub_type, address, city, bp, tel, fax, mail, web, niu, status } = req.body;
+  const b = req.body || {};
+  // Fetch current to preserve unchanged fields (partial update support)
+  const existing = await query("SELECT * FROM portfolio_items WHERE id = $1", [req.params.id]);
+  if (existing.rows.length === 0) return res.status(404).json({ error: "Not found" });
+  const cur = existing.rows[0];
+  const m = <T,>(newVal: T, oldVal: T) => (newVal === undefined ? oldVal : newVal);
   try {
     const r = await query(
       `UPDATE portfolio_items SET
-         category_id=COALESCE($1, category_id),
-         name=COALESCE($2, name),
-         sub_type=$3, address=$4, city=$5, bp=$6, tel=$7, fax=$8, mail=$9, web=$10, niu=$11,
-         status=COALESCE($12, status)
+         category_id=$1, name=$2, sub_type=$3, address=$4, city=$5, bp=$6,
+         tel=$7, fax=$8, mail=$9, web=$10, niu=$11, status=$12
        WHERE id=$13 RETURNING *`,
-      [category_id || null, name || null, sub_type || null, address || null, city || null, bp || null, tel || null, fax || null, mail || null, web || null, niu || null, status || null, req.params.id]
+      [
+        m(b.category_id, cur.category_id),
+        m(b.name, cur.name),
+        m(b.sub_type, cur.sub_type),
+        m(b.address, cur.address),
+        m(b.city, cur.city),
+        m(b.bp, cur.bp),
+        m(b.tel, cur.tel),
+        m(b.fax, cur.fax),
+        m(b.mail, cur.mail),
+        m(b.web, cur.web),
+        m(b.niu, cur.niu),
+        m(b.status, cur.status),
+        req.params.id,
+      ]
     );
-    if (r.rows.length === 0) return res.status(404).json({ error: "Not found" });
     res.json(r.rows[0]);
   } catch (err: any) { res.status(500).json({ error: err.message || "Server error" }); }
 });
