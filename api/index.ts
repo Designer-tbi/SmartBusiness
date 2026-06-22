@@ -103,9 +103,12 @@ async function ensureDbInitialized() {
       "ALTER TABLE quotes ADD COLUMN IF NOT EXISTS subscription_id TEXT DEFAULT NULL",
       "ALTER TABLE portfolio_items ADD COLUMN IF NOT EXISTS agent_id TEXT",
       "ALTER TABLE portfolio_items ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'nouveau'",
+      "ALTER TABLE portfolio_items ADD COLUMN IF NOT EXISTS lost_reason TEXT",
+      "ALTER TABLE categories ADD COLUMN IF NOT EXISTS created_by TEXT",
       "ALTER TABLE leads ADD COLUMN IF NOT EXISTS currency TEXT",
       "ALTER TABLE customers ADD COLUMN IF NOT EXISTS currency TEXT",
       "ALTER TABLE opportunities ADD COLUMN IF NOT EXISTS currency TEXT",
+      "ALTER TABLE opportunities ADD COLUMN IF NOT EXISTS agent_id TEXT",
       `CREATE TABLE IF NOT EXISTS opportunity_items (
         id SERIAL PRIMARY KEY,
         opportunity_id INTEGER NOT NULL REFERENCES opportunities(id) ON DELETE CASCADE,
@@ -352,43 +355,70 @@ app.get("/api/auth/me", authenticateToken, async (req: any, res) => {
 
 // Categories
 app.get("/api/categories", authenticateToken, async (req, res) => {
-  try { res.json((await query("SELECT * FROM categories ORDER BY name ASC")).rows); } catch (err) { res.status(500).json({ error: "Server error" }); }
+  try { res.json((await query('SELECT c.*, u.name as "createdByName" FROM categories c LEFT JOIN users u ON c.created_by = u.uid ORDER BY name ASC')).rows); } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 app.post("/api/categories", authenticateToken, async (req: any, res) => {
   const { name } = req.body;
   if (!name) return res.status(400).json({ error: "Name is required" });
   try {
-    const result = await query("INSERT INTO categories (name) VALUES ($1) ON CONFLICT (name) DO NOTHING RETURNING *", [name.toUpperCase()]);
+    const result = await query("INSERT INTO categories (name, created_by) VALUES ($1, $2) ON CONFLICT (name) DO NOTHING RETURNING *", [name.toUpperCase(), req.user.uid]);
     if (result.rows.length === 0) { const existing = await query("SELECT * FROM categories WHERE name = $1", [name.toUpperCase()]); return res.json(existing.rows[0]); }
     res.status(201).json(result.rows[0]);
   } catch (err) { res.status(500).json({ error: "Server error" }); }
+});
+app.put("/api/categories/:id", authenticateToken, async (req: any, res) => {
+  if (req.user.role !== 'admin' && req.user.role !== 'superadmin') return res.status(403).json({ error: "Forbidden" });
+  const { name } = req.body;
+  if (!name) return res.status(400).json({ error: "Name is required" });
+  try {
+    const r = await query("UPDATE categories SET name = $1 WHERE id = $2 RETURNING *", [name.toUpperCase(), req.params.id]);
+    if (r.rows.length === 0) return res.status(404).json({ error: "Not found" });
+    res.json(r.rows[0]);
+  } catch (err: any) { res.status(500).json({ error: err.message || "Server error" }); }
 });
 
 // Portfolio Items
 app.get("/api/portfolio-items", authenticateToken, async (req: any, res) => {
   try {
-    let q = "SELECT * FROM portfolio_items"; let params: any[] = [];
-    if (req.user.role !== 'admin' && req.user.role !== 'superadmin') { q += " WHERE (agent_id = $1 OR agent_id IS NULL)"; params.push(req.user.uid); }
-    q += " ORDER BY name ASC";
+    const { userId } = req.query;
+    let q = 'SELECT p.*, u.name as "agentName" FROM portfolio_items p LEFT JOIN users u ON p.agent_id = u.uid';
+    let params: any[] = [];
+    const isAdmin = req.user.role === 'admin' || req.user.role === 'superadmin';
+    if (!isAdmin) {
+      q += " WHERE (p.agent_id = $1 OR p.agent_id IS NULL)";
+      params.push(req.user.uid);
+    } else if (userId) {
+      q += " WHERE p.agent_id = $1";
+      params.push(userId);
+    }
+    q += " ORDER BY p.name ASC";
     res.json((await query(q, params)).rows);
   } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 app.get("/api/categories/:categoryId/items", authenticateToken, async (req: any, res) => {
   try {
-    let q = "SELECT * FROM portfolio_items WHERE category_id = $1"; let params: any[] = [req.params.categoryId];
-    if (req.user.role !== 'admin' && req.user.role !== 'superadmin') { q += " AND (agent_id = $2 OR agent_id IS NULL)"; params.push(req.user.uid); }
-    q += " ORDER BY name ASC";
+    const { userId } = req.query;
+    let q = 'SELECT p.*, u.name as "agentName" FROM portfolio_items p LEFT JOIN users u ON p.agent_id = u.uid WHERE p.category_id = $1';
+    let params: any[] = [req.params.categoryId];
+    const isAdmin = req.user.role === 'admin' || req.user.role === 'superadmin';
+    if (!isAdmin) {
+      q += " AND (p.agent_id = $2 OR p.agent_id IS NULL)";
+      params.push(req.user.uid);
+    } else if (userId) {
+      q += " AND p.agent_id = $2";
+      params.push(userId);
+    }
+    q += " ORDER BY p.name ASC";
     res.json((await query(q, params)).rows);
   } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 app.post("/api/portfolio-items", authenticateToken, async (req: any, res) => {
-  const { category_id, name, sub_type, address, city, bp, tel, fax, mail, web, niu, status } = req.body;
+  const { category_id, name, sub_type, address, city, bp, tel, fax, mail, web, niu, status, lost_reason } = req.body;
   if (!category_id || !name) return res.status(400).json({ error: "Category ID and Name are required" });
-  try { res.status(201).json((await query("INSERT INTO portfolio_items (category_id, name, sub_type, address, city, bp, tel, fax, mail, web, niu, status, agent_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *", [category_id, name, sub_type, address, city, bp, tel, fax, mail, web, niu, status || 'nouveau', req.user.uid])).rows[0]); } catch (err) { res.status(500).json({ error: "Server error" }); }
+  try { res.status(201).json((await query("INSERT INTO portfolio_items (category_id, name, sub_type, address, city, bp, tel, fax, mail, web, niu, status, lost_reason, agent_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *", [category_id, name, sub_type, address, city, bp, tel, fax, mail, web, niu, status || 'nouveau', lost_reason || null, req.user.uid])).rows[0]); } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 app.put("/api/portfolio-items/:id", authenticateToken, async (req: any, res) => {
   const b = req.body || {};
-  // Fetch current to preserve unchanged fields (partial update support)
   const existing = await query("SELECT * FROM portfolio_items WHERE id = $1", [req.params.id]);
   if (existing.rows.length === 0) return res.status(404).json({ error: "Not found" });
   const cur = existing.rows[0];
@@ -397,22 +427,14 @@ app.put("/api/portfolio-items/:id", authenticateToken, async (req: any, res) => 
     const r = await query(
       `UPDATE portfolio_items SET
          category_id=$1, name=$2, sub_type=$3, address=$4, city=$5, bp=$6,
-         tel=$7, fax=$8, mail=$9, web=$10, niu=$11, status=$12
-       WHERE id=$13 RETURNING *`,
+         tel=$7, fax=$8, mail=$9, web=$10, niu=$11, status=$12, lost_reason=$13
+       WHERE id=$14 RETURNING *`,
       [
-        m(b.category_id, cur.category_id),
-        m(b.name, cur.name),
-        m(b.sub_type, cur.sub_type),
-        m(b.address, cur.address),
-        m(b.city, cur.city),
-        m(b.bp, cur.bp),
-        m(b.tel, cur.tel),
-        m(b.fax, cur.fax),
-        m(b.mail, cur.mail),
-        m(b.web, cur.web),
-        m(b.niu, cur.niu),
-        m(b.status, cur.status),
-        req.params.id,
+        m(b.category_id, cur.category_id), m(b.name, cur.name), m(b.sub_type, cur.sub_type),
+        m(b.address, cur.address), m(b.city, cur.city), m(b.bp, cur.bp),
+        m(b.tel, cur.tel), m(b.fax, cur.fax), m(b.mail, cur.mail),
+        m(b.web, cur.web), m(b.niu, cur.niu), m(b.status, cur.status),
+        m(b.lost_reason, cur.lost_reason), req.params.id,
       ]
     );
     res.json(r.rows[0]);
@@ -693,10 +715,10 @@ app.delete("/api/leads/:id", authenticateToken, async (req, res) => {
 // Opportunities
 app.get("/api/opportunities", authenticateToken, async (req: any, res) => {
   try {
-    let q = 'SELECT o.id, o.customer_id as "customerId", o.lead_id as "leadId", o.title, o.amount, o.currency, o.stage, o.probability, o.expected_close_date as "expectedCloseDate", o.notes, o.created_at as "createdAt", o.updated_at as "updatedAt", c.name as "customerName", c.agent_id as "customerAgentId", l.agent_id as "leadAgentId", CASE WHEN l.type = \'company\' THEN l.company_name ELSE COALESCE(l.first_name,\'\') || \' \' || COALESCE(l.last_name,\'\') END as "leadName", (SELECT COUNT(*) FROM opportunity_items WHERE opportunity_id = o.id) AS "itemsCount" FROM opportunities o LEFT JOIN customers c ON o.customer_id = c.id LEFT JOIN leads l ON o.lead_id = l.id';
+    let q = 'SELECT o.id, o.customer_id as "customerId", o.lead_id as "leadId", o.title, o.amount, o.currency, o.stage, o.probability, o.expected_close_date as "expectedCloseDate", o.notes, o.created_at as "createdAt", o.updated_at as "updatedAt", o.agent_id as "agentId", c.name as "customerName", c.agent_id as "customerAgentId", l.agent_id as "leadAgentId", u.name as "agentName", CASE WHEN l.type = \'company\' THEN l.company_name ELSE COALESCE(l.first_name,\'\') || \' \' || COALESCE(l.last_name,\'\') END as "leadName", (SELECT COUNT(*) FROM opportunity_items WHERE opportunity_id = o.id) AS "itemsCount" FROM opportunities o LEFT JOIN customers c ON o.customer_id = c.id LEFT JOIN leads l ON o.lead_id = l.id LEFT JOIN users u ON o.agent_id = u.uid';
     let params: any[] = [];
     if (req.user.role !== 'admin' && req.user.role !== 'superadmin') {
-      q += ' WHERE c.agent_id = $1 OR l.agent_id = $1';
+      q += ' WHERE o.agent_id = $1 OR c.agent_id = $1 OR l.agent_id = $1';
       params.push(req.user.uid);
     }
     q += ' ORDER BY o.created_at DESC';
@@ -737,7 +759,7 @@ app.post("/api/opportunities", authenticateToken, async (req: any, res) => {
     if (Array.isArray(items) && items.length > 0) {
       finalAmount = items.reduce((acc: number, it: any) => acc + (Number(it.quantity) || 1) * (Number(it.unitPrice) || 0), 0);
     }
-    const result = await query('INSERT INTO opportunities (customer_id, lead_id, title, amount, currency, stage, probability, expected_close_date, notes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id, customer_id as "customerId", lead_id as "leadId", title, amount, currency, stage, probability, expected_close_date as "expectedCloseDate", notes, created_at as "createdAt"', [customerId || null, leadId || null, title, finalAmount, currency || null, stage || 'Prospection', probability, expectedCloseDate, notes]);
+    const result = await query('INSERT INTO opportunities (customer_id, lead_id, title, amount, currency, stage, probability, expected_close_date, notes, agent_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id, customer_id as "customerId", lead_id as "leadId", title, amount, currency, stage, probability, expected_close_date as "expectedCloseDate", notes, agent_id as "agentId", created_at as "createdAt"', [customerId || null, leadId || null, title, finalAmount, currency || null, stage || 'Prospection', probability, expectedCloseDate, notes, req.user.uid]);
     const opp = result.rows[0];
     await saveOpportunityItems(opp.id, items || []);
     res.status(201).json(opp);
@@ -882,7 +904,7 @@ async function autoCreateInvoiceFromQuote(quoteId: number) {
     if (customerId) await query("UPDATE quotes SET customer_id = $1, lead_id = NULL WHERE id = $2", [customerId, quoteId]);
   }
   if (!customerId) return null;
-  const invoiceNumber = `F-${new Date().getFullYear()}-${Date.now().toString().slice(-5)}`;
+  const invoiceNumber = await nextMonthlyNumber('F', 'invoices');
   const dueDate = new Date(); dueDate.setDate(dueDate.getDate() + 30);
   const r = await query(
     "INSERT INTO invoices (number, customer_id, quote_id, agent_id, amount, status, date, due_date) VALUES ($1,$2,$3,$4,$5,'En attente',$6,$7) RETURNING id",
@@ -1070,15 +1092,32 @@ async function validateQuoteItemsMix(items: any[]): Promise<string | null> {
   return null;
 }
 
+// ============================================================================
+// Monthly numbering helpers (e.g. DEV-2026-02-001, F-2026-02-007)
+// ============================================================================
+async function nextMonthlyNumber(prefix: string, table: 'quotes' | 'invoices'): Promise<string> {
+  const now = new Date();
+  const yyyy = now.getUTCFullYear();
+  const mm = String(now.getUTCMonth() + 1).padStart(2, '0');
+  const pattern = `${prefix}-${yyyy}-${mm}-%`;
+  const r = await query(
+    `SELECT COUNT(*)::int AS cnt FROM ${table} WHERE number LIKE $1`,
+    [pattern]
+  );
+  const seq = String((r.rows[0]?.cnt || 0) + 1).padStart(3, '0');
+  return `${prefix}-${yyyy}-${mm}-${seq}`;
+}
+
 app.post("/api/quotes", authenticateToken, async (req: any, res) => {
   const { number, customerId, leadId, amount, status, date, expiryDate, notes, items } = req.body;
   try {
     const err = await validateQuoteItemsMix(items || []);
     if (err) return res.status(400).json({ error: err });
-    const result = await query("INSERT INTO quotes (number, customer_id, lead_id, agent_id, amount, status, date, expiry_date, notes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id", [number, customerId === "" ? null : customerId, leadId === "" ? null : leadId, req.user.uid, amount, status || 'Brouillon', date, expiryDate, notes]);
+    const finalNumber = number || await nextMonthlyNumber('DEV', 'quotes');
+    const result = await query("INSERT INTO quotes (number, customer_id, lead_id, agent_id, amount, status, date, expiry_date, notes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id, number", [finalNumber, customerId === "" ? null : customerId, leadId === "" ? null : leadId, req.user.uid, amount, status || 'Brouillon', date, expiryDate, notes]);
     const quoteId = result.rows[0].id;
     if (items?.length > 0) { for (const item of items) { await query("INSERT INTO quote_items (quote_id, product_id, description, quantity, unit_price, total_price) VALUES ($1,$2,$3,$4,$5,$6)", [quoteId, item.productId === "" ? null : item.productId, item.description, item.quantity, item.unitPrice, item.totalPrice]); } }
-    res.status(201).json({ id: quoteId });
+    res.status(201).json({ id: quoteId, number: result.rows[0].number });
   } catch (err: any) { console.error(err); res.status(500).json({ error: "Server error: " + err.message }); }
 });
 app.put("/api/quotes/:id", authenticateToken, async (req, res) => {
@@ -1644,7 +1683,7 @@ app.get("/api/invoices", authenticateToken, async (req: any, res) => {
 });
 app.post("/api/invoices", authenticateToken, async (req: any, res) => {
   const { number, customerId, quoteId, amount, status, date, dueDate, notes } = req.body;
-  const invoiceNum = number || `F-${new Date().getFullYear()}-${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`;
+  const invoiceNum = number || await nextMonthlyNumber('F', 'invoices');
   try { res.status(201).json({ id: (await query("INSERT INTO invoices (number, customer_id, quote_id, agent_id, amount, status, date, due_date, notes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id", [invoiceNum, customerId === "" ? null : customerId, quoteId === "" ? null : quoteId, req.user.uid, amount || 0, status || 'En attente', date || new Date().toISOString().split('T')[0], dueDate || null, notes || null])).rows[0].id }); } catch (err: any) { console.error(err); res.status(500).json({ error: "Server error: " + err.message }); }
 });
 app.put("/api/invoices/:id", authenticateToken, async (req: any, res) => {

@@ -26,30 +26,38 @@ interface PortfolioItem {
   mail?: string;
   web?: string;
   niu?: string;
-  status?: 'nouveau' | 'suivi' | 'en_cours' | 'termine';
+  status?: 'nouveau' | 'suivi' | 'en_cours' | 'a_recontacter' | 'gagne' | 'perdu' | 'termine';
+  lost_reason?: string;
+  agent_id?: string;
+  agentName?: string;
   created_at: string;
 }
 
 // === Status mapping for visual badges ===
 const STATUS_CONFIG: Record<string, { label: string; bg: string; text: string; pulseColor: string; ring: string }> = {
-  nouveau:    { label: 'Nouveau prospect', bg: 'bg-blue-500',    text: 'text-white', pulseColor: 'bg-blue-400',    ring: 'ring-blue-400/40' },
-  suivi:      { label: 'En suivi',         bg: 'bg-amber-500',   text: 'text-white', pulseColor: 'bg-amber-300',   ring: 'ring-amber-400/40' },
-  en_cours:   { label: 'En cours',         bg: 'bg-violet-600',  text: 'text-white', pulseColor: 'bg-violet-400',  ring: 'ring-violet-400/40' },
-  termine:    { label: 'Terminé',          bg: 'bg-emerald-600', text: 'text-white', pulseColor: 'bg-emerald-300', ring: 'ring-emerald-400/40' },
+  nouveau:        { label: 'Nouveau prospect', bg: 'bg-blue-500',    text: 'text-white', pulseColor: 'bg-blue-400',    ring: 'ring-blue-400/40' },
+  suivi:          { label: 'En suivi',         bg: 'bg-amber-500',   text: 'text-white', pulseColor: 'bg-amber-300',   ring: 'ring-amber-400/40' },
+  en_cours:       { label: 'En cours',         bg: 'bg-violet-600',  text: 'text-white', pulseColor: 'bg-violet-400',  ring: 'ring-violet-400/40' },
+  a_recontacter:  { label: 'À recontacter',    bg: 'bg-cyan-500',    text: 'text-white', pulseColor: 'bg-cyan-300',    ring: 'ring-cyan-400/40' },
+  gagne:          { label: 'Gagné',            bg: 'bg-emerald-600', text: 'text-white', pulseColor: 'bg-emerald-300', ring: 'ring-emerald-400/40' },
+  perdu:          { label: 'Perdu',            bg: 'bg-rose-600',    text: 'text-white', pulseColor: 'bg-rose-300',    ring: 'ring-rose-400/40' },
+  // legacy
+  termine:        { label: 'Gagné',            bg: 'bg-emerald-600', text: 'text-white', pulseColor: 'bg-emerald-300', ring: 'ring-emerald-400/40' },
 };
 
 function StatusBadge({ status }: { status?: string }) {
   const cfg = STATUS_CONFIG[status || 'nouveau'] || STATUS_CONFIG.nouveau;
-  const isActive = status !== 'termine';
+  const isStatic = status === 'gagne' || status === 'perdu' || status === 'termine';
   return (
     <div className={`absolute top-3 right-3 z-10 ${cfg.bg} ${cfg.text} px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider shadow-lg flex items-center gap-1.5 ring-2 ${cfg.ring}`}>
-      {isActive && (
+      {!isStatic && (
         <span className="relative flex h-2 w-2">
           <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${cfg.pulseColor} opacity-75`}></span>
           <span className={`relative inline-flex rounded-full h-2 w-2 ${cfg.pulseColor}`}></span>
         </span>
       )}
-      {status === 'termine' && <span className="text-[12px]">✓</span>}
+      {status === 'gagne' || status === 'termine' ? <span className="text-[12px]">✓</span> : null}
+      {status === 'perdu' ? <span className="text-[12px]">✗</span> : null}
       <span>{cfg.label}</span>
     </div>
   );
@@ -86,6 +94,7 @@ export default function Portfolio() {
     web: '',
     niu: '',
     status: 'nouveau',
+    lost_reason: '',
   });
   const [submitting, setSubmitting] = useState(false);
 
@@ -225,6 +234,7 @@ export default function Portfolio() {
       web: item.web || '',
       niu: item.niu || '',
       status: item.status || 'nouveau',
+      lost_reason: item.lost_reason || '',
     });
     setEditingItemId(item.id);
     setSelectedCategoryForAdd(item.category_id);
@@ -242,18 +252,22 @@ export default function Portfolio() {
       item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       item.sub_type?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       item.city?.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesStatus = !statusFilter || (item.status || 'nouveau') === statusFilter;
+    let itemStatus = (item.status || 'nouveau') as string;
+    if (itemStatus === 'termine') itemStatus = 'gagne';
+    const matchesStatus = !statusFilter || itemStatus === statusFilter;
     return matchesSearch && matchesStatus;
   });
 
   // Counters for status chips (computed on UN-filtered items so users see total counts)
+  // Treat legacy 'termine' as 'gagne'
   const statusCounts = items.reduce(
     (acc, it) => {
-      const s = (it.status || 'nouveau') as keyof typeof acc;
+      let s = (it.status || 'nouveau') as string;
+      if (s === 'termine') s = 'gagne';
       if (s in acc) acc[s] = (acc[s] || 0) + 1;
       return acc;
     },
-    { nouveau: 0, suivi: 0, en_cours: 0, termine: 0 } as Record<string, number>
+    { nouveau: 0, suivi: 0, en_cours: 0, a_recontacter: 0, gagne: 0, perdu: 0 } as Record<string, number>
   );
 
   const handleConvertToOpportunity = async (item: PortfolioItem) => {
@@ -467,7 +481,7 @@ export default function Portfolio() {
 
       {/* Add/Edit Item Form — MODAL POPUP */}
       {isAddingItem && (selectedCategory || viewAll) && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={(e) => { if (e.target === e.currentTarget) { setIsAddingItem(false); setEditingItemId(null); setNewItem({ name: '', sub_type: '', address: '', city: '', bp: '', tel: '', fax: '', mail: '', web: '', niu: '', status: 'nouveau' }); } }}>
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={(e) => { if (e.target === e.currentTarget) { setIsAddingItem(false); setEditingItemId(null); setNewItem({ name: '', sub_type: '', address: '', city: '', bp: '', tel: '', fax: '', mail: '', web: '', niu: '', status: 'nouveau', lost_reason: '' }); } }}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[92vh] flex flex-col overflow-hidden" data-testid="portfolio-item-form">
             <div className="p-6 border-b border-slate-100 bg-gradient-to-r from-indigo-50 to-purple-50 flex justify-between items-center">
               <div className="flex items-center gap-3">
@@ -480,7 +494,7 @@ export default function Portfolio() {
               </div>
               <button
                 type="button"
-                onClick={() => { setIsAddingItem(false); setEditingItemId(null); setNewItem({ name: '', sub_type: '', address: '', city: '', bp: '', tel: '', fax: '', mail: '', web: '', niu: '', status: 'nouveau' }); }}
+                onClick={() => { setIsAddingItem(false); setEditingItemId(null); setNewItem({ name: '', sub_type: '', address: '', city: '', bp: '', tel: '', fax: '', mail: '', web: '', niu: '', status: 'nouveau', lost_reason: '' }); }}
                 className="p-2 hover:bg-white rounded-full transition-all text-slate-400"
                 title="Fermer"
               >
@@ -524,14 +538,31 @@ export default function Portfolio() {
                     newItem.status === 'nouveau' ? 'border-blue-400 text-blue-700' :
                     newItem.status === 'suivi' ? 'border-amber-400 text-amber-700' :
                     newItem.status === 'en_cours' ? 'border-violet-400 text-violet-700' :
+                    newItem.status === 'a_recontacter' ? 'border-cyan-400 text-cyan-700' :
+                    newItem.status === 'perdu' ? 'border-rose-400 text-rose-700' :
                     'border-emerald-400 text-emerald-700'
                   }`}
                 >
                   <option value="nouveau">🆕 Nouveau prospect</option>
                   <option value="suivi">🔔 En suivi</option>
                   <option value="en_cours">⚡ En cours</option>
-                  <option value="termine">✅ Terminé</option>
+                  <option value="a_recontacter">📞 À recontacter</option>
+                  <option value="gagne">✅ Gagné</option>
+                  <option value="perdu">❌ Perdu</option>
                 </select>
+                {newItem.status === 'perdu' && (
+                  <div className="mt-3 p-3 bg-rose-50 border-2 border-rose-200 rounded-xl">
+                    <label className="block text-xs font-bold text-rose-700 mb-1.5">Motif de la perte *</label>
+                    <textarea
+                      value={newItem.lost_reason}
+                      onChange={(e) => setNewItem({...newItem, lost_reason: e.target.value})}
+                      placeholder="Ex: Trop cher, choisi concurrent, projet annulé, pas de budget..."
+                      rows={2}
+                      data-testid="portfolio-lost-reason"
+                      className="w-full px-3 py-2 bg-white border border-rose-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-rose-300 resize-none"
+                    />
+                  </div>
+                )}
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1.5">Type / Sous-catégorie</label>
@@ -622,7 +653,7 @@ export default function Portfolio() {
             <div className="p-4 border-t border-slate-100 bg-slate-50 flex justify-end gap-2">
               <button
                 type="button"
-                onClick={() => { setIsAddingItem(false); setEditingItemId(null); setNewItem({ name: '', sub_type: '', address: '', city: '', bp: '', tel: '', fax: '', mail: '', web: '', niu: '', status: 'nouveau' }); }}
+                onClick={() => { setIsAddingItem(false); setEditingItemId(null); setNewItem({ name: '', sub_type: '', address: '', city: '', bp: '', tel: '', fax: '', mail: '', web: '', niu: '', status: 'nouveau', lost_reason: '' }); }}
                 className="px-6 py-2 border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-100 transition-colors"
               >
                 Annuler
@@ -720,15 +751,37 @@ export default function Portfolio() {
               ⚡ En cours · {statusCounts.en_cours}
             </button>
             <button
-              onClick={() => setStatusFilter('termine')}
-              data-testid="chip-termine"
+              onClick={() => setStatusFilter('a_recontacter')}
+              data-testid="chip-recontacter"
               className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all flex items-center gap-1 ${
-                statusFilter === 'termine'
+                statusFilter === 'a_recontacter'
+                  ? 'bg-cyan-500 text-white shadow-lg scale-105 ring-2 ring-cyan-300'
+                  : 'bg-cyan-50 text-cyan-700 border border-cyan-200 hover:bg-cyan-100'
+              }`}
+            >
+              📞 À recontacter · {statusCounts.a_recontacter}
+            </button>
+            <button
+              onClick={() => setStatusFilter('gagne')}
+              data-testid="chip-gagne"
+              className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all flex items-center gap-1 ${
+                statusFilter === 'gagne'
                   ? 'bg-emerald-600 text-white shadow-lg scale-105 ring-2 ring-emerald-300'
                   : 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100'
               }`}
             >
-              ✅ Terminé · {statusCounts.termine}
+              ✅ Gagné · {statusCounts.gagne}
+            </button>
+            <button
+              onClick={() => setStatusFilter('perdu')}
+              data-testid="chip-perdu"
+              className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all flex items-center gap-1 ${
+                statusFilter === 'perdu'
+                  ? 'bg-rose-600 text-white shadow-lg scale-105 ring-2 ring-rose-300'
+                  : 'bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100'
+              }`}
+            >
+              ❌ Perdu · {statusCounts.perdu}
             </button>
           </div>
           {loading && items.length === 0 ? (

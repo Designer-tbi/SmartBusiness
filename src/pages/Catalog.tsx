@@ -77,6 +77,7 @@ export default function Catalog() {
   const [showCatalogModal, setShowCatalogModal] = useState(false);
   const [showCategoryModal, setShowCategoryModal] = useState(false);
   const [showProductModal, setShowProductModal] = useState(false);
+  const [editingProductId, setEditingProductId] = useState<number | null>(null);
   const [showVatModal, setShowVatModal] = useState(false);
 
   // Form states
@@ -186,8 +187,10 @@ export default function Catalog() {
   const handleCreateProduct = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const res = await fetch('/api/products', {
-        method: 'POST',
+      const url = editingProductId ? `/api/products/${editingProductId}` : '/api/products';
+      const method = editingProductId ? 'PUT' : 'POST';
+      const res = await fetch(url, {
+        method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...productForm,
@@ -201,6 +204,7 @@ export default function Catalog() {
       });
       if (res.ok) {
         setShowProductModal(false);
+        setEditingProductId(null);
         setProductForm({
           name: '',
           type: 'product',
@@ -214,10 +218,39 @@ export default function Catalog() {
           description: ''
         });
         fetchData();
+      } else {
+        const err = await res.json();
+        alert('Erreur: ' + (err.error || 'inconnue'));
       }
     } catch (error) {
-      console.error("Error creating product:", error);
+      console.error("Error saving product:", error);
     }
+  };
+
+  const handleEditProduct = (product: any) => {
+    setEditingProductId(product.id);
+    setProductForm({
+      name: product.name || '',
+      type: product.type || 'product',
+      categoryId: product.category_id ? String(product.category_id) : (product.categoryId ? String(product.categoryId) : ''),
+      catalogId: product.catalog_id ? String(product.catalog_id) : (product.catalogId ? String(product.catalogId) : ''),
+      price: product.price != null ? String(product.price) : '',
+      vatRate: product.vat_rate != null ? String(product.vat_rate) : (product.vatRate != null ? String(product.vatRate) : '20'),
+      vatRateId: product.vat_rate_id ? String(product.vat_rate_id) : (product.vatRateId ? String(product.vatRateId) : ''),
+      stock: product.stock != null ? String(product.stock) : '',
+      unit: product.unit || 'unité',
+      description: product.description || ''
+    });
+    setShowProductModal(true);
+  };
+
+  const handleDeleteProduct = async (id: number) => {
+    if (!confirm('Supprimer définitivement ce produit/service ?')) return;
+    try {
+      const res = await fetch(`/api/products/${id}`, { method: 'DELETE' });
+      if (res.ok) fetchData();
+      else alert('Erreur lors de la suppression');
+    } catch (e: any) { alert('Erreur: ' + e.message); }
   };
 
   const filteredProducts = useMemo(() => {
@@ -394,10 +427,10 @@ export default function Catalog() {
                   <div className="h-32 bg-slate-200 flex items-center justify-center relative">
                     <Package size={32} className="text-slate-400" />
                     <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button className="p-1.5 bg-white text-slate-600 rounded-md hover:text-indigo-600 shadow-sm border border-slate-200">
+                      <button onClick={() => handleEditProduct(product)} data-testid={`edit-product-${product.id}`} className="p-1.5 bg-white text-slate-600 rounded-md hover:text-indigo-600 shadow-sm border border-slate-200" title="Modifier">
                         <Edit2 size={14} />
                       </button>
-                      <button className="p-1.5 bg-white text-slate-600 rounded-md hover:text-rose-600 shadow-sm border border-slate-200">
+                      <button onClick={() => handleDeleteProduct(product.id)} data-testid={`delete-product-${product.id}`} className="p-1.5 bg-white text-slate-600 rounded-md hover:text-rose-600 shadow-sm border border-slate-200" title="Supprimer">
                         <Trash2 size={14} />
                       </button>
                     </div>
