@@ -1,7 +1,10 @@
 // Chunked upload utility — bypasses Vercel 4.5MB serverless body limit
 // File is split into ~2 MB base64 chunks, uploaded sequentially, then reassembled server-side.
-
-const CHUNK_SIZE = 2 * 1024 * 1024; // 2 MB raw → ~2.7 MB base64 per request (safe under 4.5 MB)
+//
+// IMPORTANT: chunk size MUST be a multiple of 3 bytes so that each base64-encoded chunk
+// has NO intermediate padding. Otherwise concatenation on the server produces corrupted base64.
+// 3 raw bytes → exactly 4 base64 chars (no '=' padding). 2,097,150 = 699,050 × 3 ≈ 2 MB.
+const CHUNK_SIZE = 2_097_150;
 
 export type UploadMeta = {
   name: string;

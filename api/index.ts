@@ -118,6 +118,12 @@ async function ensureDbInitialized() {
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       )`,
       "CREATE INDEX IF NOT EXISTS idx_opportunity_items_opp ON opportunity_items(opportunity_id)",
+      // === System flags table (for one-time migrations / cleanup) ===
+      `CREATE TABLE IF NOT EXISTS system_flags (
+        flag_key TEXT PRIMARY KEY,
+        value TEXT,
+        executed_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      )`,
       `CREATE TABLE IF NOT EXISTS comments (
         id SERIAL PRIMARY KEY,
         entity_type TEXT NOT NULL,
@@ -203,6 +209,42 @@ async function ensureDbInitialized() {
     }
     dbInitialized = true;
     console.log("Database initialized successfully");
+
+    // === One-time cleanup of corrupted chunked uploads (base64 padding bug) ===
+    try {
+      const flagCheck = await query("SELECT 1 FROM system_flags WHERE flag_key = 'cleanup_corrupted_documents_v1'");
+      if (flagCheck.rows.length === 0) {
+        // Identify documents whose decoded base64 size doesn't match file_size
+        // (= chunked uploads corrupted by padding bug; tolerance ±10 bytes for data: prefix variations)
+        const candidates = await query(`
+          SELECT id, file_name, file_size,
+            LENGTH(file_data) AS encoded_len,
+            CASE
+              WHEN file_data LIKE 'data:%base64,%' THEN POSITION('base64,' IN file_data) + 6
+              ELSE 0
+            END AS prefix_len
+          FROM documents
+          WHERE file_data IS NOT NULL AND file_size > 0
+        `);
+        const ids: number[] = [];
+        for (const row of candidates.rows) {
+          const b64Len = Number(row.encoded_len) - Number(row.prefix_len || 0);
+          // base64 decoded length = ceil(b64Len * 3 / 4) minus padding chars
+          // Approximate decoded size = b64Len * 3 / 4
+          const approxDecoded = Math.floor(b64Len * 3 / 4);
+          const stored = Number(row.file_size);
+          // If decoded is more than 10% smaller than stored size → corrupted
+          if (stored > 1024 && approxDecoded < stored * 0.9) {
+            ids.push(row.id);
+          }
+        }
+        if (ids.length > 0) {
+          await query(`DELETE FROM documents WHERE id = ANY($1::int[])`, [ids]);
+          console.log(`[Cleanup] Deleted ${ids.length} corrupted documents (chunked upload base64 padding bug)`);
+        }
+        await query("INSERT INTO system_flags (flag_key, value) VALUES ('cleanup_corrupted_documents_v1', $1)", [`${ids.length} deleted`]);
+      }
+    } catch (cleanupErr) { console.error("[Cleanup] error:", cleanupErr); }
   } catch (err) {
     console.error("DB init error:", err);
   }
@@ -2188,13 +2230,18 @@ app.get("/api/documents/:id/file", authenticateToken, async (req, res) => {
     const r = await query("SELECT file_name, file_type, file_data FROM documents WHERE id = $1", [req.params.id]);
     if (r.rows.length === 0) return res.status(404).json({ error: "Document not found" });
     const d = r.rows[0];
-    // file_data is base64 (with or without data: prefix)
-    let b64 = d.file_data || '';
-    if (b64.startsWith('data:')) b64 = b64.split(',')[1] || '';
+    // file_data may be a data URL "data:...;base64,XXX" OR raw base64
+    let b64 = (d.file_data || '').toString();
+    const commaIdx = b64.indexOf('base64,');
+    if (commaIdx >= 0) b64 = b64.substring(commaIdx + 7);
+    // Strip any whitespace/newlines that could break Buffer decoding
+    b64 = b64.replace(/[\s\r\n]/g, '');
     const buf = Buffer.from(b64, 'base64');
     res.setHeader('Content-Type', d.file_type || 'application/octet-stream');
+    res.setHeader('Content-Length', String(buf.length));
     res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(d.file_name || 'fichier')}"`);
-    res.setHeader('Cache-Control', 'private, max-age=60');
+    res.setHeader('Cache-Control', 'private, max-age=300');
+    res.setHeader('Accept-Ranges', 'bytes');
     res.send(buf);
   } catch (err: any) { res.status(500).json({ error: err.message || "Server error" }); }
 });
