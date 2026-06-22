@@ -92,7 +92,7 @@ export default function Tracking() {
       q.status === 'Envoyé' && q.expiryDate && isBefore(parseISO(q.expiryDate), today)
     );
 
-    const totalAmount = [...baseFilteredQuotes, ...baseFilteredInvoices].reduce((sum, item) => sum + (item.amount || 0), 0);
+    const totalAmount = [...baseFilteredQuotes, ...baseFilteredInvoices].reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
 
     return {
       sentQuotes: sentQuotes.length,

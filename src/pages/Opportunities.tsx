@@ -228,8 +228,8 @@ export default function Opportunities() {
     }
   };
 
-  const totalValue = filteredOpportunities.reduce((sum, o) => sum + o.amount, 0);
-  const weightedValue = filteredOpportunities.reduce((sum, o) => sum + (o.amount * o.probability / 100), 0);
+  const totalValue = filteredOpportunities.reduce((sum, o) => sum + (Number(o.amount) || 0), 0);
+  const weightedValue = filteredOpportunities.reduce((sum, o) => sum + ((Number(o.amount) || 0) * (Number(o.probability) || 0) / 100), 0);
 
   if (loading) return <div className="flex h-screen items-center justify-center">Chargement...</div>;
 
