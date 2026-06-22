@@ -99,24 +99,36 @@ export default function Documents() {
 
   const handleDownload = async (doc: Document) => {
     try {
-      const res = await fetch(`/api/documents/${doc.id}`);
-      const data = await res.json();
-      if (data.file_data) {
-        const link = document.createElement('a');
-        link.href = data.file_data;
-        link.download = doc.file_name;
-        link.click();
-      }
-    } catch (err) { console.error(err); }
+      // Use binary streaming endpoint (no huge JSON payload)
+      const res = await fetch(`/api/documents/${doc.id}/file`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = doc.file_name;
+      link.click();
+      // Cleanup blob URL after a moment
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (err: any) {
+      console.error('[Documents] Download error:', err);
+      alert('Erreur téléchargement: ' + err.message);
+    }
   };
 
   const handlePreview = async (doc: Document) => {
     try {
-      const res = await fetch(`/api/documents/${doc.id}`);
-      const data = await res.json();
-      setPreviewData(data.file_data);
+      // Use binary streaming endpoint to avoid loading huge JSON
+      const res = await fetch(`/api/documents/${doc.id}/file`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      setPreviewData(url);
       setPreviewDoc(doc);
-    } catch (err) { console.error(err); }
+    } catch (err: any) {
+      console.error('[Documents] Preview error:', err);
+      alert('Erreur prévisualisation: ' + err.message);
+    }
   };
 
   const filtered = documents.filter(d =>
@@ -285,65 +297,44 @@ export default function Documents() {
 
       {/* Preview Modal */}
       {previewDoc && previewData && (
-        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={() => { setPreviewDoc(null); setPreviewData(null); }}>
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={() => { if (previewData?.startsWith('blob:')) URL.revokeObjectURL(previewData); setPreviewDoc(null); setPreviewData(null); }}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()} data-testid="preview-modal">
             <div className="p-4 border-b border-slate-100 flex justify-between items-center flex-shrink-0">
               <h3 className="font-bold text-slate-800">{previewDoc.name}</h3>
               <div className="flex items-center gap-2">
-                <button onClick={() => {
-                  // Open in new tab
-                  const win = window.open();
-                  if (win) {
-                    if (previewDoc.file_type?.includes('pdf')) {
-                      win.document.write(`<iframe src="${previewData}" style="width:100%;height:100%;border:none;" />`);
-                    } else if (previewDoc.file_type?.startsWith('image/')) {
-                      win.document.write(`<img src="${previewData}" style="max-width:100%;height:auto;" />`);
-                    } else {
-                      win.location.href = previewData;
-                    }
-                  }
-                }} className="px-3 py-1.5 text-sm bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 flex items-center gap-1">
+                <a href={previewData} target="_blank" rel="noreferrer" className="px-3 py-1.5 text-sm bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 flex items-center gap-1">
                   <Eye className="w-3.5 h-3.5" /> Ouvrir
-                </button>
+                </a>
                 <button onClick={() => handleDownload(previewDoc)} className="px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center gap-1">
                   <Download className="w-3.5 h-3.5" /> Télécharger
                 </button>
-                <button onClick={() => { setPreviewDoc(null); setPreviewData(null); }} className="p-1.5 hover:bg-slate-100 rounded-lg"><X className="w-5 h-5 text-slate-400" /></button>
+                <button onClick={() => { if (previewData?.startsWith('blob:')) URL.revokeObjectURL(previewData); setPreviewDoc(null); setPreviewData(null); }} className="p-1.5 hover:bg-slate-100 rounded-lg"><X className="w-5 h-5 text-slate-400" /></button>
               </div>
             </div>
             <div className="flex-1 overflow-auto p-4 flex items-center justify-center bg-slate-50 min-h-[500px]">
               {previewDoc.file_type?.startsWith('image/') ? (
                 <img src={previewData} alt={previewDoc.name} className="max-w-full max-h-[70vh] object-contain rounded-lg shadow-md" />
               ) : previewDoc.file_type?.includes('pdf') ? (
-                <object data={previewData} type="application/pdf" className="w-full h-[70vh] rounded-lg">
-                  <div className="text-center py-16">
-                    <File className="w-16 h-16 text-slate-300 mx-auto mb-3" />
-                    <p className="text-slate-500 mb-4">Votre navigateur ne supporte pas l'affichage PDF intégré</p>
-                    <div className="flex items-center justify-center gap-3">
-                      <button onClick={() => {
-                        const win = window.open();
-                        if (win) win.document.write(`<iframe src="${previewData}" style="width:100%;height:100%;border:none;" />`);
-                      }} className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700">
-                        Ouvrir dans un nouvel onglet
-                      </button>
-                      <button onClick={() => handleDownload(previewDoc)} className="px-4 py-2 bg-slate-200 text-slate-700 rounded-lg text-sm hover:bg-slate-300">
-                        Télécharger
-                      </button>
-                    </div>
-                  </div>
-                </object>
+                <iframe src={previewData} title={previewDoc.name} className="w-full h-[70vh] rounded-lg border-0" />
               ) : previewDoc.file_type?.startsWith('text/') ? (
-                <pre className="w-full p-6 bg-white border border-slate-200 rounded-lg text-sm text-slate-700 overflow-auto max-h-[70vh] whitespace-pre-wrap">
-                  {atob(previewData.split(',')[1] || '')}
-                </pre>
+                <iframe src={previewData} title={previewDoc.name} className="w-full h-[70vh] rounded-lg border border-slate-200 bg-white" />
+              ) : previewDoc.file_type?.startsWith('video/') ? (
+                <video src={previewData} controls className="max-w-full max-h-[70vh] rounded-lg shadow-md" />
+              ) : previewDoc.file_type?.startsWith('audio/') ? (
+                <audio src={previewData} controls className="w-full" />
               ) : (
                 <div className="text-center py-16">
                   <File className="w-16 h-16 text-slate-300 mx-auto mb-3" />
-                  <p className="text-slate-500 font-medium mb-2">Aperçu non disponible</p>
+                  <p className="text-slate-500 font-medium mb-2">Aperçu intégré non disponible</p>
                   <p className="text-sm text-slate-400 mb-4">Type: {previewDoc.file_type || 'inconnu'}</p>
-                  <button onClick={() => handleDownload(previewDoc)} className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700">
-                    Télécharger le fichier
-                  </button>
+                  <div className="flex items-center justify-center gap-3">
+                    <a href={previewData} target="_blank" rel="noreferrer" className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700">
+                      Ouvrir dans un nouvel onglet
+                    </a>
+                    <button onClick={() => handleDownload(previewDoc)} className="px-4 py-2 bg-slate-200 text-slate-700 rounded-lg text-sm hover:bg-slate-300">
+                      Télécharger
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
