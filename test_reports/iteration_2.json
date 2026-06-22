@@ -1,0 +1,65 @@
+{
+  "summary": "Livraison 1 backend+frontend tested against PROD https://smart-business-sigma.vercel.app. 17 backend tests run (8 pass, 7 fail, 2 skip). Frontend portfolio/catalog inspected. CRITICAL FINDING: Livraison 1 changes (categories CRUD PUT, portfolio status gagne/perdu/a_recontacter + lost_reason, opportunity agent_id persistence, agentName LEFT JOIN, nextMonthlyNumber, data-testid edit/delete-product, data-testid edit-portfolio) ARE PRESENT IN /app/api/index.ts + /app/src/pages/* source but ARE NOT DEPLOYED to Vercel production yet. All 7 backend failures and all frontend gaps trace to the same root cause: production runs PRE-Livraison-1 code.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "PUT /api/categories/:id", "issue": "Returns 404 'Cannot PUT /api/categories/:id' — route not deployed to prod (exists in /app/api/index.ts L369-378)", "priority": "CRITICAL"},
+      {"endpoint": "POST /api/categories", "issue": "Response missing 'created_by' field — column or RETURNING clause not deployed", "priority": "HIGH"},
+      {"endpoint": "GET /api/portfolio-items", "issue": "Response missing 'agentName' (LEFT JOIN users not deployed) AND missing 'lost_reason' column", "priority": "CRITICAL"},
+      {"endpoint": "POST /api/opportunities", "issue": "agentId/agent_id NOT persisted/returned (req.user.uid not bound) — agent filter useless without it", "priority": "CRITICAL"},
+      {"endpoint": "POST /api/quotes (number=null)", "issue": "500 'null value in column number of relation quotes violates not-null constraint' — nextMonthlyNumber fallback not deployed (helper exists in /app/api/index.ts L1098-1109)", "priority": "CRITICAL"}
+    ],
+    "minor": [
+      {"endpoint": "/api/admin/seed-demo", "issue": "Was required to recreate demo agents before testing; agents had been pruned from prod DB"},
+      {"endpoint": "POST /api/portfolio-items", "issue": "Status 'a_recontacter' accepted and stored (free text), but 'lost_reason' field also dropped silently — likely DB column missing"}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Portfolio status filter chips", "issue": "Only 4 statuses shown (Nouveau/En suivi/En cours/Terminé). Missing: Gagné, Perdu, À recontacter.", "selector": "Portfolio page filter bar", "priority": "CRITICAL"},
+      {"component": "Portfolio item form (Nouvel établissement)", "issue": "Status <select> only has 4 options (nouveau/suivi/en_cours/termine). Missing: gagne, perdu, a_recontacter. No 'Motif' (lost_reason) field at all.", "selector": "Modal form status select", "priority": "CRITICAL"},
+      {"component": "Catalog product cards", "issue": "No data-testid='edit-product-<id>' or 'delete-product-<id>' attributes on the pencil/trash icon buttons (required for E2E testing).", "selector": "Catalog product card action icons", "priority": "HIGH"},
+      {"component": "Portfolio item cards", "issue": "No data-testid='edit-portfolio-<id>' attribute on edit pencil buttons.", "selector": "Portfolio category detail page", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [
+      {"flow": "Portfolio create/edit with status='perdu'", "issue": "Cannot be tested via UI — UI has no 'perdu' option and no lost_reason field; backend also rejects lost_reason silently.", "affected_selectors": ["select[name=status]", "[name=lost_reason]"]},
+      {"flow": "Quote creation auto-numbering", "issue": "Frontend likely passes number=null; backend then 500s because nextMonthlyNumber not deployed."}
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_livraison1.py",
+    "/app/backend/tests/test_production_api.py",
+    "/app/test_reports/pytest/livraison1_results.xml"
+  ],
+  "action_items": [
+    "DEPLOY /app/api/index.ts + /app/src/pages/Portfolio.tsx + /app/src/pages/Catalog.tsx to Vercel — push to the branch wired to smart-business-sigma.vercel.app and confirm build succeeds.",
+    "Verify Postgres Neon schema has columns: categories.created_by (text/uuid), portfolio_items.lost_reason (text), portfolio_items.agent_id (already exists), opportunities.agent_id (already exists). Run schema migrations from ensureDbInitialized if not auto-applied.",
+    "Re-run `python -m pytest /app/backend/tests/test_livraison1.py -v` after deploy — expect 17/17 pass (or adjust monthly-number regex if format is DEV-YYYYMM-NNNN vs DEV-YYYY-MM-NNN).",
+    "Spec mismatch on quote numbering: review request says 'DEV-YYYYMM-NNNN' (8-digit yyyymm + 4-digit seq) but code in /app/api/index.ts L1098-1109 produces 'DEV-YYYY-MM-NNN' (3-digit seq with dash). Confirm with product the intended format and align.",
+    "Add data-testid='edit-product-<id>' and data-testid='delete-product-<id>' on the icon buttons in /app/src/pages/Catalog.tsx — they are missing in the deployed build and would block automated E2E.",
+    "Add data-testid='edit-portfolio-<id>' / 'delete-portfolio-<id>' on Portfolio item card action buttons."
+  ],
+  "critical_code_review_comments": [
+    "/app/api/index.ts L364: POST /api/categories uses ON CONFLICT (name) DO NOTHING — if name already exists, returns existing row WITHOUT updating created_by. OK but means tests creating duplicate names will silently return the original owner's row.",
+    "/app/api/index.ts L418: POST /api/portfolio-items always sets agent_id=req.user.uid (even for admin/superadmin) — admins creating portfolio items get them tagged as their own; review if intentional. Better: only set agent_id when role==='agent'.",
+    "/app/api/index.ts L420-442: PUT /api/portfolio-items uses partial-update merge with m(b.x, cur.x). When client sends lost_reason: null explicitly, the merge correctly keeps null. Good.",
+    "/app/api/index.ts L1098-1109: nextMonthlyNumber uses COUNT(*) for the month — race-prone under concurrent inserts on Vercel serverless (could produce duplicate numbers). Consider a Postgres SERIAL/sequence per (prefix, yyyymm) or a single transaction with SELECT FOR UPDATE on a counters table.",
+    "/app/api/index.ts L1098-1109: format is `${prefix}-${yyyy}-${mm}-${seq3}` (DEV-2026-02-001). Review request specifies `DEV-YYYYMM-NNNN` (DEV-202602-0001). Pick one and align tests + frontend display.",
+    "/app/api/index.ts L716-726: opportunities GET filter `o.agent_id = $1 OR c.agent_id = $1 OR l.agent_id = $1` — correctly isolates per-agent. Verified test_opportunity_not_visible_to_other_agent passes once agent_id is persisted on POST.",
+    "/app/api/index.ts L754-767: POST /api/opportunities INSERTs agent_id=req.user.uid — but production still returns agentId=null. Almost certainly the deployed build predates this fix.",
+    "Production cleanliness: 3 leftover TEST_CAT_* categories were found in prod DB and have been deleted. Future agent test runs should ALWAYS use teardown_class and a 'TEST_' prefix (we did)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_livraison1.py (new, 17 tests covering categories CRUD, portfolio statuses, opportunity isolation, products CRUD, quote monthly numbering)"
+  ],
+  "success_rate": {
+    "backend": "47% (8/17 pass, 7 fail, 2 skipped)",
+    "frontend": "20% (UI presents pre-Livraison-1 build: 4 statuses instead of 6, no lost_reason field, no edit/delete-product testids)"
+  },
+  "test_credentials": "Superadmin eden@tbi-center.fr / loub@ki2014D OK. Demo agents agent.brazza1@/agent.kinshasa1@smart-desk.pro / Demo2026! were MISSING and had to be re-seeded via POST /api/admin/seed-demo (superadmin).",
+  "seed_data_creation": "Called POST /api/admin/seed-demo once (recreated 5 agents + sample categories/portfolio/products/customers/leads/opps/quotes/invoices/activities/objectives/commissions/projects). Test resources (TEST_CAT_*, TEST_PROD_*, TEST_OPP_*, TEST_PF_*) created during tests have been cleaned up via post-test teardown + manual cleanup pass.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "After main agent deploys to Vercel (git push triggers auto-build), re-run `cd /app && python -m pytest backend/tests/test_livraison1.py -v` and expect 17/17 PASS. Existing baseline regression `backend/tests/test_production_api.py` (23 tests) should also still pass. If the chosen quote number format is DEV-YYYYMM-NNNN (per spec) rather than DEV-YYYY-MM-NNN (current code), update both /app/api/index.ts L1098 and the regex in test_livraison1.py::test_quote_created_without_number_gets_monthly_format. For frontend retest: Portfolio status filter chips should display 6 chips (Nouveau / Suivi / En cours / Gagné / Perdu / À recontacter / Terminé), the create/edit modal status <select> should have all 6 values, and a 'Motif' textarea should appear only when status='perdu'. Catalog product cards should expose data-testid='edit-product-<id>' and 'delete-product-<id>'.",
+  "rca of the issue": "ROOT CAUSE: production Vercel deployment is running a build that predates Livraison 1. Evidence: (a) PUT /api/categories/:id returns the Express default 404 HTML 'Cannot PUT' (route literally absent); (b) GET /api/portfolio-items response has no agentName/lost_reason keys (LEFT JOIN + new column unmapped); (c) POST /api/opportunities returns agentId:null (INSERT not yet binding req.user.uid); (d) POST /api/quotes with number=null hits the Postgres NOT NULL constraint (nextMonthlyNumber fallback absent); (e) the Portfolio frontend renders only the 4 legacy statuses and no lost_reason field. The fix is purely operational: trigger a Vercel deploy from the branch containing /app/api/index.ts (Livraison 1) and re-run the regression suite. No code change required from the testing side. Mitigation/workaround: none — features are unusable in production until redeploy."
+}
