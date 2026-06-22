@@ -2601,6 +2601,10 @@ app.get("/api/agent/payments", authenticateToken, async (req: any, res) => {
         q.payment_amount, q.payment_currency, q.subscription_id,
         c.name AS customer_name, c.email AS customer_email, c.company_name AS customer_company,
         u.name AS agent_name,
+        (SELECT STRING_AGG(COALESCE(p.name, qi.description, '—'), ', ' ORDER BY qi.id)
+          FROM quote_items qi LEFT JOIN products p ON qi.product_id = p.id
+          WHERE qi.quote_id = q.id) AS product_names,
+        (SELECT COUNT(*) FROM quote_items qi WHERE qi.quote_id = q.id) AS items_count,
         (SELECT COUNT(*) FROM quote_items qi LEFT JOIN products p ON qi.product_id = p.id
           WHERE qi.quote_id = q.id AND LOWER(COALESCE(p.name, qi.description, '')) LIKE '%smartdesk%') > 0 AS has_smartdesk,
         (SELECT MAX(d.created_at) FROM documents d WHERE d.quote_id = q.id AND d.tag = 'smartdesk_provisioned') AS smartdesk_provisioned_at,

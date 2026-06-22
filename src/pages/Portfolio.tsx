@@ -11,6 +11,15 @@ interface Category {
   id: number;
   name: string;
   created_at: string;
+  created_by?: string;
+  createdByName?: string;
+}
+
+interface AgentOption {
+  uid: string;
+  name: string;
+  email: string;
+  role: string;
 }
 
 interface PortfolioItem {
@@ -66,6 +75,7 @@ function StatusBadge({ status }: { status?: string }) {
 export default function Portfolio() {
   const navigate = useNavigate();
   const { profile } = useAuth();
+  const isAdmin = profile?.role === 'admin' || profile?.role === 'superadmin';
   const zoneCfg = getZoneConfig(profile?.zone);
   const [expandedComments, setExpandedComments] = useState<number | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -77,6 +87,8 @@ export default function Portfolio() {
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
+  const [agentFilter, setAgentFilter] = useState<string>('all'); // admin only
+  const [agents, setAgents] = useState<AgentOption[]>([]);
   const [isAddingCategory, setIsAddingCategory] = useState(false);
   const [isAddingItem, setIsAddingItem] = useState(false);
   const [editingItemId, setEditingItemId] = useState<number | null>(null);
@@ -103,12 +115,21 @@ export default function Portfolio() {
   }, []);
 
   useEffect(() => {
+    if (isAdmin) {
+      fetch('/api/users')
+        .then(r => r.ok ? r.json() : [])
+        .then((users: any[]) => setAgents(users.filter(u => u.role === 'agent' || u.role === 'admin' || u.role === 'superadmin')))
+        .catch(() => {});
+    }
+  }, [isAdmin]);
+
+  useEffect(() => {
     if (selectedCategory) {
       fetchItems(selectedCategory.id);
     } else if (viewAll) {
       fetchAllItems();
     }
-  }, [selectedCategory, viewAll]);
+  }, [selectedCategory, viewAll, agentFilter]);
 
   const fetchCategories = async () => {
     try {
@@ -124,10 +145,12 @@ export default function Portfolio() {
     }
   };
 
+  const buildAgentParam = () => (isAdmin && agentFilter !== 'all') ? `?userId=${encodeURIComponent(agentFilter)}` : '';
+
   const fetchItems = async (categoryId: number) => {
     try {
       setLoading(true);
-      const response = await fetch(`/api/categories/${categoryId}/items`);
+      const response = await fetch(`/api/categories/${categoryId}/items${buildAgentParam()}`);
       if (!response.ok) throw new Error('Erreur lors du chargement des éléments');
       const data = await response.json();
       setItems(data);
@@ -141,7 +164,7 @@ export default function Portfolio() {
   const fetchAllItems = async () => {
     try {
       setLoading(true);
-      const response = await fetch('/api/portfolio-items');
+      const response = await fetch(`/api/portfolio-items${buildAgentParam()}`);
       if (!response.ok) throw new Error('Erreur lors du chargement des éléments');
       const data = await response.json();
       setItems(data);
@@ -210,6 +233,7 @@ export default function Portfolio() {
         web: '',
         niu: '',
         status: 'nouveau',
+        lost_reason: '',
       });
       setSelectedCategoryForAdd(null);
       setIsAddingItem(false);
@@ -412,6 +436,22 @@ export default function Portfolio() {
             className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
           />
         </div>
+        {isAdmin && (
+          <select
+            data-testid="admin-agent-filter"
+            value={agentFilter}
+            onChange={(e) => setAgentFilter(e.target.value)}
+            className="bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            title="Filtrer par utilisateur (admin uniquement)"
+          >
+            <option value="all">👥 Tous les utilisateurs</option>
+            {agents.map(a => (
+              <option key={a.uid} value={a.uid}>
+                {a.role === 'agent' ? '🧑‍💼' : '👑'} {a.name} ({a.email})
+              </option>
+            ))}
+          </select>
+        )}
         {(selectedCategory || viewAll) && (
           <div className="flex bg-white border border-slate-200 rounded-lg p-1 shrink-0">
             <button
@@ -693,6 +733,11 @@ export default function Portfolio() {
                   <p className="text-xs text-slate-500 mt-1">
                     Secteur d'activité
                   </p>
+                  {isAdmin && category.createdByName && (
+                    <p className="text-[10px] text-indigo-600 mt-1 truncate" title={`Créé par ${category.createdByName}`} data-testid={`category-author-${category.id}`}>
+                      <span className="text-slate-400">Créé par</span> {category.createdByName}
+                    </p>
+                  )}
                 </div>
               </div>
             </div>
@@ -808,6 +853,11 @@ export default function Portfolio() {
                               <span className="inline-block mt-1 px-2 py-0.5 bg-slate-100 text-slate-600 text-[10px] font-bold rounded uppercase tracking-wider">
                                 {item.sub_type}
                               </span>
+                            )}
+                            {isAdmin && item.agentName && (
+                              <div className="mt-1 text-[10px] text-indigo-600" data-testid={`portfolio-agent-${item.id}`}>
+                                <span className="text-slate-400">Agent :</span> {item.agentName}
+                              </div>
                             )}
                           </div>
                         </div>

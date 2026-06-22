@@ -34,6 +34,8 @@ type Payment = {
   customer_name?: string;
   customer_email?: string;
   customer_company?: string;
+  product_names?: string | null;
+  items_count?: number;
   has_smartdesk: boolean;
   smartdesk_provisioned_at?: string | null;
   commission_amount?: number | null;
@@ -101,6 +103,7 @@ export default function AgentPayments() {
       p.number?.toLowerCase().includes(s) ||
       p.customer_name?.toLowerCase().includes(s) ||
       p.customer_email?.toLowerCase().includes(s) ||
+      p.product_names?.toLowerCase().includes(s) ||
       p.agent_name?.toLowerCase().includes(s)
     );
   });
@@ -235,7 +238,7 @@ export default function AgentPayments() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
           <input
             type="text"
-            placeholder="Rechercher par devis, client, agent…"
+            placeholder="Rechercher par devis, client, produit, agent…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             data-testid="search-payments-input"
@@ -251,12 +254,13 @@ export default function AgentPayments() {
             <thead className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200">
               <tr>
                 <th className="px-4 py-3">Devis</th>
+                <th className="px-4 py-3">Date paiement</th>
+                <th className="px-4 py-3">Produit / Service</th>
                 <th className="px-4 py-3">Client</th>
                 {isAdmin && <th className="px-4 py-3">Agent</th>}
                 <th className="px-4 py-3 text-right">Montant payé</th>
                 <th className="px-4 py-3">Commission</th>
                 <th className="px-4 py-3">SmartDesk</th>
-                <th className="px-4 py-3">Payé le</th>
                 <th className="px-4 py-3"></th>
               </tr>
             </thead>
@@ -272,6 +276,24 @@ export default function AgentPayments() {
                         <>One-time · Réf. {p.payment_id?.substring(0, 14)}…</>
                       )}
                     </div>
+                  </td>
+                  <td className="px-4 py-3 text-slate-700 text-xs whitespace-nowrap" data-testid={`payment-date-${p.id}`}>
+                    {p.payment_date ? format(new Date(p.payment_date), 'dd MMM yyyy', { locale: fr }) : '—'}
+                    <div className="text-[10px] text-slate-400">
+                      {p.payment_date ? format(new Date(p.payment_date), 'HH:mm', { locale: fr }) : ''}
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 text-slate-700 max-w-[260px]" data-testid={`payment-product-${p.id}`}>
+                    {p.product_names ? (
+                      <div className="text-sm font-medium text-slate-800 truncate" title={p.product_names}>
+                        {p.product_names}
+                      </div>
+                    ) : (
+                      <span className="text-xs text-slate-400 italic">—</span>
+                    )}
+                    {p.items_count && p.items_count > 1 && (
+                      <div className="text-[10px] text-slate-400 mt-0.5">{p.items_count} lignes</div>
+                    )}
                   </td>
                   <td className="px-4 py-3">
                     <div className="font-medium text-slate-900">{p.customer_company || p.customer_name || '—'}</div>
@@ -304,9 +326,6 @@ export default function AgentPayments() {
                       )}
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-slate-500 text-xs">
-                    {p.payment_date ? format(new Date(p.payment_date), 'dd MMM yyyy HH:mm', { locale: fr }) : '—'}
-                  </td>
                   <td className="px-4 py-3">
                     <a
                       href={`/public/quotes/${p.id}`}
@@ -323,7 +342,7 @@ export default function AgentPayments() {
               ))}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={isAdmin ? 8 : 7} className="px-6 py-12 text-center text-slate-400 italic">
+                  <td colSpan={isAdmin ? 9 : 8} className="px-6 py-12 text-center text-slate-400 italic">
                     {search ? 'Aucun paiement ne correspond à votre recherche.' : 'Aucun devis payé pour le moment.'}
                   </td>
                 </tr>
