@@ -4,7 +4,6 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import cookieParser from "cookie-parser";
 import nodemailer from "nodemailer";
-import { attachAgentRoutes } from "../lib/agents/routes";
 
 const JWT_SECRET = process.env.JWT_SECRET || "smart-business-secret-key";
 
@@ -2627,31 +2626,11 @@ app.get("/api/agent/payments", authenticateToken, async (req: any, res) => {
 });
 
 // =====================================================================
-// AI AGENTS (TBI Technology team) — Superadmin only
+// AI AGENTS routes are handled by a SEPARATE serverless function:
+//   /app/api/agents.ts (rewrite in vercel.json)
+// This isolates the Anthropic SDK + AI-agent code from the main API so
+// any agent-module failure cannot bring down login/CRM/payments.
 // =====================================================================
-const requireSuperadmin = (req: any, res: any, next: any) => {
-  const token = req.cookies?.token;
-  if (!token) return res.status(401).json({ error: "Unauthorized" });
-  jwt.verify(token, JWT_SECRET, (err: any, user: any) => {
-    if (err) return res.status(403).json({ error: "Forbidden" });
-    if (user.role !== 'superadmin') return res.status(403).json({ error: "Superadmin requis" });
-    req.user = user;
-    next();
-  });
-};
-
-if (true) {
-  try {
-    attachAgentRoutes(app, requireSuperadmin);
-    console.log("[agents] routes attached");
-  } catch (err: any) {
-    const msg = err?.message || String(err);
-    console.error("[agents] attach error:", msg);
-    app.use("/api/agents", (_req, res) => {
-      res.status(503).json({ error: "Module agents IA indisponible", detail: msg });
-    });
-  }
-}
 
 // Global error handler
 app.use((err: any, req: any, res: any, next: any) => {
