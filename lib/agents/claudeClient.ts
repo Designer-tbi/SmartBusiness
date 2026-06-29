@@ -1,31 +1,37 @@
-// claudeClient.ts — Shared Claude (Anthropic) client for all AI agents.
-// IMPORTANT: the @anthropic-ai/sdk import is LAZY (inside `client()`).
-// This way, importing this file at startup never touches the SDK — if the SDK
-// or its native deps fail to load on Vercel, the rest of the agents module
-// still loads and the rest of the API stays up. Only actual agent execution
-// would surface the SDK error.
+// claudeClient.ts — Direct REST client to Anthropic Messages API.
+// No @anthropic-ai/sdk dependency → zero bundling/CJS interop issues on Vercel.
+// Uses native fetch (Node 18+).
 
 const MODEL = process.env.CLAUDE_MODEL || "claude-sonnet-4-6";
 const MAX_TOKENS = parseInt(process.env.CLAUDE_MAX_TOKENS || "4096", 10);
+const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
+const ANTHROPIC_VERSION = "2023-06-01";
 
-let _client: any = null;
-async function client(): Promise<any> {
+type UserMessage = { role: "user" | "assistant"; content: string };
+
+function toMessages(userMsg: string | UserMessage[]): UserMessage[] {
+  return Array.isArray(userMsg) ? userMsg : [{ role: "user", content: userMsg }];
+}
+
+async function callAnthropic(body: any): Promise<any> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     throw new Error("ANTHROPIC_API_KEY is missing. Set it in Vercel Environment Variables.");
   }
-  if (!_client) {
-    // Dynamic import keeps the SDK off the function-startup critical path.
-    const mod: any = await import("@anthropic-ai/sdk");
-    const Anthropic = mod.default || mod.Anthropic || mod;
-    _client = new Anthropic({ apiKey });
+  const resp = await fetch(ANTHROPIC_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": ANTHROPIC_VERSION,
+    },
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok) {
+    const errText = await resp.text().catch(() => "");
+    throw new Error(`Anthropic API ${resp.status}: ${errText.substring(0, 500)}`);
   }
-  return _client;
-}
-
-type UserMessage = { role: "user" | "assistant"; content: string };
-function toMessages(userMsg: string | UserMessage[]): UserMessage[] {
-  return Array.isArray(userMsg) ? userMsg : [{ role: "user", content: userMsg }];
+  return resp.json();
 }
 
 export async function askClaude(
@@ -33,15 +39,14 @@ export async function askClaude(
   userMsg: string | UserMessage[],
   options: Record<string, unknown> = {}
 ): Promise<string> {
-  const c = await client();
-  const resp = await c.messages.create({
+  const resp = await callAnthropic({
     model: MODEL,
     max_tokens: MAX_TOKENS,
     system: systemPrompt,
     messages: toMessages(userMsg),
     ...options,
   });
-  const block = resp.content[0];
+  const block = resp.content?.[0];
   return block && block.type === "text" ? block.text : "";
 }
 
@@ -49,15 +54,14 @@ export async function askClaudeWithSearch(
   systemPrompt: string,
   userMsg: string | UserMessage[]
 ): Promise<string> {
-  const c = await client();
-  const resp = await c.messages.create({
+  const resp = await callAnthropic({
     model: MODEL,
     max_tokens: MAX_TOKENS,
     system: systemPrompt,
     messages: toMessages(userMsg),
-    tools: [{ type: "web_search_20250305", name: "web_search" } as any],
+    tools: [{ type: "web_search_20250305", name: "web_search" }],
   });
-  return resp.content
+  return (resp.content || [])
     .filter((b: any) => b.type === "text")
     .map((b: any) => b.text)
     .join("\n");
