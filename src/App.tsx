@@ -32,6 +32,7 @@ import SuperAdminDashboard from './pages/SuperAdminDashboard';
 import UserActivity from './pages/UserActivity';
 import AgentPayments from './pages/AgentPayments';
 import Strategies from './pages/Strategies';
+import AITeam from './pages/AITeam';
 import Layout from './components/Layout';
 
 const ProtectedRoute = ({ children, requiredRole }: { children: React.ReactNode, requiredRole?: 'admin' | 'agent' | 'superadmin' }) => {
@@ -90,6 +91,7 @@ export default function App() {
             <Route path="documents" element={<Documents />} />
             <Route path="sessions" element={<ProtectedRoute requiredRole="admin"><Sessions /></ProtectedRoute>} />
             <Route path="super-admin" element={<ProtectedRoute requiredRole="superadmin"><SuperAdminDashboard /></ProtectedRoute>} />
+            <Route path="ai-team" element={<ProtectedRoute requiredRole="superadmin"><AITeam /></ProtectedRoute>} />
             <Route path="user-activity" element={<ProtectedRoute requiredRole="admin"><UserActivity /></ProtectedRoute>} />
             <Route path="sales-analysis" element={<SalesAnalysis />} />
           </Route>

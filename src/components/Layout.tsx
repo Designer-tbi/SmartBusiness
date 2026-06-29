@@ -27,7 +27,8 @@ import {
   ChevronDown,
   ChevronRight,
   Monitor,
-  CreditCard
+  CreditCard,
+  Sparkles
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 
@@ -123,6 +124,15 @@ export default function Layout() {
         { name: 'Super Admin', href: '/super-admin', icon: Settings },
       ]
     });
+    // Super-admin only: AI Team
+    if (profile?.role === 'superadmin') {
+      navItems.push({
+        name: 'Équipe IA',
+        href: '/ai-team',
+        icon: Sparkles,
+        highlight: true,
+      } as any);
+    }
   } else {
     // Commerciaux : lecture seule
     navItems.push({

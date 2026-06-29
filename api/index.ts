@@ -4,6 +4,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import cookieParser from "cookie-parser";
 import nodemailer from "nodemailer";
+import { attachAgentRoutes } from "../lib/agents/routes";
 
 const JWT_SECRET = process.env.JWT_SECRET || "smart-business-secret-key";
 
@@ -2624,6 +2625,21 @@ app.get("/api/agent/payments", authenticateToken, async (req: any, res) => {
     res.status(500).json({ error: err.message || 'Server error' });
   }
 });
+
+// =====================================================================
+// AI AGENTS (TBI Technology team) — Superadmin only
+// =====================================================================
+const requireSuperadmin = (req: any, res: any, next: any) => {
+  const token = req.cookies?.token;
+  if (!token) return res.status(401).json({ error: "Unauthorized" });
+  jwt.verify(token, JWT_SECRET, (err: any, user: any) => {
+    if (err) return res.status(403).json({ error: "Forbidden" });
+    if (user.role !== 'superadmin') return res.status(403).json({ error: "Superadmin requis" });
+    req.user = user;
+    next();
+  });
+};
+attachAgentRoutes(app, requireSuperadmin);
 
 // Global error handler
 app.use((err: any, req: any, res: any, next: any) => {

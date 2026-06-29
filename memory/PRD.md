@@ -65,11 +65,25 @@ French (fr-FR)
 - ✅ Fix PayPal 401 silent error (PAYPAL_MODE=live alignment + verbose errors + enableFunding:card)
 - ✅ **New page "Mes Paiements"** (`/payments`) — agent view of paid quotes + commissions + SmartDesk status with 20s polling
 - ✅ **Refactor `api/index.ts`**: 2192 → 1679 lines, extracted 6 helper modules (db, auth, mailer, automation, paypal, smartdesk). Pure refactor, 23/23 production tests pass.
+- ✅ **Livraison 1** (28 fév): Catégories CRUD (PUT/DELETE), Portfolio statuts gagne/perdu/à_recontacter + champ lost_reason, Catalogue Edit/Delete produits, opportunités persistent agent_id, nextMonthlyNumber DEV-YYYY-MM-NNN. ⚠️ Code en place, déploiement Vercel en attente (Save to GitHub).
+- ✅ **Livraison 2** (28 fév): Page Paiements enrichie (colonne Produit/Service + Date en 2e position, recherche par produit), Portfolio admin filter par utilisateur (dropdown Tous les utilisateurs), Catégories avec créateur affiché ("Créé par X"), établissements avec agent affiché ("Agent: X"). Bug totaux concaténés corrigé dans Opportunities.tsx + Tracking.tsx (Number() wrap).
+- ✅ **Équipe IA TBI Technology** (28 fév) — Super Admin uniquement
+  - 13 agents IA hiérarchisés : Eden (CEO) → Timothy/Flore/Paul (Directors) → 9 sous-agents
+  - Claude Sonnet 4.6 via clé Anthropic utilisateur (ANTHROPIC_API_KEY)
+  - 30+ endpoints `/api/agents/*` (superadmin guard)
+  - Page `/ai-team` avec org chart interactif, panneau d'action par agent, historique runs IA
+  - Table `agent_runs` (logs durée, statut, input, output, errors)
+  - LinkedIn par agent (mode simulation par défaut, real API si token OAuth présent)
+  - Adapter `internalCRM.ts` (direct DB calls, remplace l'HTTP adapter du prototype original)
 
 ## Backlog / Roadmap
 
 ### P1
 - Stats de conversion: tunnel Devis envoyés → signés → payés
+- Modaliser tous les formulaires restants en popup (Leads, Opportunités, Clients, Devis…)
+- Vérification temporelle de la remise à 0 mensuelle des numérotations devis/factures
+- Filtre admin Catégories : extension à toutes les autres entités (Opportunités, Clients, Devis)
+- 13 tokens LinkedIn OAuth (1 par agent IA) pour passer du mode simulation à l'API réelle
 
 ### P2
 - Badge visuel statut provisioning SmartDesk sur page Devis admin
@@ -99,6 +113,10 @@ French (fr-FR)
 - `EXTERNAL_API_KEY` (SmartDesk)
 - `SMARTDESK_API_URL` (SmartDesk)
 - `SMTP_FROM` (optional, default demo@smart-desk.pro)
+- `ANTHROPIC_API_KEY` ⚡ — clé Claude Sonnet 4.6 pour les 13 agents IA (Super Admin)
+- `CLAUDE_MODEL` (default: claude-sonnet-4-6)
+- `CLAUDE_MAX_TOKENS` (default: 4096)
+- `LINKEDIN_TOKEN_<AGENT_UC>` + `LINKEDIN_MEMBER_ID_<AGENT_UC>` (optionnel — sinon mode simulation)
 
 ## Test credentials
 See `/app/memory/test_credentials.md`
