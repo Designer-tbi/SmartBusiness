@@ -1,33 +1,40 @@
 // claudeClient.ts — Shared Claude (Anthropic) client for all AI agents.
-// Uses the user-provided ANTHROPIC_API_KEY from .env (Vercel env vars).
-import Anthropic from "@anthropic-ai/sdk";
+// IMPORTANT: the @anthropic-ai/sdk import is LAZY (inside `client()`).
+// This way, importing this file at startup never touches the SDK — if the SDK
+// or its native deps fail to load on Vercel, the rest of the agents module
+// still loads and the rest of the API stays up. Only actual agent execution
+// would surface the SDK error.
 
-const apiKey = process.env.ANTHROPIC_API_KEY;
 const MODEL = process.env.CLAUDE_MODEL || "claude-sonnet-4-6";
 const MAX_TOKENS = parseInt(process.env.CLAUDE_MAX_TOKENS || "4096", 10);
 
-let _client: Anthropic | null = null;
-function client(): Anthropic {
+let _client: any = null;
+async function client(): Promise<any> {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     throw new Error("ANTHROPIC_API_KEY is missing. Set it in Vercel Environment Variables.");
   }
-  if (!_client) _client = new Anthropic({ apiKey });
+  if (!_client) {
+    // Dynamic import keeps the SDK off the function-startup critical path.
+    const mod: any = await import("@anthropic-ai/sdk");
+    const Anthropic = mod.default || mod.Anthropic || mod;
+    _client = new Anthropic({ apiKey });
+  }
   return _client;
 }
 
 type UserMessage = { role: "user" | "assistant"; content: string };
-
 function toMessages(userMsg: string | UserMessage[]): UserMessage[] {
   return Array.isArray(userMsg) ? userMsg : [{ role: "user", content: userMsg }];
 }
 
-/** Standard Claude call returning the first text block. */
 export async function askClaude(
   systemPrompt: string,
   userMsg: string | UserMessage[],
   options: Record<string, unknown> = {}
 ): Promise<string> {
-  const resp = await client().messages.create({
+  const c = await client();
+  const resp = await c.messages.create({
     model: MODEL,
     max_tokens: MAX_TOKENS,
     system: systemPrompt,
@@ -38,12 +45,12 @@ export async function askClaude(
   return block && block.type === "text" ? block.text : "";
 }
 
-/** Claude with web_search tool enabled (concatenates all text blocks). */
 export async function askClaudeWithSearch(
   systemPrompt: string,
   userMsg: string | UserMessage[]
 ): Promise<string> {
-  const resp = await client().messages.create({
+  const c = await client();
+  const resp = await c.messages.create({
     model: MODEL,
     max_tokens: MAX_TOKENS,
     system: systemPrompt,
@@ -56,7 +63,6 @@ export async function askClaudeWithSearch(
     .join("\n");
 }
 
-/** Claude returning structured JSON. Strips markdown fences and parses. */
 export async function askClaudeJSON<T = any>(
   systemPrompt: string,
   userMsg: string | UserMessage[]
@@ -72,4 +78,4 @@ export async function askClaudeJSON<T = any>(
   }
 }
 
-export const CLAUDE_INFO = { model: MODEL, max_tokens: MAX_TOKENS, configured: !!apiKey };
+export const CLAUDE_INFO = { model: MODEL, max_tokens: MAX_TOKENS, configured: !!process.env.ANTHROPIC_API_KEY };

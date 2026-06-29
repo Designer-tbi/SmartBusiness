@@ -4,19 +4,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import cookieParser from "cookie-parser";
 import nodemailer from "nodemailer";
-
-// AI agents are loaded best-effort. If their module throws at load (e.g. missing
-// dep on Vercel), the rest of the API must keep working. Top-level await is OK
-// because tsconfig module=ESNext.
-let _attachAgentRoutes: ((app: any, guard: any) => void) | null = null;
-let _agentsLoadError: string | null = null;
-try {
-  const mod = await import("../lib/agents/routes");
-  _attachAgentRoutes = mod.attachAgentRoutes;
-} catch (err: any) {
-  _agentsLoadError = err?.message || String(err);
-  console.error("[agents] failed to load:", _agentsLoadError);
-}
+import { attachAgentRoutes } from "../lib/agents/routes";
 
 const JWT_SECRET = process.env.JWT_SECRET || "smart-business-secret-key";
 
@@ -2652,19 +2640,17 @@ const requireSuperadmin = (req: any, res: any, next: any) => {
   });
 };
 
-if (_attachAgentRoutes) {
+if (true) {
   try {
-    _attachAgentRoutes(app, requireSuperadmin);
+    attachAgentRoutes(app, requireSuperadmin);
     console.log("[agents] routes attached");
   } catch (err: any) {
-    _agentsLoadError = err?.message || String(err);
-    console.error("[agents] attach error:", _agentsLoadError);
+    const msg = err?.message || String(err);
+    console.error("[agents] attach error:", msg);
+    app.use("/api/agents", (_req, res) => {
+      res.status(503).json({ error: "Module agents IA indisponible", detail: msg });
+    });
   }
-}
-if (!_attachAgentRoutes || _agentsLoadError) {
-  app.use("/api/agents", (_req, res) => {
-    res.status(503).json({ error: "Module agents IA indisponible", detail: _agentsLoadError || "module not loaded" });
-  });
 }
 
 // Global error handler
