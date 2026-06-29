@@ -4,6 +4,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import cookieParser from "cookie-parser";
 import nodemailer from "nodemailer";
+import { attachAgentRoutes } from "../lib/agents/routes";
 
 const JWT_SECRET = process.env.JWT_SECRET || "smart-business-secret-key";
 
@@ -2639,26 +2640,17 @@ const requireSuperadmin = (req: any, res: any, next: any) => {
   });
 };
 
-// Lazy + defensive: load the AI agents module ONLY when first /api/agents/* request hits.
-// This way, any bundle/load failure of @anthropic-ai/sdk or related modules cannot
-// break the rest of the API (login, CRM, etc.).
-let agentsLoaded = false;
-let agentsLoadError: string | null = null;
-app.use("/api/agents", async (req, res, next) => {
-  if (agentsLoaded) return next();
-  if (agentsLoadError) return res.status(503).json({ error: "Module agents IA indisponible", detail: agentsLoadError });
-  try {
-    const mod = await import("../lib/agents/routes");
-    mod.attachAgentRoutes(app, requireSuperadmin);
-    agentsLoaded = true;
-    console.log("[agents] routes attached on first request");
-    next();
-  } catch (err: any) {
-    agentsLoadError = err?.message || String(err);
-    console.error("[agents] failed to load:", agentsLoadError);
-    res.status(503).json({ error: "Module agents IA indisponible", detail: agentsLoadError });
-  }
-});
+// Static import forces Vercel/esbuild to bundle /lib/agents/* into the function.
+// Safety net: catch any unexpected initialisation error so login still works.
+try {
+  attachAgentRoutes(app, requireSuperadmin);
+  console.log("[agents] routes attached");
+} catch (err: any) {
+  console.error("[agents] failed to attach routes:", err?.message || err);
+  app.use("/api/agents", (_req, res) => {
+    res.status(503).json({ error: "Module agents IA indisponible", detail: err?.message || String(err) });
+  });
+}
 
 // Global error handler
 app.use((err: any, req: any, res: any, next: any) => {
