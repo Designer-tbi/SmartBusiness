@@ -4,7 +4,19 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import cookieParser from "cookie-parser";
 import nodemailer from "nodemailer";
-import { attachAgentRoutes } from "../lib/agents/routes";
+
+// AI agents are loaded best-effort. If their module throws at load (e.g. missing
+// dep on Vercel), the rest of the API must keep working. Top-level await is OK
+// because tsconfig module=ESNext.
+let _attachAgentRoutes: ((app: any, guard: any) => void) | null = null;
+let _agentsLoadError: string | null = null;
+try {
+  const mod = await import("../lib/agents/routes");
+  _attachAgentRoutes = mod.attachAgentRoutes;
+} catch (err: any) {
+  _agentsLoadError = err?.message || String(err);
+  console.error("[agents] failed to load:", _agentsLoadError);
+}
 
 const JWT_SECRET = process.env.JWT_SECRET || "smart-business-secret-key";
 
@@ -2640,15 +2652,18 @@ const requireSuperadmin = (req: any, res: any, next: any) => {
   });
 };
 
-// Static import forces Vercel/esbuild to bundle /lib/agents/* into the function.
-// Safety net: catch any unexpected initialisation error so login still works.
-try {
-  attachAgentRoutes(app, requireSuperadmin);
-  console.log("[agents] routes attached");
-} catch (err: any) {
-  console.error("[agents] failed to attach routes:", err?.message || err);
+if (_attachAgentRoutes) {
+  try {
+    _attachAgentRoutes(app, requireSuperadmin);
+    console.log("[agents] routes attached");
+  } catch (err: any) {
+    _agentsLoadError = err?.message || String(err);
+    console.error("[agents] attach error:", _agentsLoadError);
+  }
+}
+if (!_attachAgentRoutes || _agentsLoadError) {
   app.use("/api/agents", (_req, res) => {
-    res.status(503).json({ error: "Module agents IA indisponible", detail: err?.message || String(err) });
+    res.status(503).json({ error: "Module agents IA indisponible", detail: _agentsLoadError || "module not loaded" });
   });
 }
 
