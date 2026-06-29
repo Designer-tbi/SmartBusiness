@@ -4,7 +4,7 @@
 import express from "express";
 import cookieParser from "cookie-parser";
 import jwt from "jsonwebtoken";
-import { attachAgentRoutes } from "../lib/agents/routes";
+import { attachAgentRoutes } from "./agentslib/routes";
 
 const JWT_SECRET = process.env.JWT_SECRET || "smart-business-secret-key";
 
