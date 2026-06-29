@@ -4,7 +4,6 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import cookieParser from "cookie-parser";
 import nodemailer from "nodemailer";
-import { attachAgentRoutes } from "../lib/agents/routes";
 
 const JWT_SECRET = process.env.JWT_SECRET || "smart-business-secret-key";
 
@@ -2639,7 +2638,27 @@ const requireSuperadmin = (req: any, res: any, next: any) => {
     next();
   });
 };
-attachAgentRoutes(app, requireSuperadmin);
+
+// Lazy + defensive: load the AI agents module ONLY when first /api/agents/* request hits.
+// This way, any bundle/load failure of @anthropic-ai/sdk or related modules cannot
+// break the rest of the API (login, CRM, etc.).
+let agentsLoaded = false;
+let agentsLoadError: string | null = null;
+app.use("/api/agents", async (req, res, next) => {
+  if (agentsLoaded) return next();
+  if (agentsLoadError) return res.status(503).json({ error: "Module agents IA indisponible", detail: agentsLoadError });
+  try {
+    const mod = await import("../lib/agents/routes");
+    mod.attachAgentRoutes(app, requireSuperadmin);
+    agentsLoaded = true;
+    console.log("[agents] routes attached on first request");
+    next();
+  } catch (err: any) {
+    agentsLoadError = err?.message || String(err);
+    console.error("[agents] failed to load:", agentsLoadError);
+    res.status(503).json({ error: "Module agents IA indisponible", detail: agentsLoadError });
+  }
+});
 
 // Global error handler
 app.use((err: any, req: any, res: any, next: any) => {
