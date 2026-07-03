@@ -248,6 +248,32 @@ async function ensureDbInitialized() {
         await query("INSERT INTO system_flags (flag_key, value) VALUES ('cleanup_corrupted_documents_v1', $1)", [`${ids.length} deleted`]);
       }
     } catch (cleanupErr) { console.error("[Cleanup] error:", cleanupErr); }
+
+    // ─── One-time seed: AI Agents platform users (Timothy MAYAKISSA, Alex Robert) ───
+    try {
+      const seedCheck = await query("SELECT 1 FROM system_flags WHERE flag_key = 'seed_ai_agent_users_v1'");
+      if (seedCheck.rows.length === 0) {
+        const agentUsers = [
+          { email: "timothy@tbi-center.fr", password: "@g£ntTimothy", name: "Timothy MAYAKISSA", role: "agent", zone: "CG" },
+          { email: "alex@tbi-center.fr",     password: "@l£xagent",   name: "Alex Robert",        role: "agent", zone: "CG" },
+        ];
+        for (const u of agentUsers) {
+          const exists = await query("SELECT uid FROM users WHERE email=$1", [u.email]);
+          if (exists.rows.length === 0) {
+            const hashed = await bcrypt.hash(u.password, 10);
+            await query("INSERT INTO users (uid, email, password, name, role, zone, created_at) VALUES ($1,$2,$3,$4,$5,$6,CURRENT_TIMESTAMP)",
+              [`u_${Math.random().toString(36).slice(2, 12)}`, u.email, hashed, u.name, u.role, u.zone]);
+            console.log(`[Seed AI agents] created user ${u.email}`);
+          } else {
+            // Update password to make sure it matches the current spec
+            const hashed = await bcrypt.hash(u.password, 10);
+            await query("UPDATE users SET password=$1, name=$2, role=$3, zone=$4 WHERE email=$5", [hashed, u.name, u.role, u.zone, u.email]);
+            console.log(`[Seed AI agents] updated user ${u.email}`);
+          }
+        }
+        await query("INSERT INTO system_flags (flag_key, value) VALUES ('seed_ai_agent_users_v1', $1)", ["ok"]);
+      }
+    } catch (seedErr) { console.error("[Seed AI agents] error:", seedErr); }
   } catch (err) {
     console.error("DB init error:", err);
   }

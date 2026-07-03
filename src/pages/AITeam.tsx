@@ -57,6 +57,7 @@ export default function AITeam() {
   const [runs, setRuns] = useState<RunRow[]>([]);
   const [showRuns, setShowRuns] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [linkedinStatus, setLinkedinStatus] = useState<Record<string, { connected: boolean; has_credentials?: boolean; member_id?: string }>>({});
 
   useEffect(() => {
     (async () => {
@@ -69,6 +70,8 @@ export default function AITeam() {
         const data = await r.json();
         setAgents(data.agents || []);
         setClaudeInfo(data.claude || {});
+        // Fetch LinkedIn status (non-blocking)
+        fetch('/api/agents/linkedin/status').then(r => r.ok ? r.json() : null).then(s => { if (s?.agents) setLinkedinStatus(s.agents); }).catch(() => {});
       } catch (e: any) {
         setError(e.message);
       } finally {
@@ -156,7 +159,7 @@ export default function AITeam() {
 
       {/* Agent panel */}
       {selectedAgent && (
-        <AgentPanel agent={selectedAgent} onClose={() => setSelectedAgent(null)} onRefresh={fetchRuns} />
+        <AgentPanel agent={selectedAgent} onClose={() => setSelectedAgent(null)} onRefresh={fetchRuns} linkedinStatus={linkedinStatus[selectedAgent.id]} />
       )}
 
       {/* Runs panel */}
@@ -203,7 +206,7 @@ function AgentCard({ agent, onClick, isCeo, isDirector, compact }: { agent: Agen
 }
 
 // ─────────────────────────────────────────────────────────────────────
-function AgentPanel({ agent, onClose, onRefresh }: { agent: AgentMeta; onClose: () => void; onRefresh: () => void }) {
+function AgentPanel({ agent, onClose, onRefresh, linkedinStatus }: { agent: AgentMeta; onClose: () => void; onRefresh: () => void; linkedinStatus?: { connected: boolean; has_credentials?: boolean; member_id?: string } }) {
   const [active, setActive] = useState<Capability | null>(null);
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<any>(null);
@@ -240,12 +243,32 @@ function AgentPanel({ agent, onClose, onRefresh }: { agent: AgentMeta; onClose: 
           <button onClick={onClose} className="absolute top-4 right-4 text-white/80 hover:text-white" data-testid="close-agent-panel"><X size={20} /></button>
           <div className="flex items-center gap-4">
             <div className="w-16 h-16 bg-white/20 backdrop-blur rounded-2xl flex items-center justify-center text-4xl">{agent.avatar}</div>
-            <div>
+            <div className="flex-1">
               <h2 className="text-2xl font-black">{agent.name}</h2>
               <p className="text-white/80">{agent.role}</p>
               <p className="text-xs text-white/60 mt-1">{agent.email}</p>
             </div>
           </div>
+          {linkedinStatus && (
+            <div className="mt-4 flex items-center gap-2 text-sm">
+              <Linkedin size={14} className="text-white/90" />
+              {linkedinStatus.connected ? (
+                <span className="inline-flex items-center gap-1 bg-white/20 backdrop-blur px-2.5 py-1 rounded-full text-xs">
+                  <CheckCircle2 size={12} /> LinkedIn connecté {linkedinStatus.member_id ? `(${linkedinStatus.member_id.substring(0, 8)}…)` : ''}
+                </span>
+              ) : linkedinStatus.has_credentials ? (
+                <a
+                  href={`/api/agents/oauth/linkedin/${agent.id}/start`}
+                  data-testid={`li-connect-${agent.id}`}
+                  className="inline-flex items-center gap-1.5 bg-white text-slate-900 px-3 py-1 rounded-full text-xs font-semibold hover:bg-white/90 transition"
+                >
+                  <Linkedin size={12} /> Connecter LinkedIn
+                </a>
+              ) : (
+                <span className="text-xs text-white/70 italic">LinkedIn en simulation (pas de credentials app)</span>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="p-6 grid grid-cols-1 gap-3">

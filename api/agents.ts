@@ -65,8 +65,8 @@ async function askClaudeJSON<T = any>(systemPrompt: string, userMsg: string | Us
 type LinkedInAccount = { agentName: string; role: string; email: string; profileUrl: string; displayName: string; headline: string; connections: number; };
 const LINKEDIN_ACCOUNTS: Record<string, LinkedInAccount> = {
   eden:   { agentName: "Eden",    role: "DG",              email: "eden.dg@tbi-center.fr",         profileUrl: "https://linkedin.com/in/eden-tbi-technology",    displayName: "Eden | DG TBI",                   headline: "CEO | Transformation Digitale Afrique Centrale", connections: 843 },
-  timothy:{ agentName: "Timothy", role: "Dir Commercial",  email: "timothy@tbi-center.fr",         profileUrl: "https://linkedin.com/in/timothy-tbi",             displayName: "Timothy Kimba | TBI",             headline: "Directeur Commercial | Digital",                 connections: 312 },
-  alex:   { agentName: "Alex",    role: "Prospection",     email: "alex@tbi-center.fr",            profileUrl: "https://linkedin.com/in/alex-moanda-tbi",         displayName: "Alex Moanda | TBI",               headline: "Business Developer | CRM/ERP",                   connections: 187 },
+  timothy:{ agentName: "Timothy MAYAKISSA", role: "Dir Commercial",  email: "timothy@tbi-center.fr",         profileUrl: "https://linkedin.com/in/timothy-mayakissa",       displayName: "Timothy MAYAKISSA | TBI",         headline: "Directeur Commercial | Digital",                 connections: 312 },
+  alex:   { agentName: "Alex Robert",       role: "Prospection",     email: "alex@tbi-center.fr",            profileUrl: "https://linkedin.com/in/alex-robert-tbi",         displayName: "Alex Robert | TBI",               headline: "Business Developer B2B | CRM/ERP",               connections: 187 },
   sara:   { agentName: "Sara",    role: "Avant-vente",     email: "sara@tbi-center.fr",            profileUrl: "https://linkedin.com/in/sara-nguesso-tbi",        displayName: "Sara Nguesso | TBI",              headline: "Consultante Avant-Vente",                        connections: 143 },
   marc:   { agentName: "Marc",    role: "Pipeline",        email: "marc@tbi-center.fr",            profileUrl: "https://linkedin.com/in/marc-itoua-tbi",          displayName: "Marc Itoua | TBI",                headline: "Account Manager | Digital Congo",                connections: 201 },
   lisa:   { agentName: "Lisa",    role: "Contrats",        email: "lisa@tbi-center.fr",            profileUrl: "https://linkedin.com/in/lisa-mavoungou-tbi",      displayName: "Lisa Mavoungou | TBI",            headline: "Juriste Commercial IT | OHADA",                  connections: 98 },
@@ -78,10 +78,64 @@ const LINKEDIN_ACCOUNTS: Record<string, LinkedInAccount> = {
   kevin:  { agentName: "Kevin",   role: "Recouvrement",    email: "kevin@tbi-center.fr",           profileUrl: "https://linkedin.com/in/kevin-tbi",               displayName: "Kevin | TBI",                     headline: "Recouvrement",                                   connections: 82 },
   ingrid: { agentName: "Ingrid",  role: "Budget",          email: "ingrid@tbi-center.fr",          profileUrl: "https://linkedin.com/in/ingrid-tbi",              displayName: "Ingrid | TBI",                    headline: "Contrôle de Gestion",                            connections: 65 },
 };
+
+// LinkedIn Developer App credentials (per agent) — reads from Vercel env
+type LinkedInAppCreds = { client_id: string; client_secret: string };
+function linkedinCreds(agentId: string): LinkedInAppCreds | null {
+  const uc = agentId.toUpperCase();
+  const id = process.env[`LINKEDIN_CLIENT_ID_${uc}`];
+  const secret = process.env[`LINKEDIN_CLIENT_SECRET_${uc}`];
+  return id && secret ? { client_id: id, client_secret: secret } : null;
+}
+const LINKEDIN_REDIRECT_URI = process.env.LINKEDIN_REDIRECT_URI || "https://smart-business-sigma.vercel.app/api/agents/oauth/linkedin/callback";
+const LINKEDIN_SCOPES = "openid profile w_member_social email";
+
+// Load agent access token from DB (populated after OAuth callback)
+async function liGetTokenFromDB(agentId: string): Promise<{ access_token: string; member_id?: string } | null> {
+  try {
+    await ensureLinkedInTokensTable();
+    const r = await q("SELECT access_token, member_id, expires_at FROM agent_linkedin_tokens WHERE agent_id=$1 AND (expires_at IS NULL OR expires_at > NOW()) ORDER BY id DESC LIMIT 1", [agentId]);
+    return r.rows[0] || null;
+  } catch { return null; }
+}
+let linkedInTokensTableReady = false;
+async function ensureLinkedInTokensTable() {
+  if (linkedInTokensTableReady) return;
+  await q(`CREATE TABLE IF NOT EXISTS agent_linkedin_tokens (
+    id SERIAL PRIMARY KEY, agent_id TEXT NOT NULL, access_token TEXT NOT NULL,
+    refresh_token TEXT, member_id TEXT, scope TEXT, expires_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+  )`);
+  await q("CREATE INDEX IF NOT EXISTS idx_li_tokens_agent ON agent_linkedin_tokens(agent_id, created_at DESC)");
+  linkedInTokensTableReady = true;
+}
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+async function liApiCall(url: string, token: string, opts: { method?: string; body?: any } = {}): Promise<any> {
+  const resp = await fetch(url, {
+    method: opts.method || "GET",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+      "X-Restli-Protocol-Version": "2.0.0",
+      "LinkedIn-Version": "202405",
+    },
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  });
+  if (!resp.ok) throw new Error(`LinkedIn ${resp.status}: ${(await resp.text().catch(() => "")).substring(0, 400)}`);
+  return resp.json().catch(() => ({}));
+}
 
 async function liSearchProspects(agentId: string, { keywords = "", location = "Brazzaville", limit = 20 } = {}) {
   const acc = LINKEDIN_ACCOUNTS[agentId]; if (!acc) throw new Error(`Unknown agent: ${agentId}`);
+  const t = await liGetTokenFromDB(agentId);
+  if (t?.access_token) {
+    try {
+      const params = new URLSearchParams({ keywords, count: String(limit) });
+      const data = await liApiCall(`https://api.linkedin.com/v2/people-search?${params}`, t.access_token);
+      return { agent: acc.agentName, results: data.elements || [], total: data.paging?.total || 0, live: true };
+    } catch (e: any) { console.warn(`[LI ${agentId} search fallback]`, e.message); }
+  }
   const mock = [
     { id: "LI001", name: "Jean-Baptiste Mbemba", title: "DG - Société Mbemba Transport", location: "Brazzaville", industry: "Transport", connections: 2 },
     { id: "LI002", name: "Odette Nkounkou",      title: "PDG - Nkounkou Commerce",       location: "Pointe-Noire", industry: "Commerce",  connections: 1 },
@@ -91,9 +145,44 @@ async function liSearchProspects(agentId: string, { keywords = "", location = "B
   ].slice(0, limit);
   return { agent: acc.agentName, results: mock, total: mock.length, simulated: true, query: keywords, location };
 }
-async function liSendConnection(agentId: string, targetId: string, message: string = "") { const acc = LINKEDIN_ACCOUNTS[agentId]!; return { success: true, agent: acc.agentName, sentTo: targetId, simulated: true, message: message.substring(0, 300) }; }
-async function liSendMessage(agentId: string, targetId: string, subject: string, body: string) { const acc = LINKEDIN_ACCOUNTS[agentId]!; return { success: true, agent: acc.agentName, subject, chars: body.length, simulated: true, sentTo: targetId }; }
-async function liPublishPost(agentId: string, text: string) { const acc = LINKEDIN_ACCOUNTS[agentId]!; return { success: true, agent: acc.agentName, characters: text.length, simulated: true }; }
+async function liSendConnection(agentId: string, targetId: string, message: string = "") {
+  const acc = LINKEDIN_ACCOUNTS[agentId]!;
+  const t = await liGetTokenFromDB(agentId);
+  if (t?.access_token) {
+    try {
+      await liApiCall("https://api.linkedin.com/v2/invitations", t.access_token, { method: "POST", body: { invitee: { "com.linkedin.voyager.growth.invitation.InviteeProfile": { profileId: targetId } }, message: message.substring(0, 300) } });
+      return { success: true, agent: acc.agentName, sentTo: targetId, live: true, message: message.substring(0, 300) };
+    } catch (e: any) { console.warn(`[LI ${agentId} connect fallback]`, e.message); }
+  }
+  return { success: true, agent: acc.agentName, sentTo: targetId, simulated: true, message: message.substring(0, 300) };
+}
+async function liSendMessage(agentId: string, targetId: string, subject: string, body: string) {
+  const acc = LINKEDIN_ACCOUNTS[agentId]!;
+  const t = await liGetTokenFromDB(agentId);
+  if (t?.access_token) {
+    try {
+      await liApiCall("https://api.linkedin.com/v2/messaging/conversations", t.access_token, { method: "POST", body: { recipients: [`urn:li:person:${targetId}`], subject, body: body.substring(0, 1900) } });
+      return { success: true, agent: acc.agentName, subject, chars: body.length, live: true, sentTo: targetId };
+    } catch (e: any) { console.warn(`[LI ${agentId} msg fallback]`, e.message); }
+  }
+  return { success: true, agent: acc.agentName, subject, chars: body.length, simulated: true, sentTo: targetId };
+}
+async function liPublishPost(agentId: string, text: string) {
+  const acc = LINKEDIN_ACCOUNTS[agentId]!;
+  const t = await liGetTokenFromDB(agentId);
+  if (t?.access_token && t.member_id) {
+    try {
+      await liApiCall("https://api.linkedin.com/v2/ugcPosts", t.access_token, { method: "POST", body: {
+        author: `urn:li:person:${t.member_id}`,
+        lifecycleState: "PUBLISHED",
+        specificContent: { "com.linkedin.ugc.ShareContent": { shareCommentary: { text }, shareMediaCategory: "NONE" } },
+        visibility: { "com.linkedin.ugc.MemberNetworkVisibility": "PUBLIC" },
+      }});
+      return { success: true, agent: acc.agentName, characters: text.length, live: true };
+    } catch (e: any) { console.warn(`[LI ${agentId} post fallback]`, e.message); }
+  }
+  return { success: true, agent: acc.agentName, characters: text.length, simulated: true };
+}
 
 // ─── COMPREHENSIVE CRM ADAPTER (all platform APIs) ──────────────────
 // Each method returns { data } to keep the agent prompt code shape consistent.
@@ -558,6 +647,96 @@ const requireSuperadmin = (req: any, res: any, next: any) => {
 // Diagnostic (no auth)
 app.get("/api/agents/ping", (_req, res) => {
   res.json({ ok: true, message: "agents monolith loaded", claude: CLAUDE_INFO });
+});
+
+// ─── LinkedIn OAuth 3-legged flow ──────────────────────────────────
+// Start OAuth: agents visit /api/agents/oauth/linkedin/:agentId/start (must be logged in as superadmin)
+// LinkedIn redirects to /api/agents/oauth/linkedin/callback with ?code=... which we exchange for an access token.
+
+app.get("/api/agents/oauth/linkedin/:agentId/start", (req, res) => {
+  // Read token from cookie manually (no requireSuperadmin middleware here because we redirect out to LinkedIn)
+  const token = req.cookies?.token;
+  if (!token) return res.status(401).send("Login superadmin requis");
+  let user: any = null;
+  try { user = jwt.verify(token, JWT_SECRET); } catch { return res.status(403).send("Session invalide"); }
+  if (user.role !== "superadmin") return res.status(403).send("Superadmin requis");
+
+  const agentId = req.params.agentId;
+  const creds = linkedinCreds(agentId);
+  if (!creds) return res.status(400).send(`Aucun client_id/secret LinkedIn configuré pour ${agentId}. Ajouter LINKEDIN_CLIENT_ID_${agentId.toUpperCase()} et LINKEDIN_CLIENT_SECRET_${agentId.toUpperCase()} dans Vercel env.`);
+
+  const state = Buffer.from(JSON.stringify({ agentId, ts: Date.now() })).toString("base64url");
+  const url = new URL("https://www.linkedin.com/oauth/v2/authorization");
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set("client_id", creds.client_id);
+  url.searchParams.set("redirect_uri", LINKEDIN_REDIRECT_URI);
+  url.searchParams.set("scope", LINKEDIN_SCOPES);
+  url.searchParams.set("state", state);
+  res.redirect(url.toString());
+});
+
+app.get("/api/agents/oauth/linkedin/callback", async (req, res) => {
+  try {
+    const code = String(req.query.code || "");
+    const state = String(req.query.state || "");
+    if (!code || !state) return res.status(400).send("Paramètres manquants");
+    let parsed: any = null;
+    try { parsed = JSON.parse(Buffer.from(state, "base64url").toString("utf8")); } catch { return res.status(400).send("state invalide"); }
+    const agentId = parsed.agentId as string;
+    const creds = linkedinCreds(agentId);
+    if (!creds) return res.status(400).send(`Credentials LinkedIn absents pour ${agentId}`);
+
+    // Exchange code for access token
+    const tokenResp = await fetch("https://www.linkedin.com/oauth/v2/accessToken", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
+        code, redirect_uri: LINKEDIN_REDIRECT_URI,
+        client_id: creds.client_id, client_secret: creds.client_secret,
+      }),
+    });
+    const tokenData: any = await tokenResp.json();
+    if (!tokenResp.ok || !tokenData.access_token) return res.status(500).send(`Erreur token LinkedIn: ${JSON.stringify(tokenData)}`);
+
+    // Fetch member id (userinfo endpoint with openid scope)
+    let memberId: string | undefined;
+    try {
+      const meResp = await fetch("https://api.linkedin.com/v2/userinfo", { headers: { Authorization: `Bearer ${tokenData.access_token}` } });
+      const me: any = await meResp.json();
+      memberId = me.sub || undefined;
+    } catch { /* non-fatal */ }
+
+    const expiresAt = tokenData.expires_in ? new Date(Date.now() + Number(tokenData.expires_in) * 1000) : null;
+    await ensureLinkedInTokensTable();
+    await q(
+      `INSERT INTO agent_linkedin_tokens (agent_id, access_token, refresh_token, member_id, scope, expires_at) VALUES ($1,$2,$3,$4,$5,$6)`,
+      [agentId, tokenData.access_token, tokenData.refresh_token || null, memberId || null, tokenData.scope || null, expiresAt]
+    );
+    // Return simple HTML success page
+    res.send(`<!doctype html><html><body style="font-family:system-ui;padding:40px;text-align:center"><h1 style="color:#059669">✓ LinkedIn connecté pour l'agent ${agentId}</h1><p>Token stocké. Vous pouvez fermer cet onglet.</p><p><a href="/ai-team">← Retour à l'équipe IA</a></p></body></html>`);
+  } catch (err: any) {
+    console.error("[LinkedIn callback]", err);
+    res.status(500).send(`Erreur callback: ${err?.message || String(err)}`);
+  }
+});
+
+// Check LinkedIn OAuth status for each agent
+app.get("/api/agents/linkedin/status", requireSuperadmin, async (_req, res) => {
+  try {
+    await ensureLinkedInTokensTable();
+    const r = await q("SELECT DISTINCT ON (agent_id) agent_id, member_id, expires_at, created_at FROM agent_linkedin_tokens ORDER BY agent_id, created_at DESC");
+    const map: Record<string, any> = {};
+    for (const row of r.rows) {
+      map[row.agent_id] = { connected: !row.expires_at || new Date(row.expires_at) > new Date(), member_id: row.member_id, expires_at: row.expires_at, connected_at: row.created_at };
+    }
+    // Include agents with configured creds but not yet connected
+    for (const id of Object.keys(LINKEDIN_ACCOUNTS)) {
+      if (!map[id]) map[id] = { connected: false, has_credentials: !!linkedinCreds(id) };
+      else map[id].has_credentials = !!linkedinCreds(id);
+    }
+    res.json({ success: true, agents: map });
+  } catch (err: any) { res.status(500).json({ error: err?.message || String(err) }); }
 });
 
 app.use("/api/agents", (req, _res, next) => { ensureAgentRunsTable().catch(() => {}); next(); }, requireSuperadmin);
