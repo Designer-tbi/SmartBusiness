@@ -804,6 +804,76 @@ app.post("/api/agents/paul/kevin/recovery",    wrap("kevin","recovery")   ((_r) 
 app.get ("/api/agents/paul/ingrid/variance",   wrap("ingrid","variance")  ((r) => ingridVariance((r.query as any).period)));
 app.get ("/api/agents/paul/ingrid/cashflow",   wrap("ingrid","cashflow")  ((_r) => ingridCashflow()));
 
+// ─── CONVERSATIONAL COMMAND BAR ────────────────────────────────────
+// POST /api/agents/:agentId/chat  { message, history?:[{role,content}] }
+// Sends the user's natural-language order to the chosen agent (via Claude).
+// System prompt is composed from the agent persona + its available capabilities.
+const AGENT_PERSONAS: Record<string, string> = {
+  eden:    EDEN_SYS,
+  timothy: TIMOTHY_SYS,
+  alex:    TIMOTHY_SYS + "\nTu es ALEX, spécialisé en prospection B2B sous les ordres de Timothy.",
+  sara:    TIMOTHY_SYS + "\nTu es SARA, spécialisée en devis et avant-vente sous les ordres de Timothy.",
+  marc:    TIMOTHY_SYS + "\nTu es MARC, spécialisé en pipeline et relances sous les ordres de Timothy.",
+  lisa:    TIMOTHY_SYS + "\nTu es LISA, spécialisée en contrats et juridique sous les ordres de Timothy.",
+  flore:   FLORE_SYS,
+  nina:    FLORE_SYS + "\nTu es NINA, chasseuse de talents sous les ordres de Flore.",
+  omar:    FLORE_SYS + "\nTu es OMAR, spécialiste paie SYSCOHADA sous les ordres de Flore.",
+  paul:    PAUL_SYS,
+  chloe:   PAUL_SYS + "\nTu es CHLOÉ, comptable SYSCOHADA sous les ordres de Paul.",
+  kevin:   PAUL_SYS + "\nTu es KEVIN, spécialiste recouvrement sous les ordres de Paul.",
+  ingrid:  PAUL_SYS + "\nTu es INGRID, contrôleuse de gestion sous les ordres de Paul.",
+};
+
+app.post("/api/agents/:agentId/chat", async (req, res) => {
+  try {
+    const agentId = req.params.agentId;
+    const meta = AGENTS.find((a) => a.id === agentId);
+    if (!meta) return res.status(404).json({ success: false, error: "Agent inconnu" });
+    const { message, history = [] } = req.body || {};
+    if (!message) return res.status(400).json({ success: false, error: "message requis" });
+
+    const basePersona = AGENT_PERSONAS[agentId] || `Tu es ${meta.name}, ${meta.role} chez TBI Technology.`;
+    const capsList = meta.capabilities.map((c) => `- ${c.label} (${c.id}): ${c.description}`).join("\n");
+    const teamCtx = agentId === "eden"
+      ? `\n\nTu diriges 3 équipes : Timothy (Commercial), Flore (RH), Paul (CFO). Sous-agents disponibles :
+- ALEX (prospection), SARA (devis), MARC (pipeline), LISA (juridique) — sous Timothy
+- NINA (recrutement), OMAR (paie) — sous Flore
+- CHLOÉ (compta), KEVIN (recouvrement), INGRID (budget) — sous Paul
+Tu peux répondre directement ou indiquer quelle action déléguer.`
+      : "";
+    const system = `${basePersona}
+
+Tu réponds à un ordre donné par le SUPERADMIN via une barre de commande. Tu es EXÉCUTIF, concis, professionnel.
+
+Tes capacités disponibles (actionnables via l'interface) :
+${capsList}
+${teamCtx}
+
+Règles de réponse :
+1. Si la commande est claire → propose une réponse concrète (max 300 mots)
+2. Si elle nécessite une action → dis quelle capacité tu vas invoquer et pourquoi
+3. Si tu manques d'infos → pose UNE question précise
+4. Toujours en français, ton pro et direct.
+5. Termine par un bref plan d'action si pertinent (bullets max 5)`;
+
+    const messages = [
+      ...(Array.isArray(history) ? history.slice(-6) : []),
+      { role: "user" as const, content: String(message).substring(0, 3000) },
+    ];
+    const t0 = Date.now();
+    const reply = await askClaude(system, messages).catch((err: any) => {
+      throw err;
+    });
+    await logRun({ agent_id: agentId, capability: "chat", status: "success", input: { message }, output: { reply: reply.substring(0, 4000) }, triggered_by: (req as any).user?.uid, duration_ms: Date.now() - t0 });
+    res.json({ success: true, agent: agentId, agentName: meta.name, reply, model: CLAUDE_INFO.model });
+  } catch (err: any) {
+    console.error("[chat]", err?.message || err);
+    res.status(500).json({ success: false, error: err?.message || "Erreur chat" });
+  }
+});
+
+
+
 // ─── PLATFORM APIs (any agent can access ALL) ─────────────────────
 // Exposes the full CRM adapter so agents (via UI or another agent) can list/read/write anything.
 app.get   ("/api/agents/platform/leads",           async (_r, res) => res.json(await platform.listLeads()));

@@ -1,8 +1,9 @@
 // AITeam.tsx — Super Admin only.
 // Interface centrale pour piloter les 13 agents IA (Eden + Timothy/Flore/Paul + sous-agents)
 import { useState, useEffect } from 'react';
+import React from 'react';
 import type { ReactNode } from 'react';
-import { Sparkles, Loader2, ChevronRight, Play, RefreshCw, X, Crown, Briefcase, Users, DollarSign, History, Linkedin, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { Sparkles, Loader2, ChevronRight, Play, RefreshCw, X, Crown, Briefcase, Users, DollarSign, History, Linkedin, CheckCircle2, AlertTriangle, Send, MessageSquare } from 'lucide-react';
 
 type Capability = {
   id: string;
@@ -166,7 +167,174 @@ export default function AITeam() {
       {showRuns && (
         <RunsModal runs={runs} onClose={() => setShowRuns(false)} onRefresh={fetchRuns} />
       )}
+
+      {/* Command Bar — floating chat with agents */}
+      <CommandBar agents={agents} />
     </div>
+  );
+}
+
+// ─── COMMAND BAR ─────────────────────────────────────────────────────
+type ChatEntry = { role: 'user' | 'assistant'; content: string; agent?: string; ts: number };
+function CommandBar({ agents }: { agents: AgentMeta[] }) {
+  const [open, setOpen] = useState(false);
+  const [target, setTarget] = useState<string>('eden');
+  const [input, setInput] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [history, setHistory] = useState<ChatEntry[]>([]);
+  const scrollRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [history, open]);
+
+  const send = async (msg?: string) => {
+    const text = (msg ?? input).trim();
+    if (!text || busy) return;
+    setBusy(true);
+    const userEntry: ChatEntry = { role: 'user', content: text, agent: target, ts: Date.now() };
+    setHistory(h => [...h, userEntry]);
+    setInput('');
+    try {
+      const past = history.slice(-6).map(h => ({ role: h.role, content: h.content }));
+      const r = await fetch(`/api/agents/${target}/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: text, history: past }),
+      });
+      const data = await r.json();
+      if (!r.ok || !data.success) throw new Error(data.error || `HTTP ${r.status}`);
+      setHistory(h => [...h, { role: 'assistant', content: data.reply, agent: data.agent, ts: Date.now() }]);
+    } catch (e: any) {
+      setHistory(h => [...h, { role: 'assistant', content: `⚠️ Erreur : ${e.message}`, agent: target, ts: Date.now() }]);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const suggestions = target === 'eden'
+    ? ['Fais-moi une vue exécutive du mois', 'Quels sont les 3 risques principaux ?', 'Demande à Timothy son rapport pipeline']
+    : target === 'timothy'
+    ? ['Analyse le pipeline', 'Trouve 10 prospects PME à Brazzaville', 'Génère un devis pour un site web']
+    : target === 'paul'
+    ? ['Fais le dashboard financier', 'Lance le cycle de recouvrement', 'Prévisions trésorerie 3 mois']
+    : ['Que peux-tu faire ?', 'Fais un rapport pour ton directeur'];
+
+  const targetAgent = agents.find(a => a.id === target);
+
+  return (
+    <>
+      {/* Trigger button (mobile + desktop) */}
+      {!open && (
+        <button
+          onClick={() => setOpen(true)}
+          data-testid="open-command-bar"
+          className="fixed z-40 bottom-4 right-4 md:bottom-6 md:right-6 bg-indigo-600 text-white rounded-full shadow-2xl hover:shadow-indigo-500/50 hover:bg-indigo-700 transition-all px-5 py-3 flex items-center gap-2 font-semibold safe-bottom"
+        >
+          <MessageSquare size={18} />
+          <span className="hidden sm:inline">Donner un ordre</span>
+          <span className="sm:hidden">Ordre</span>
+        </button>
+      )}
+
+      {/* Panel */}
+      {open && (
+        <div className="fixed z-40 inset-x-0 bottom-0 md:inset-x-auto md:right-6 md:bottom-6 md:w-[440px] bg-white rounded-t-2xl md:rounded-2xl shadow-2xl border border-slate-200 flex flex-col max-h-[85vh] md:max-h-[70vh] safe-bottom" data-testid="command-bar">
+          {/* Header */}
+          <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between bg-gradient-to-r from-indigo-600 to-violet-600 text-white rounded-t-2xl">
+            <div className="flex items-center gap-2 min-w-0">
+              <MessageSquare size={16} />
+              <span className="font-semibold">Barre de commande</span>
+              {targetAgent && <span className="text-white/70 text-xs">→ {targetAgent.avatar} {targetAgent.name}</span>}
+            </div>
+            <button onClick={() => setOpen(false)} className="text-white/80 hover:text-white p-1 -mr-1" data-testid="close-command-bar"><X size={18} /></button>
+          </div>
+
+          {/* Agent selector */}
+          <div className="px-4 py-2 border-b border-slate-100 bg-slate-50">
+            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Destinataire</label>
+            <select
+              value={target}
+              onChange={e => setTarget(e.target.value)}
+              data-testid="command-bar-target"
+              className="w-full mt-1 bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            >
+              {agents.map(a => (
+                <option key={a.id} value={a.id}>{a.avatar} {a.name} — {a.role}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* History */}
+          <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-3 space-y-3 min-h-[200px] max-h-[400px]" data-testid="command-history">
+            {history.length === 0 && (
+              <div className="text-center text-slate-400 text-sm italic py-4">
+                Aucune conversation. Utilisez les suggestions ci-dessous ou tapez votre ordre.
+              </div>
+            )}
+            {history.map((entry, i) => (
+              <div key={i} className={`flex ${entry.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                <div className={`max-w-[85%] rounded-xl px-3 py-2 text-sm whitespace-pre-wrap break-words ${entry.role === 'user' ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-800 border border-slate-200'}`}>
+                  {entry.role === 'assistant' && entry.agent && (
+                    <div className="text-[10px] font-bold text-indigo-600 mb-1 uppercase tracking-wider">{agents.find(a => a.id === entry.agent)?.name || entry.agent}</div>
+                  )}
+                  {entry.content}
+                </div>
+              </div>
+            ))}
+            {busy && (
+              <div className="flex justify-start">
+                <div className="bg-slate-100 border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-500 flex items-center gap-2">
+                  <Loader2 size={14} className="animate-spin" /> {targetAgent?.name || 'Agent'} réfléchit…
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Suggestions */}
+          {history.length === 0 && (
+            <div className="px-4 pb-2 flex flex-wrap gap-1.5">
+              {suggestions.map((s, i) => (
+                <button
+                  key={i}
+                  onClick={() => send(s)}
+                  disabled={busy}
+                  className="text-[11px] bg-indigo-50 hover:bg-indigo-100 text-indigo-700 px-2.5 py-1 rounded-full border border-indigo-100 transition-colors disabled:opacity-50"
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Input */}
+          <form
+            onSubmit={(e) => { e.preventDefault(); send(); }}
+            className="border-t border-slate-200 p-3 flex items-end gap-2"
+          >
+            <textarea
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
+              rows={1}
+              placeholder={`Donner un ordre à ${targetAgent?.name || 'l\'agent'}...`}
+              data-testid="command-input"
+              className="flex-1 resize-none bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all max-h-32"
+              style={{ minHeight: '40px' }}
+            />
+            <button
+              type="submit"
+              disabled={busy || !input.trim()}
+              data-testid="command-send"
+              className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl p-2.5 disabled:opacity-40 disabled:cursor-not-allowed transition-all shrink-0"
+              aria-label="Envoyer"
+            >
+              {busy ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
+            </button>
+          </form>
+        </div>
+      )}
+    </>
   );
 }
 
