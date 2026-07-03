@@ -110,8 +110,8 @@ export default function AITeam() {
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-black text-slate-900 flex items-center gap-3">
-            <Sparkles className="text-indigo-600" size={32} />
+          <h1 className="text-2xl md:text-3xl font-black text-slate-900 flex items-center gap-2 md:gap-3">
+            <Sparkles className="text-indigo-600" size={28} />
             Équipe IA — TBI Technology
           </h1>
           <p className="text-slate-500 mt-1">

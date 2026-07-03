@@ -28,7 +28,9 @@ import {
   ChevronRight,
   Monitor,
   CreditCard,
-  Sparkles
+  Sparkles,
+  Menu,
+  X
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 
@@ -46,6 +48,11 @@ export default function Layout() {
     window.addEventListener('sb-hide-sidebar', handleHideSidebar);
     return () => window.removeEventListener('sb-hide-sidebar', handleHideSidebar);
   }, []);
+
+  // Auto-close mobile drawer when navigating
+  React.useEffect(() => {
+    setIsMobileMenuOpen(false);
+  }, [location.pathname]);
 
   const handleLogout = async () => {
     await logout();
@@ -167,19 +174,27 @@ export default function Layout() {
 
       {/* Sidebar */}
       <div className={cn(
-        "fixed lg:relative z-50 lg:z-0 h-full bg-slate-900 text-white flex flex-col transition-all duration-300 ease-in-out overflow-hidden",
+        "fixed lg:relative z-50 lg:z-0 h-full bg-slate-900 text-white flex flex-col transition-all duration-300 ease-in-out overflow-hidden pt-safe",
         showSidebar ? (isSidebarOpen ? "w-72" : "w-20") : "w-0 opacity-0 pointer-events-none",
         isMobileMenuOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
       )}>
         <div className={cn("p-6 flex items-center justify-between", !isSidebarOpen && "px-4")}>
           {isSidebarOpen ? (
-            <div>
+            <div className="flex-1">
               <h1 className="text-2xl font-bold tracking-tight text-indigo-400">SmartBusiness</h1>
               <p className="text-xs text-slate-400 mt-1">Plateforme Call Center</p>
             </div>
           ) : (
             <div className="w-10 h-10 bg-indigo-600 rounded-lg flex items-center justify-center font-bold text-xl">S</div>
           )}
+          <button
+            onClick={() => setIsMobileMenuOpen(false)}
+            className="lg:hidden text-slate-400 hover:text-white p-2 -mr-2"
+            aria-label="Fermer le menu"
+            data-testid="close-mobile-menu"
+          >
+            <X size={22} />
+          </button>
         </div>
         
         <nav className="flex-1 px-4 space-y-1 mt-4 overflow-y-auto custom-scrollbar">
@@ -302,13 +317,15 @@ export default function Layout() {
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 md:px-8 shrink-0">
-          <div className="flex items-center gap-4">
+        <header className="h-14 md:h-16 bg-white border-b border-slate-200 flex items-center justify-between px-3 md:px-8 shrink-0 pt-safe" style={{ paddingTop: 'max(env(safe-area-inset-top), 0px)' }}>
+          <div className="flex items-center gap-2 md:gap-4 min-w-0 flex-1">
             <button 
               onClick={() => setIsMobileMenuOpen(true)}
-              className="lg:hidden p-2 text-slate-600 hover:bg-slate-100 rounded-lg"
+              className="lg:hidden -ml-1 p-2 text-slate-700 hover:bg-slate-100 rounded-lg"
+              aria-label="Ouvrir le menu"
+              data-testid="open-mobile-menu"
             >
-              <LayoutDashboard size={20} />
+              <Menu size={22} />
             </button>
             <button 
               onClick={() => setIsSidebarOpen(!isSidebarOpen)}
@@ -316,22 +333,22 @@ export default function Layout() {
             >
               {isSidebarOpen ? <ChevronDown className="rotate-90" size={20} /> : <ChevronRight size={20} />}
             </button>
-            <h2 className="text-lg font-semibold text-slate-800 truncate">
+            <h2 className="text-base md:text-lg font-semibold text-slate-800 truncate">
               {getPageTitle()}
             </h2>
           </div>
           
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 md:gap-3 shrink-0">
             <div className="hidden md:flex flex-col items-end">
               <span className="text-sm font-bold text-slate-900">{profile?.name}</span>
               <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">{profile?.role}</span>
             </div>
-            <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold border border-indigo-100">
+            <div className="w-9 h-9 md:w-10 md:h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold border border-indigo-100">
               {profile?.name.charAt(0).toUpperCase()}
             </div>
           </div>
         </header>
-        <main className="flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-8">
+        <main className="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-4 md:p-8 safe-bottom">
           <Outlet />
         </main>
       </div>
