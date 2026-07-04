@@ -1,0 +1,44 @@
+{
+  "summary": "Iteration 4 retest against PROD https://smart-business-sigma.vercel.app after main agent's two fixes (SQL cast in /api/agents/runs/recent + Vercel redeploy shipping External Tools routes + ExternalToolsPanel + LinkedIn Timothy env vars). Pytest result: 28/29 pass (96.5%, up from 24/29 = 83%). The 5 previously-failing FEATURE tests (runs_recent, fetch_url_public, fetch_url_bad_input, extract_to_crm_leads_from_text, plus indirectly the tools_analyze / ExternalToolsPanel UI flow) ALL now pass. The single remaining failure is TestNoFunctionInvocationFailed::test_no_html_crash_get which lumps in the pre-existing intermittent cold-start read timeout on /api/agents/platform/quotes and /invoices (>60s) — same minor issue flagged in iteration_3, NOT a regression, NOT part of the 5 targeted fixes. Frontend: /ai-team page correctly renders the ExternalToolsPanel ('Outils externes'), expands to reveal [data-testid='tool-source'] + [data-testid='tool-run'] + 3 mode tabs (Analyser / Extraire→CRM / Recherche web) + 13-agent selector — full UI integration verified. LinkedIn OAuth Timothy: GET /api/agents/oauth/linkedin/timothy/start returns 302 to https://www.linkedin.com/oauth/v2/authorization?...client_id=779df3rdss7vdl... confirming LINKEDIN_CLIENT_ID_TIMOTHY env var is loaded. CRM core regression: all 11 list endpoints (leads/opportunities/customers/quotes/invoices/commissions/products/categories/portfolio-items/activities/reports) return 200. AI live: Claude Fable 5 answered analyze + chat calls successfully. extract-to-crm inserted a real lead id=21 ('Acme Corp') from a short text — end-to-end AI→CRM confirmed.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "GET /api/agents/platform/quotes and /api/agents/platform/invoices",
+        "issue": "Intermittent read timeout > 60s on Vercel cold start. Not a crash and not FUNCTION_INVOCATION_FAILED — the endpoints eventually respond 200 in browser (verified via /devis and /factures pages). Root cause: serverless cold start + un-indexed SELECT on growing quotes/invoices tables. Same issue as iteration_3. Because the aggregated test test_no_html_crash_get uses timeout=25s and treats a connection exception as a failure, that single test still shows RED even though the endpoints themselves are functionally correct."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_agents_regression.py",
+    "/app/test_reports/pytest/agents_regression_iter4.xml"
+  ],
+  "action_items": [
+    "(Optional, to reach a clean 29/29 green) Either (a) add composite indexes on quotes(status, created_at) and invoices(status, due_date) plus warmup-ping in Vercel cron, OR (b) bump the timeout in test_no_html_crash_get from 25s to 60s and add explicit warmup GET before the loop. Suggest option (a) for real UX — /devis and /factures pages benefit as well.",
+    "No other blocking action items. All 5 fixes targeted in this retest are verified in production."
+  ],
+  "critical_code_review_comments": [
+    "SQL fix on /api/agents.ts L1044 (to_jsonb('<<truncated>>'::text)) works — verified by successful GET /api/agents/runs/recent returning {success:true, runs:[...]} for the superadmin. Clean fix, no side effects visible.",
+    "External Tools routes at /api/agents.ts L1211-1312 (fetch-url, analyze, extract-to-crm) all now respond 200 with structured JSON. Input validation on empty URL returns 400 with clear French message — good UX.",
+    "extract-to-crm inserted real lead into /api/leads (id=21 'Acme Corp') from unstructured text using Claude Fable 5 — the AI→CRM extraction bridge is fully functional in production.",
+    "ExternalToolsPanel (frontend, AITeam.tsx L525+) is now deployed and works: collapse/expand ('Ouvrir'/'Fermer'), 3 modes, 13 agents in dropdown, results area visible. Consider adding a subtle loading indicator inside the RÉSULTAT area during Exécution (currently the message stays 'Aucun résultat pour l'instant.' until AI returns, which can feel unresponsive on 90s+ Claude calls).",
+    "LINKEDIN_CLIENT_ID_TIMOTHY is now correctly loaded in Vercel — the 302 redirect exposes client_id=779df3rdss7vdl. Reminder: this client_id is now visible in browser network tab (normal for OAuth PKCE flow, but ensure client_secret stays server-only — which it is).",
+    "Pre-existing cold-start latency on /api/agents/platform/{quotes,invoices} is the single remaining flake in the suite. Not a code bug per se, but worth an index + warmup ping."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "96.5% (28/29 pass). The 1 failing test is an aggregate cold-start-timeout flake on quotes/invoices, not a functional bug and not part of the 5 targeted regressions.",
+    "frontend": "100% (ExternalToolsPanel fully functional, /ai-team renders 13 agents + panel, login + navigation + form all work)"
+  },
+  "test_credentials": "Superadmin eden@tbi-center.fr / loub@ki2014D — verified working in this iteration (login 200 + role=superadmin + cookie 'token' set).",
+  "seed_data_creation": "One real lead was inserted during extract-to-crm test: id=21, name='Acme Corp' (from prompt 'Jean Dupont, CEO, Acme Corp, jean@acme.com'). Safe to delete via DELETE /api/leads/21 if cleanup desired. No other data mutations. Two agent_runs rows logged (expected side-effect of chat + execute endpoints).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Iteration 4 CLOSES the 5 gaps identified in iteration_3. To move from 28/29 → 29/29 the main agent can either (1) add DB indexes on quotes/invoices + a Vercel cron warmup ping, or (2) increase the timeout in test_no_html_crash_get and insert an explicit warmup GET. The regression suite /app/backend/tests/test_agents_regression.py is stable and should be re-used as-is going forward — the AI-dependent tests already tolerate 500s gracefully (skip on Anthropic error). Frontend selectors that are verified working on /ai-team: [data-testid='external-tools-panel'], [data-testid='tool-source'], [data-testid='tool-run']. Consider adding [data-testid='tool-result'] to the RÉSULTAT area for downstream test scripts.",
+  "rca of the issue": "Both root causes from iteration_3 are FIXED and verified: (1) SQL type mismatch in /api/agents/runs/recent — fixed via to_jsonb('<<truncated>>'::text) cast, endpoint returns 200 with structured runs list. (2) Deployment gap on External Tools — Vercel redeploy shipped the 3 routes (fetch-url, analyze, extract-to-crm) AND the ExternalToolsPanel React component; both are live and interoperate correctly. (3) Bonus: LINKEDIN_CLIENT_ID_TIMOTHY env var loaded — OAuth start now redirects to real linkedin.com instead of returning 400. No new regressions detected."
+}
