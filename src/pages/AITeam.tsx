@@ -157,6 +157,9 @@ export default function AITeam() {
         </div>
       )}
 
+      {/* External Tools Panel */}
+      <ExternalToolsPanel agents={agents} />
+
       {/* Org chart: 3 columns by director */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {directors.map(d => (
@@ -518,6 +521,139 @@ function AgentPanel({ agent, onClose, onRefresh, linkedinStatus }: { agent: Agen
 }
 
 // ─────────────────────────────────────────────────────────────────────
+// ─── EXTERNAL TOOLS PANEL — scrape URLs, analyze text, extract to CRM ─
+function ExternalToolsPanel({ agents }: { agents: AgentMeta[] }) {
+  const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState<'analyze' | 'extract' | 'search'>('analyze');
+  const [target, setTarget] = useState<'leads' | 'customers' | 'products' | 'portfolio'>('leads');
+  const [source, setSource] = useState('');
+  const [question, setQuestion] = useState('');
+  const [agentId, setAgentId] = useState('eden');
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<any>(null);
+
+  const run = async () => {
+    if (!source.trim() && mode !== 'search') return;
+    setBusy(true); setResult(null);
+    try {
+      let endpoint = '', body: any = { agentId };
+      if (mode === 'search') { endpoint = '/api/agents/tools/web-search'; body.query = source; }
+      else if (mode === 'analyze') { endpoint = '/api/agents/tools/analyze'; body.source = source; body.question = question; }
+      else if (mode === 'extract') { endpoint = '/api/agents/tools/extract-to-crm'; body.source = source; body.target = target; }
+      const r = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      setResult(await r.json());
+    } catch (e: any) { setResult({ success: false, error: e.message }); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div className="bg-gradient-to-r from-slate-900 to-indigo-900 rounded-2xl p-5 md:p-6 text-white shadow-xl" data-testid="external-tools-panel">
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <h3 className="text-lg md:text-xl font-black flex items-center gap-2"><Sparkles size={20} className="text-violet-300" /> Outils externes</h3>
+          <p className="text-xs md:text-sm text-white/70 mt-0.5">Analyser un site, extraire des données, chercher sur le web — et tout intégrer dans le CRM.</p>
+        </div>
+        <button onClick={() => setOpen(!open)} className="text-white/90 hover:text-white bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-lg text-xs font-semibold" data-testid="toggle-tools">
+          {open ? 'Fermer' : 'Ouvrir'}
+        </button>
+      </div>
+      {open && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+          <div className="space-y-3">
+            {/* Mode selector */}
+            <div className="flex gap-2 flex-wrap">
+              {[
+                { id: 'analyze', label: '🔬 Analyser', hint: 'Analyse minutieuse d\'un site ou texte' },
+                { id: 'extract', label: '📥 Extraire → CRM', hint: 'Extraire + insérer en base' },
+                { id: 'search',  label: '🌐 Recherche web', hint: 'Recherche live sur le web' },
+              ].map((m) => (
+                <button key={m.id} onClick={() => setMode(m.id as any)} title={m.hint}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${mode === m.id ? 'bg-white text-slate-900' : 'bg-white/10 text-white hover:bg-white/20'}`}
+                  data-testid={`tool-mode-${m.id}`}>
+                  {m.label}
+                </button>
+              ))}
+            </div>
+            {/* Agent selector */}
+            <div>
+              <label className="text-[10px] font-bold text-white/70 uppercase tracking-wider">Agent exécutant</label>
+              <select value={agentId} onChange={(e) => setAgentId(e.target.value)}
+                className="w-full mt-1 bg-white/10 border border-white/20 rounded-lg px-2 py-1.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-violet-400"
+                data-testid="tool-agent-select">
+                {agents.map((a) => <option key={a.id} value={a.id} className="text-slate-900">{a.avatar} {a.name}</option>)}
+              </select>
+            </div>
+            {/* Extract target */}
+            {mode === 'extract' && (
+              <div>
+                <label className="text-[10px] font-bold text-white/70 uppercase tracking-wider">Insérer comme…</label>
+                <select value={target} onChange={(e) => setTarget(e.target.value as any)}
+                  className="w-full mt-1 bg-white/10 border border-white/20 rounded-lg px-2 py-1.5 text-sm text-white"
+                  data-testid="tool-extract-target">
+                  <option value="leads"      className="text-slate-900">Leads (prospects)</option>
+                  <option value="customers"  className="text-slate-900">Clients</option>
+                  <option value="products"   className="text-slate-900">Produits / services</option>
+                  <option value="portfolio"  className="text-slate-900">Portefeuille (établissements)</option>
+                </select>
+              </div>
+            )}
+            {/* Source input */}
+            <div>
+              <label className="text-[10px] font-bold text-white/70 uppercase tracking-wider">
+                {mode === 'search' ? 'Requête de recherche' : 'URL ou texte à analyser'}
+              </label>
+              <textarea value={source} onChange={(e) => setSource(e.target.value)} rows={mode === 'search' ? 2 : 5}
+                placeholder={mode === 'search' ? 'Ex: Appels d\'offres IT Congo Brazzaville 2026' : 'https://www.exemple.com ou coller du texte…'}
+                className="w-full mt-1 bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-sm text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-violet-400"
+                data-testid="tool-source"/>
+            </div>
+            {/* Optional question */}
+            {mode === 'analyze' && (
+              <div>
+                <label className="text-[10px] font-bold text-white/70 uppercase tracking-wider">Question spécifique (optionnel)</label>
+                <input value={question} onChange={(e) => setQuestion(e.target.value)}
+                  placeholder="Ex: Quels sont les 3 concurrents mentionnés ?"
+                  className="w-full mt-1 bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-sm text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-violet-400"
+                  data-testid="tool-question"/>
+              </div>
+            )}
+            <button onClick={run} disabled={busy || (!source.trim() && mode !== 'search')}
+              className="w-full bg-violet-600 hover:bg-violet-700 text-white rounded-lg py-2.5 font-semibold text-sm disabled:opacity-40 transition-all flex items-center justify-center gap-2"
+              data-testid="tool-run">
+              {busy ? <><Loader2 size={14} className="animate-spin" /> Exécution…</> : <><Play size={14} /> Lancer</>}
+            </button>
+          </div>
+          {/* Result */}
+          <div className="bg-slate-950/50 border border-white/10 rounded-lg overflow-hidden min-h-[200px] max-h-[400px] flex flex-col">
+            <div className="px-3 py-1.5 border-b border-white/10 text-xs font-bold text-white/70 uppercase tracking-wider">Résultat</div>
+            <div className="flex-1 overflow-y-auto p-3 text-xs text-emerald-200" data-testid="tool-result">
+              {!result && <div className="text-white/40 italic">Aucun résultat pour l'instant.</div>}
+              {result && result.success === false && <div className="text-rose-300">⚠️ {result.error}</div>}
+              {result && result.success && (
+                <>
+                  {result.reply && <pre className="whitespace-pre-wrap font-sans text-white/90">{result.reply}</pre>}
+                  {result.extracted !== undefined && (
+                    <div>
+                      <p className="text-emerald-300 font-bold">✓ {result.inserted} / {result.extracted} enregistrements insérés en CRM</p>
+                      {result.items && result.items.length > 0 && (
+                        <ul className="mt-2 text-xs space-y-0.5 text-white/80">
+                          {result.items.slice(0, 20).map((it: any, i: number) => <li key={i}>#{it.id} — {it.name}</li>)}
+                        </ul>
+                      )}
+                      {result.originUrl && <p className="mt-2 text-white/50">Source : {result.originUrl}</p>}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 function RunsModal({ runs, onClose, onRefresh }: { runs: RunRow[]; onClose: () => void; onRefresh: () => void }) {
   return (
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onClose}>

@@ -53,6 +53,31 @@ async function callAnthropic(body: any): Promise<any> {
   return resp.json();
 }
 
+// Fast variant: shorter max_tokens, low reasoning effort → snappier UI
+async function askClaudeFast(systemPrompt: string, userMsg: string | UserMessage[]): Promise<string> {
+  const r = await callAnthropic({ model: MODEL, max_tokens: Math.min(MAX_TOKENS, 2048), system: systemPrompt, messages: toMessages(userMsg), output_config: { effort: "low" } });
+  const t = (r.content || []).find((b: any) => b.type === "text");
+  return t ? t.text : "";
+}
+
+// Fetch any public URL and return cleaned text
+async function fetchUrlAsText(url: string): Promise<{ url: string; title?: string; text: string; length: number }> {
+  const resp = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0 (TBI-Agent-Bot)" }, redirect: "follow" });
+  if (!resp.ok) throw new Error(`URL fetch ${resp.status}`);
+  const html = await resp.text();
+  // Basic HTML → text cleanup
+  const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+  const stripped = html
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, " ")
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+  return { url, title: titleMatch?.[1]?.trim(), text: stripped.substring(0, 40000), length: stripped.length };
+}
+
 async function askClaude(systemPrompt: string, userMsg: string | UserMessage[], options: Record<string, unknown> = {}): Promise<string> {
   const r = await callAnthropic({ model: MODEL, max_tokens: MAX_TOKENS, system: systemPrompt, messages: toMessages(userMsg), ...options });
   // Fable 5 returns thinking blocks + text blocks — extract only text
@@ -1116,7 +1141,7 @@ Règles de réponse :
       { role: "user" as const, content: String(message).substring(0, 3000) },
     ];
     const t0 = Date.now();
-    const reply = await askClaude(system, messages).catch((err: any) => {
+    const reply = await askClaudeFast(system, messages).catch((err: any) => {
       throw err;
     });
     await logRun({ agent_id: agentId, capability: "chat", status: "success", input: { message }, output: { reply: reply.substring(0, 4000) }, triggered_by: (req as any).user?.uid, duration_ms: Date.now() - t0 });
@@ -1161,7 +1186,10 @@ app.post("/api/agents/:agentId/execute/:capId", async (req, res) => {
 
   const t0 = Date.now();
   try {
-    const reply = await askClaude(persona + "\n\nExécute la demande de façon exécutive, concrète et actionnable.", userPrompt);
+    // Use fast mode (lower effort, capped tokens) for free-form + chat
+    const useFast = capId === "u-free" || capId === "chat";
+    const asker = useFast ? askClaudeFast : askClaude;
+    const reply = await asker(persona + "\n\nExécute la demande de façon exécutive, concrète et actionnable.", userPrompt);
     await logRun({ agent_id: agentId, capability: capId, status: "success", input: { input }, output: { reply: reply.substring(0, 8000) }, triggered_by: (req as any).user?.uid, duration_ms: Date.now() - t0 });
     if (shouldSaveReport) {
       await saveAgentReport({ agent_id: agentId, capability: capId, title: `${capLabel} — ${new Date().toLocaleDateString("fr-FR")}`, summary: reply });
@@ -1171,6 +1199,116 @@ app.post("/api/agents/:agentId/execute/:capId", async (req, res) => {
     await logRun({ agent_id: agentId, capability: capId, status: "error", error_message: err?.message || String(err), duration_ms: Date.now() - t0 });
     res.status(500).json({ success: false, agent: agentId, capability: capId, error: err?.message || "Erreur exécution" });
   }
+});
+
+
+
+// ─── EXTERNAL TOOLS — Web fetch + document analysis + auto-import ──
+// Agents can grab data from external URLs OR text pasted by the user
+// and Claude extracts structured fields that are auto-inserted into CRM.
+
+// POST /api/agents/tools/fetch-url  { url }
+app.post("/api/agents/tools/fetch-url", async (req, res) => {
+  try {
+    const url = String(req.body?.url || "");
+    if (!/^https?:\/\//.test(url)) return res.status(400).json({ error: "URL http(s) requise" });
+    const out = await fetchUrlAsText(url);
+    res.json({ success: true, ...out });
+  } catch (err: any) { res.status(500).json({ success: false, error: err?.message || String(err) }); }
+});
+
+// POST /api/agents/tools/web-search  { query, agentId? }
+app.post("/api/agents/tools/web-search", async (req, res) => {
+  try {
+    const query = String(req.body?.query || "");
+    const agentId = String(req.body?.agentId || "eden");
+    if (!query) return res.status(400).json({ error: "query requise" });
+    const persona = AGENT_PERSONAS[agentId] || "Tu es un analyste expert.";
+    const t0 = Date.now();
+    const reply = await askClaudeWithSearch(persona, `Recherche sur le web et synthétise : ${query}. Réponds en français avec sources citées.`);
+    await logRun({ agent_id: agentId, capability: "web-search", status: "success", input: { query }, output: { reply: reply.substring(0, 8000) }, duration_ms: Date.now() - t0 });
+    res.json({ success: true, query, reply });
+  } catch (err: any) { res.status(500).json({ success: false, error: err?.message || String(err) }); }
+});
+
+// POST /api/agents/tools/extract-to-crm  { source: url|text, target: 'leads'|'customers'|'products'|'portfolio', agentId? }
+// Fetches source (URL or raw text), asks Claude to extract structured records,
+// then inserts them into the corresponding CRM table.
+app.post("/api/agents/tools/extract-to-crm", async (req, res) => {
+  try {
+    const { source, target, agentId = "eden" } = req.body || {};
+    if (!source || !target) return res.status(400).json({ error: "source + target requis" });
+    const validTargets = ["leads", "customers", "products", "portfolio"];
+    if (!validTargets.includes(target)) return res.status(400).json({ error: `target must be one of ${validTargets.join(", ")}` });
+
+    // 1) Resolve source content
+    let content = String(source);
+    let originUrl: string | null = null;
+    if (/^https?:\/\//.test(content)) {
+      const fetched = await fetchUrlAsText(content);
+      originUrl = fetched.url;
+      content = fetched.text;
+    }
+    content = content.substring(0, 30000);
+
+    // 2) Prompt schemas per target
+    const schemas: Record<string, string> = {
+      leads:      `Extrait TOUS les prospects/leads (personnes ou entreprises) du contenu. Retourne JSON: { items: [{ type:"individual|company", first_name, last_name, company_name, email, phone, notes }] }`,
+      customers:  `Extrait TOUS les clients (entreprises/particuliers déjà clients) du contenu. Retourne JSON: { items: [{ type:"individual|company", name, email, phone, address, city, company_name }] }`,
+      products:   `Extrait TOUS les produits/services listés dans le contenu. Retourne JSON: { items: [{ name, price:number, type:"service|product", description, currency:"XAF|USD|EUR" }] }`,
+      portfolio:  `Extrait TOUS les établissements/entreprises listés (portefeuille commercial). Retourne JSON: { items: [{ name, address, city, tel, mail, sub_type, status:"nouveau" }] }`,
+    };
+    const persona = AGENT_PERSONAS[agentId] || `Tu es un analyste expert d'extraction de données pour TBI Technology.`;
+    const extraction: any = await askClaudeJSON(persona, `${schemas[target]}\n\nCONTENU À ANALYSER :\n${content}`);
+    const items = extraction?.items || [];
+
+    // 3) Insert into CRM
+    const inserted: any[] = [];
+    for (const it of items) {
+      try {
+        let created;
+        if (target === "leads")     created = (await platform.createLead(it)).data;
+        if (target === "customers") created = (await platform.createCustomer(it)).data;
+        if (target === "products")  created = (await platform.createProduct(it)).data;
+        if (target === "portfolio") {
+          if (!it.category_id) it.category_id = 1;
+          created = (await platform.createPortfolio(it)).data;
+        }
+        if (created) inserted.push({ id: created.id, name: it.name || it.company_name || it.first_name });
+      } catch (e: any) { /* skip failed */ }
+    }
+    await logRun({ agent_id: agentId, capability: `extract-to-${target}`, status: "success", input: { originUrl, items_count: items.length }, output: { inserted_count: inserted.length }, duration_ms: 0 });
+    await saveAgentReport({
+      agent_id: agentId, capability: `extract-to-${target}`,
+      title: `Extraction ${target} — ${originUrl ? new URL(originUrl).hostname : "texte fourni"}`,
+      summary: `${items.length} enregistrements ${target} détectés, ${inserted.length} insérés dans le CRM.\n\nOrigine : ${originUrl || "texte fourni par superadmin"}`,
+      next_actions: inserted.slice(0, 10).map((i: any) => `${target} #${i.id} — ${i.name}`).join("\n"),
+      metrics: { new_leads: target === "leads" ? inserted.length : 0, new_customers: target === "customers" ? inserted.length : 0 },
+    });
+    res.json({ success: true, target, extracted: items.length, inserted: inserted.length, items: inserted, originUrl });
+  } catch (err: any) { res.status(500).json({ success: false, error: err?.message || String(err) }); }
+});
+
+// POST /api/agents/tools/analyze  { source: url|text, question?, agentId? }
+// Analyse minutieuse d'un contenu externe sans écrire en base.
+app.post("/api/agents/tools/analyze", async (req, res) => {
+  try {
+    const { source, question = "", agentId = "eden" } = req.body || {};
+    if (!source) return res.status(400).json({ error: "source requis" });
+    let content = String(source);
+    let originUrl: string | null = null;
+    if (/^https?:\/\//.test(content)) {
+      const fetched = await fetchUrlAsText(content);
+      originUrl = fetched.url;
+      content = fetched.text;
+    }
+    content = content.substring(0, 30000);
+    const persona = AGENT_PERSONAS[agentId] || `Tu es un analyste expert.`;
+    const t0 = Date.now();
+    const reply = await askClaude(persona, `Analyse minutieusement ce contenu et réponds : ${question || "Fais une analyse complète, extrais tous les points clés et propose 3 actions concrètes."}\n\nCONTENU :\n${content}`);
+    await logRun({ agent_id: agentId, capability: "analyze", status: "success", input: { originUrl, question }, output: { reply: reply.substring(0, 8000) }, duration_ms: Date.now() - t0 });
+    res.json({ success: true, agent: agentId, originUrl, reply });
+  } catch (err: any) { res.status(500).json({ success: false, error: err?.message || String(err) }); }
 });
 
 

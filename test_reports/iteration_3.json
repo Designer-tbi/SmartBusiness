@@ -1,0 +1,90 @@
+{
+  "summary": "E2E regression Livraison 2 (AI monolith + Command Bar + External Tools + Mobile UI) run against PRODUCTION https://smart-business-sigma.vercel.app. Backend: 24/29 pytest pass (83%). Frontend: login, /ai-team (13 agents), Command Bar (real AI reply), Timothy capabilities panel (13 caps incl u-free), Reports page, and mobile hamburger drawer with department [IA] badges all work. Two deployment gaps found: (a) External Tools routes /api/agents/tools/{fetch-url|analyze|extract-to-crm} return 404 'Cannot POST' — routes not registered in deployed build; the corresponding frontend ExternalToolsPanel component is also absent from the AI Team page DOM. (b) /api/agents/runs/recent returns 500 due to a SQL type-mismatch bug in the CASE expression on jsonb column. All other AI routes (team, chat, execute/u-free, linkedin/status, oauth/*/start, ping) work correctly; no Vercel FUNCTION_INVOCATION_FAILED (502) observed. CRM core lists (leads/opportunities/customers/quotes/invoices/commissions + 5 more) all return 200.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "GET /api/agents/runs/recent",
+        "issue": "Returns 500 {\"success\":false,\"error\":\"invalid input syntax for type json\"}. Root cause in /app/api/agents.ts L1044: `CASE WHEN LENGTH(output::text)>2000 THEN '<<truncated>>' ELSE output END`. `output` is a jsonb column but the THEN branch is text; Postgres tries to coerce '<<truncated>>' to jsonb and fails (it is not valid JSON). Fix: either `THEN to_jsonb('<<truncated>>'::text)` or cast both branches to text via `ELSE output::text`.",
+        "priority": "HIGH"
+      },
+      {
+        "endpoint": "POST /api/agents/tools/fetch-url",
+        "issue": "404 'Cannot POST /api/agents/tools/fetch-url' — Express default 404, i.e. route not registered in the deployed function. Code exists at /app/api/agents.ts L1211 but is not present on Vercel. Redeploy the branch that contains the External Tools section (lines 1206-1312 of agents.ts).",
+        "priority": "HIGH"
+      },
+      {
+        "endpoint": "POST /api/agents/tools/analyze",
+        "issue": "404 'Cannot POST' — same deployment gap as fetch-url. Code exists at agents.ts L1294 but not on prod.",
+        "priority": "HIGH"
+      },
+      {
+        "endpoint": "POST /api/agents/tools/extract-to-crm",
+        "issue": "404 'Cannot POST' — same deployment gap. Code exists at agents.ts L1237 but not on prod. Blocks the whole AI-to-CRM extraction flow required by feature #6/#11 of the review request.",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": [
+      {
+        "endpoint": "GET /api/agents/platform/quotes",
+        "issue": "Read timeout (>25s) intermittently — likely serverless cold start + un-indexed query. Not a crash, but slow on first hit."
+      },
+      {
+        "endpoint": "GET /api/agents/platform/invoices",
+        "issue": "Same as above — occasional cold-start timeouts."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "ExternalToolsPanel on /ai-team",
+        "issue": "data-testid='external-tools-panel' is absent from the deployed DOM. The component is written in /app/src/pages/AITeam.tsx L525+ and referenced at L161, but the deployed build does not include it. Likely tied to the same non-deployed commit as the /api/agents/tools/* backend routes. User cannot access fetch-url / analyze / extract-to-crm from the UI.",
+        "selector": "[data-testid='external-tools-panel']",
+        "priority": "HIGH"
+      }
+    ],
+    "integration_issues": [
+      {
+        "flow": "External URL → CRM extraction (feature #6 and #11)",
+        "issue": "Not testable end-to-end because backend routes return 404 and frontend panel is missing. Once deployed, the two ends should reconnect (frontend code POSTs to /api/agents/tools/{extract-to-crm|analyze|fetch-url} which exist in source).",
+        "affected_selectors": ["[data-testid='external-tools-panel']", "[data-testid='tool-source']", "[data-testid='tool-run']"]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_agents_regression.py",
+    "/app/test_reports/pytest/agents_regression.xml"
+  ],
+  "action_items": [
+    "REDEPLOY the branch containing /app/api/agents.ts (Livraison 2) to Vercel — the tools routes at L1211-1312 are absent on prod and the frontend ExternalToolsPanel component (AITeam.tsx L525+) also isn't shipped. Verify Vercel build logs pick up both api/agents.ts and the updated AITeam bundle.",
+    "FIX SQL bug in /app/api/agents.ts L1044 (runs/recent): change `CASE WHEN LENGTH(output::text)>2000 THEN '<<truncated>>' ELSE output END` → e.g. `CASE WHEN LENGTH(output::text)>2000 THEN to_jsonb('<<truncated>>'::text) ELSE output END AS output_preview`. Confirms with a quick pytest re-run of TestAgentsMeta::test_runs_recent.",
+    "After redeploy, re-run `python -m pytest backend/tests/test_agents_regression.py -v` — the 4 failing tests (runs_recent, fetch_url_public, fetch_url_bad_input, extract_to_crm_leads_from_text) plus the crash-guard test should all pass. Expected: 29/29.",
+    "(Perf, optional) Add indexes on quotes.status/quotes.created_at and invoices.status/invoices.due_date to reduce the >25s cold-start read on /api/agents/platform/{quotes,invoices}."
+  ],
+  "critical_code_review_comments": [
+    "/app/api/agents.ts L1044 (runs/recent SQL): jsonb+text mixed in CASE branches — Postgres type-inference bug, guaranteed 500. Also visible in the current prod logs; fix by casting both branches consistently.",
+    "/app/api/agents.ts L12: JWT_SECRET falls back to hardcoded 'smart-business-secret-key' — same issue flagged in iteration_1; keep as tech debt but ensure Vercel env has JWT_SECRET set.",
+    "/app/api/agents.ts L1022: `app.use('/api/agents', ensureAgentRunsTable...); requireSuperadmin` — good pattern, but ensureAgentRunsTable errors are silently swallowed (`.catch(()=>{})`). Any DDL failure will surface later as a random 500 with no log context. Consider surfacing at least console.error.",
+    "/app/api/agents.ts L1174-1176 (u-free): input length capped at 4000 chars; label defaults to 'Action libre' with no logging of the free-form intent — for auditability, log the input verbatim (trimmed) in agent_runs.input.raw as a top-level field, not only inside {input:{input}}.",
+    "/app/api/agents.ts L1211 fetch-url: returns 500 with raw fetch error string, may leak internal error messages. Consider mapping to 502 (upstream) + generic message; keep detail behind ?debug=1 or logs.",
+    "/app/api/agents.ts is now 1379 lines — approaches the 700-line guideline threshold (single-file Vercel serverless functions have real bundling constraints, so splitting is not urgent, but the ‘MONOLITHIC’ comment at top is honest — worth extracting the LinkedIn adapter and platform proxies to separate importable modules in a future pass).",
+    "/app/src/pages/AITeam.tsx L161 uses <ExternalToolsPanel/> but no conditional; if backend routes are missing, the panel silently POSTs and shows an error toast. Add a small existence probe (GET /api/agents/ping) at panel mount, or guard the CTA when success===false was returned once — otherwise UX shows a red error every time.",
+    "/app/src/components/Layout.tsx: [IA] badge is small ('IA' text-[9px]) with gradient background — passes contrast on the dark sidebar. Filtered aiLinked items so agents don’t see them: verified. Good.",
+    "/app/src/components/Layout.tsx L149-153: 'Mes Rapports' is pushed to nav for all users but also re-added to Administration submenu for admins — duplicated entry. Minor UX polish.",
+    "/app/backend/tests/test_agents_regression.py (this run) — 29 tests, ~80s, ships with the repo for continuous regression."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_agents_regression.py (new — 29 pytest cases against prod URL)"
+  ],
+  "success_rate": {
+    "backend": "83% (24/29 pass, 5 fail — 4 deployment-gap + 1 SQL bug)",
+    "frontend": "90% (7/8 flows OK — only ExternalToolsPanel missing)"
+  },
+  "test_credentials": "Superadmin eden@tbi-center.fr / loub@ki2014D — verified working. Login returns user object + sets cookie 'token'. Role=superadmin confirmed.",
+  "seed_data_creation": "None. Read-only regression except: 1 successful chat run to Eden and 1 execute/u-free run on Timothy were logged in agent_runs table (expected — that is what the endpoints do). No CRM data mutated. AI-to-CRM extract test was skipped because backend route is 404.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "After main agent (a) redeploys the branch that includes /api/agents/tools/* routes and the frontend ExternalToolsPanel bundle, and (b) fixes the SQL type-mismatch in /api/agents.ts L1044, re-run `python -m pytest backend/tests/test_agents_regression.py -v`. Expected: 29/29 pass. For frontend, verify [data-testid='external-tools-panel'] renders on /ai-team, and try POST /api/agents/tools/fetch-url with {url:'https://example.com'} returning 200 + {success:true, text:...}. Also worth revisiting the intermittent timeouts on /api/agents/platform/quotes and /invoices — may need warmup or DB indexes. The regression test file is the source of truth; extend as new features ship. Verified working end-to-end via real AI calls: /api/agents/eden/chat, /api/agents/timothy/execute/u-free — Claude Fable 5 is configured (ANTHROPIC_API_KEY set).",
+  "rca of the issue": "TWO ROOT CAUSES: (1) DEPLOYMENT GAP — the 3 external tools routes (/api/agents/tools/fetch-url, /analyze, /extract-to-crm) and the ExternalToolsPanel React component are present in the /app source tree but not in the current Vercel production build. Evidence: (a) same-file peers /api/agents/team, /chat, /execute/u-free at earlier line numbers in agents.ts work correctly, (b) the routes at L1211-1312 return Express-default 'Cannot POST' 404 HTML which only fires when the route is not registered, (c) the frontend AI Team page has no [data-testid=external-tools-panel] node. Fix: trigger a new Vercel deployment from the Livraison-2 branch and confirm the build logs include agents.ts up to L1379. (2) SQL BUG — /api/agents.ts L1044 uses a CASE whose branches mix jsonb (`output`) and text (`'<<truncated>>'`); Postgres unifies to jsonb and tries `'<<truncated>>'::jsonb` which throws 'invalid input syntax for type json' as soon as agent_runs has at least one row. Fix: `CASE WHEN LENGTH(output::text)>2000 THEN to_jsonb('<<truncated>>'::text) ELSE output END`. Mitigation before fix: none — every call to /api/agents/runs/recent returns 500."
+}
