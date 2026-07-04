@@ -77,7 +77,7 @@ French (fr-FR)
   - Adapter `internalCRM.ts` (direct DB calls, remplace l'HTTP adapter du prototype original)
 - ✅ **Livraison AI Massive** (4 mars 2026) — Multiples améliorations IA + mobile
   - Migration vers **Claude Fable 5** avec `thinking: {type: "adaptive"}` (native fetch, PAS de @anthropic-ai/sdk pour éviter FUNCTION_INVOCATION_FAILED)
-  - Backend monolithique `/api/agents.ts` (1379 lignes, NE PAS SPLITTER — casse le bundle Vercel)
+  - Backend monolithique `/api/agents.ts` (1500+ lignes, NE PAS SPLITTER — casse le bundle Vercel)
   - **Command Bar globale** : chat conversationnel flottant avec tous les agents (`POST /api/agents/:agentId/chat`)
   - **104 capacités fixes** + **Action libre** (u-free) permettant exécution de n'importe quelle tâche en texte libre
   - **Outils externes** (Web Fetching) : `POST /api/agents/tools/fetch-url`, `/analyze`, `/extract-to-crm` — permet aux agents de scraper le web et injecter directement dans le CRM
@@ -86,6 +86,17 @@ French (fr-FR)
   - **OAuth LinkedIn 3-legged** : `/api/agents/oauth/linkedin/:agentId/start` + callback, tokens stockés par agent dans `agent_linkedin_tokens`. Nécessite `LINKEDIN_CLIENT_ID_<AGENT>` + `LINKEDIN_CLIENT_SECRET_<AGENT>` dans Vercel env.
   - **AI-to-CRM Write** : les agents écrivent directement dans `leads`, `quotes`, `reports` via `internalCRM` adapter
   - **Fix SQL** (4 mars) : `/api/agents/runs/recent` — CASE mixant jsonb + text → utilisation de `to_jsonb('<<truncated>>'::text)`
+- ✅ **Livraison Temps Réel + Honnêteté LinkedIn** (4 mars 2026, prêt à déployer)
+  - **SSE Streaming Chat** (`POST /api/agents/:agentId/chat/stream`) : réponses Claude Fable 5 mot-par-mot en temps réel dans la Command Bar
+  - **`streamClaude()`** async-generator qui parse les SSE d'Anthropic et yield chaque text_delta
+  - **`startRun`/`finishRun`** helpers pour tracker les runs IA `status='running'` avec durée écoulée
+  - **`GET /api/agents/runs/live`** : liste des tâches IA actuellement en cours (< 10min)
+  - **Presence** (`POST /api/presence/heartbeat` + `GET /api/presence/online`) : table `user_presence`, timeout 60s
+  - **Hooks React** : `useLivePoll` (polling 3s tab-visibility aware avec détection nouveautés) + `usePresence` (heartbeat 20s)
+  - **Composants** : `<LiveBadge>` (dot pulsant), `<PresenceIndicator>` (cluster avatars + popover), `<LiveRunsPanel>` (cartes tâches IA en cours)
+  - **Pages CRM live** : Leads, Devis, Factures avec auto-refresh 3s + badge "🟢 Nouveau" sur nouveaux items (auto-clear 15s)
+  - **LinkedIn honnêteté** : les fonctions `liSendMessage/liSendConnection/liPublishPost/liSearchProspects` ne mentent plus. Au lieu de retourner `success:true` en simulation silencieuse, elles renvoient `{success:false, simulated:true, error, reason, workaround}` avec la vraie raison (Marketing Developer Platform requis pour messages, etc.)
+  - **UI transparence** : Panel AgentPanel affiche bannière amber "⚠️ Action NON exécutée en réel" (data-testid=`agent-result-simulated`) ou emerald "✅ Exécuté en temps réel" (data-testid=`agent-result-live`) selon `result.simulated`/`result.live`
 
 ## Backlog / Roadmap
 
