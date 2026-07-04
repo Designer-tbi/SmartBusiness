@@ -402,8 +402,19 @@ function AgentPanel({ agent, onClose, onRefresh, linkedinStatus }: { agent: Agen
       if (cap.method === 'POST') {
         opts.headers = { 'Content-Type': 'application/json' };
         try {
-          opts.body = cap.needsBody ? body : '{}';
-          if (cap.needsBody) JSON.parse(body); // validate
+          if (cap.needsBody) {
+            // For universal capabilities: send as { input }. For legacy: raw JSON.
+            const trimmed = body.trim();
+            const isJSON = trimmed.startsWith('{') || trimmed.startsWith('[');
+            if (isJSON) {
+              JSON.parse(trimmed); // validate
+              opts.body = trimmed;
+            } else {
+              opts.body = JSON.stringify({ input: trimmed });
+            }
+          } else {
+            opts.body = '{}';
+          }
         } catch { setRunning(false); alert('JSON invalide'); return; }
       }
       const r = await fetch(cap.endpoint, opts);
@@ -477,9 +488,9 @@ function AgentPanel({ agent, onClose, onRefresh, linkedinStatus }: { agent: Agen
                 <textarea
                   value={body}
                   onChange={e => setBody(e.target.value)}
-                  rows={5}
+                  rows={3}
                   data-testid={`body-${agent.id}-${cap.id}`}
-                  placeholder='{ "topic": "Transformation digitale PME" }'
+                  placeholder={cap.id.startsWith('u-') ? 'Tapez votre instruction ou paramètre (texte libre ou JSON)…' : '{ "topic": "Transformation digitale PME" }'}
                   className="mt-3 w-full px-3 py-2 text-xs font-mono bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 />
               )}

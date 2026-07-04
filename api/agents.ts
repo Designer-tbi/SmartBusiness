@@ -419,6 +419,138 @@ const AGENTS: AgentMeta[] = [
   ]},
 ];
 
+// ─── UNIVERSAL CAPABILITY LIBRARY (unlimited actions per agent) ────────
+// Each entry is a generic capability handled via /api/agents/execute.
+// Claude fabrique la réponse à partir du prompt template ci-dessous.
+type UniversalCap = { id: string; label: string; description: string; prompt: string; needsInput?: string; saveAsReport?: boolean };
+
+const UNIVERSAL_CAPS: Record<string, UniversalCap[]> = {
+  eden: [
+    { id: "u-vision-5y",       label: "Vision 5 ans",              description: "Écrit la vision produit à 5 ans", prompt: "Rédige la vision stratégique de TBI Technology à 5 ans (2026-2031). Marchés visés, produits phares, ambitions financières.", saveAsReport: true },
+    { id: "u-note-interne",    label: "Note interne",              description: "Rédige une note interne à toute l'équipe", prompt: "Rédige une note interne officielle pour toute l'équipe TBI sur le sujet suivant : {{input}}", needsInput: "Sujet de la note" },
+    { id: "u-decision",        label: "Décision stratégique",      description: "Rend un arbitrage exécutif", prompt: "En tant que DG, rends une décision claire sur : {{input}}. Explique le raisonnement, les alternatives écartées, les prochaines étapes.", needsInput: "Question à trancher" },
+    { id: "u-objectif-tri",    label: "Objectif trimestriel",      description: "Définit les OKR du trimestre", prompt: "Définis les objectifs trimestriels de TBI Technology avec 3 OKR par département (Commercial, RH, Finance). Format : Objectif + 3 KR mesurables.", saveAsReport: true },
+    { id: "u-partenariat",     label: "Négocier partenariat",      description: "Prépare un pitch de partenariat", prompt: "Prépare un dossier de négociation de partenariat stratégique avec : {{input}}. Inclure : proposition de valeur, synergies, deal structure, prochaines étapes.", needsInput: "Nom du partenaire" },
+    { id: "u-investisseur",    label: "Répondre à investisseur",   description: "Rédige une réponse pro à un investisseur", prompt: "Rédige une réponse professionnelle et convaincante à un investisseur qui demande : {{input}}. Style de CEO expérimenté.", needsInput: "Question de l'investisseur" },
+    { id: "u-analyse-360",     label: "Analyse 360° de l'entreprise", description: "Vue globale santé + risques + opportunités", prompt: "Fais une analyse 360° de TBI Technology : santé financière, position commerciale, RH, risques, opportunités. Utilise les données du CRM en simulation. Conclus par 5 priorités immédiates.", saveAsReport: true },
+  ],
+  timothy: [
+    { id: "u-plan-mensuel",    label: "Plan de vente mensuel",     description: "Draft le plan commercial du mois", prompt: "Rédige le plan de vente du mois pour l'équipe commerciale TBI : cibles, quotas par sous-agent (Alex, Sara, Marc, Lisa), actions clés, événements.", saveAsReport: true },
+    { id: "u-analyse-concu",   label: "Analyse concurrentielle",   description: "Compare TBI à ses concurrents", prompt: "Analyse la concurrence de TBI Technology au Congo/RDC : {{input}}. Positionnement, forces, faiblesses, opportunités.", needsInput: "Nom(s) de concurrent(s)" },
+    { id: "u-argument",        label: "Argumentaire commercial",   description: "Génère un argumentaire pour un service", prompt: "Crée un argumentaire commercial complet pour vendre : {{input}}. 5 bénéfices client, 5 objections classiques + réponses, 3 preuves sociales.", needsInput: "Service à vendre" },
+    { id: "u-recap-semaine",   label: "Récap semaine commerciale", description: "Bilan hebdo du commercial", prompt: "Fais le bilan de la semaine commerciale TBI : deals gagnés/perdus, prospects chauds, actions à mener la semaine prochaine.", saveAsReport: true },
+    { id: "u-fermeture",       label: "Fermer un deal",            description: "Aide à conclure une opportunité", prompt: "Un prospect hésite à signer. Contexte : {{input}}. Propose 3 tactiques de closing éthiques + réponses aux dernières objections.", needsInput: "Situation du deal" },
+    { id: "u-negocier",        label: "Négocier une remise",       description: "Stratégie de négociation prix", prompt: "Le client demande une remise. Situation : {{input}}. Analyse si accorder et quoi obtenir en échange. Rédige la réponse.", needsInput: "Demande client" },
+    { id: "u-onboarding",      label: "Onboarding client",         description: "Plan d'onboarding pour un nouveau client", prompt: "Un nouveau client vient de signer. Contexte : {{input}}. Prépare le plan d'onboarding sur 30 jours : kick-off, jalons, rituels.", needsInput: "Client + service" },
+  ],
+  alex: [
+    { id: "u-enrichir-lead",   label: "Enrichir un lead",          description: "Analyse et enrichit un profil prospect", prompt: "Enrichis ce profil prospect (info entreprise, décideur, taille, besoins IT probables) : {{input}}", needsInput: "Nom + entreprise" },
+    { id: "u-message-perso",   label: "Message d'approche perso",  description: "Rédige un InMail sur mesure", prompt: "Rédige un message LinkedIn ultra-personnalisé pour approcher : {{input}}. Court (150 mots), une accroche unique, CTA clair.", needsInput: "Nom, poste, secteur" },
+    { id: "u-analyse-secteur", label: "Analyse d'un secteur",      description: "Cartographie un secteur B2B", prompt: "Cartographie le secteur suivant au Congo/RDC : {{input}}. Top acteurs, taille marché, besoins IT typiques, meilleurs points d'entrée commerciaux.", needsInput: "Secteur", saveAsReport: true },
+    { id: "u-decideur",        label: "Identifier le décideur",    description: "Trouve qui décide dans l'entreprise cible", prompt: "Pour vendre à cette entreprise : {{input}}, qui contacter en priorité (poste, département, seniorité) et pourquoi ?", needsInput: "Entreprise cible" },
+    { id: "u-competition",     label: "Vérifier concurrents actifs", description: "Qui vend déjà à ce prospect ?", prompt: "Analyse si des concurrents de TBI vendent déjà à : {{input}}. Comment les déloger ?", needsInput: "Prospect cible" },
+  ],
+  sara: [
+    { id: "u-roi-client",      label: "Calculer ROI client",       description: "Estime le retour sur investissement", prompt: "Calcule le ROI estimé pour un client qui investit dans : {{input}}. Économies annuelles, temps gagné, revenus additionnels. Format tableau.", needsInput: "Service + contexte client" },
+    { id: "u-cahier-charges",  label: "Cahier des charges",        description: "Rédige un cahier des charges type", prompt: "Rédige un cahier des charges détaillé pour : {{input}}. Périmètre, livrables, phases, critères d'acceptation.", needsInput: "Projet" },
+    { id: "u-compare-offres",  label: "Comparaison offres",        description: "Compare offres TBI vs concurrent", prompt: "Compare l'offre TBI vs celle du concurrent : {{input}}. Tableau avantages/inconvénients honnête.", needsInput: "Concurrent + service" },
+    { id: "u-devis-express",   label: "Devis express",             description: "Génère un devis rapide", prompt: "Génère un devis TBI structuré (FCFA) pour : {{input}}. Lignes détaillées, sous-total, remise éventuelle, total, conditions.", needsInput: "Client + services" },
+    { id: "u-follow-up-seq",   label: "Séquence de relance",       description: "Emails de relance après proposition", prompt: "Crée une séquence de 4 emails de relance sur 15 jours pour un prospect qui n'a pas répondu à la proposition : {{input}}. Ton différent à chaque email.", needsInput: "Contexte proposition" },
+  ],
+  marc: [
+    { id: "u-deal-priorise",   label: "Prioriser les deals",       description: "Classe les opportunités par priorité", prompt: "Analyse le pipeline TBI actuel et propose la priorisation des deals sur 30 jours. Critères : montant × probabilité × urgence. Recommandations par deal." },
+    { id: "u-relance-cible",   label: "Relancer un deal précis",   description: "Rédige la relance pour un deal spécifique", prompt: "Rédige un message de relance chaleureux mais ferme pour ce deal : {{input}}. Choisir le canal (email, LinkedIn, WhatsApp) et adapter.", needsInput: "Deal (client + montant + dernière interaction)" },
+    { id: "u-deals-risque",    label: "Détecter deals à risque",   description: "Identifie les opportunités en danger", prompt: "Détecte les 5 opportunités les plus à risque (silence prolongé, changement de contact, budget serré). Actions correctives immédiates.", saveAsReport: true },
+    { id: "u-forecast-mois",   label: "Forecast du mois",          description: "Prévoit le CA du mois", prompt: "Sur la base du pipeline actuel, forecast le CA signé ce mois-ci. Scénarios low/base/high + hypothèses.", saveAsReport: true },
+  ],
+  lisa: [
+    { id: "u-nda",             label: "NDA rapide",                description: "Génère un NDA bilatéral", prompt: "Rédige un NDA bilatéral OHADA entre TBI Technology et {{input}}. Durée 3 ans. Concis, robuste, droit congolais.", needsInput: "Nom du partenaire" },
+    { id: "u-cgv",             label: "CGV standard",              description: "Génère les CGV TBI", prompt: "Rédige les CGV standard de TBI Technology pour ses services IT au Congo. Facturation, propriété intellectuelle, garantie, résiliation, droit OHADA." },
+    { id: "u-avenant",         label: "Avenant contrat",           description: "Modification contractuelle", prompt: "Rédige un avenant au contrat pour la modification suivante : {{input}}. Format officiel avec clauses claires.", needsInput: "Modification à opérer" },
+    { id: "u-mise-en-demeure", label: "Mise en demeure",           description: "Lettre officielle de MED", prompt: "Rédige une mise en demeure ferme mais légale à : {{input}}. Ton : professionnel, réglementaire, dernière étape avant contentieux.", needsInput: "Client + facture impayée" },
+    { id: "u-rgpd",            label: "Analyse RGPD/conformité",   description: "Audit rapide conformité", prompt: "Analyse la conformité RGPD/protection données de : {{input}}. Risques, corrections urgentes.", needsInput: "Contexte à auditer" },
+    { id: "u-clauses-risque",  label: "Détection clauses risquées", description: "Analyse un contrat reçu", prompt: "Analyse ce contrat entrant reçu par TBI et détecte les clauses risquées : {{input}}. Recommande négociation.", needsInput: "Texte du contrat" },
+  ],
+  flore: [
+    { id: "u-fiche-poste",     label: "Fiche de poste",            description: "Rédige une fiche de poste complète", prompt: "Rédige la fiche de poste complète pour : {{input}}. Missions, responsabilités, profil, salaire indicatif (FCFA).", needsInput: "Intitulé du poste" },
+    { id: "u-grille-salaire",  label: "Grille salariale TBI",      description: "Génère la grille salariale actualisée", prompt: "Génère la grille salariale actualisée de TBI Technology (Congo) pour tous les postes tech + commercial + support. Fourchettes en FCFA.", saveAsReport: true },
+    { id: "u-onboarding-emp",  label: "Onboarding collaborateur",  description: "Plan d'intégration sur 90 jours", prompt: "Plan d'onboarding sur 90 jours pour un nouveau collaborateur : {{input}}. Semaine par semaine.", needsInput: "Poste du nouveau" },
+    { id: "u-plan-comm",       label: "Plan communication interne", description: "Communique aux équipes", prompt: "Rédige un plan de communication interne sur : {{input}}. Canaux, timing, ton adapté à la culture TBI.", needsInput: "Sujet à communiquer" },
+    { id: "u-evaluation",      label: "Évaluation performance",    description: "Grille d'évaluation semestrielle", prompt: "Crée la grille d'évaluation semestrielle pour : {{input}}. Critères, notation 1-5, entretien type.", needsInput: "Poste ou équipe" },
+    { id: "u-sortie",          label: "Sortie collaborateur",      description: "Procédure de départ", prompt: "Procédure de sortie professionnelle pour : {{input}}. Solde tout compte, restitution matériel, entretien de sortie, communication.", needsInput: "Contexte départ" },
+  ],
+  nina: [
+    { id: "u-annonce-emploi",  label: "Annonce d'emploi",          description: "Rédige une annonce attractive", prompt: "Rédige une annonce d'emploi LinkedIn attractive pour : {{input}}. Hook accrocheur, ton TBI, hashtags Congo/RDC.", needsInput: "Poste" },
+    { id: "u-grille-entretien",label: "Grille d'entretien",        description: "Questions structurées d'entretien", prompt: "Grille d'entretien structurée pour recruter : {{input}}. 15 questions techniques + comportementales + notation.", needsInput: "Poste à pourvoir" },
+    { id: "u-verif-ref",       label: "Vérifier références",       description: "Script d'appel de références", prompt: "Script d'appel pour vérifier les références de : {{input}}. 8 questions clés, red flags à détecter.", needsInput: "Candidat + poste" },
+    { id: "u-offre-emb",       label: "Offre d'embauche",          description: "Rédige la lettre d'offre", prompt: "Rédige une lettre d'offre d'embauche officielle pour : {{input}}. Poste, salaire, conditions, deadline.", needsInput: "Candidat + poste + salaire" },
+  ],
+  omar: [
+    { id: "u-charges",         label: "Charges patronales",        description: "Calcul charges pour un salaire", prompt: "Calcule les charges patronales complètes pour un salaire brut : {{input}} FCFA. CNSS, INPP, IR barème congolais, coût total employeur.", needsInput: "Salaire brut FCFA" },
+    { id: "u-declaration",     label: "Déclaration CNSS mois",     description: "Prépare la déclaration mensuelle", prompt: "Prépare la déclaration CNSS mensuelle TBI Technology pour {{input}}. Effectifs, base cotisable, cotisations. Format déclaratif congolais.", needsInput: "Mois/année" },
+    { id: "u-contrat-travail", label: "Contrat de travail",        description: "Contrat CDI type Congo", prompt: "Rédige un contrat CDI congolais pour : {{input}}. Toutes clauses : période essai, préavis, congés, mutuelle.", needsInput: "Poste + salaire + spécificités" },
+    { id: "u-note-frais",      label: "Politique note de frais",   description: "Rédige la politique NDF", prompt: "Rédige la politique de notes de frais TBI Technology : plafonds, justificatifs, validation, remboursement, cas particuliers." },
+  ],
+  paul: [
+    { id: "u-bilan-simplifie", label: "Bilan simplifié",           description: "Bilan comptable synthétique", prompt: "Prépare un bilan simplifié TBI Technology au {{input}}. Actif, passif, capitaux propres. Explique les grandes masses.", needsInput: "Date de clôture", saveAsReport: true },
+    { id: "u-compte-resultat", label: "Compte de résultat",        description: "P&L synthétique", prompt: "Prépare le compte de résultat TBI pour la période {{input}}. Produits, charges, résultat. Analyse d'écarts vs N-1.", needsInput: "Période", saveAsReport: true },
+    { id: "u-budget-annuel",   label: "Budget annuel",             description: "Draft le budget annuel", prompt: "Budget annuel 2026 TBI Technology. CA cible, structure de coûts, investissements, résultat, trésorerie prévue.", saveAsReport: true },
+    { id: "u-marges-produit",  label: "Analyse marges par produit", description: "Rentabilité des services", prompt: "Analyse les marges par produit/service TBI (site web, mobile, CRM, ERP, cyber, formation). Identifie les plus rentables et pourquoi." },
+    { id: "u-banque",          label: "Négocier avec la banque",   description: "Prépare une négo bancaire", prompt: "Prépare un dossier de négociation avec la banque pour : {{input}}. Chiffres clés, garanties, argumentaire.", needsInput: "Objet (ligne crédit, découvert, prêt...)" },
+    { id: "u-approuver-dep",   label: "Approuver dépense",         description: "Décision d'approbation", prompt: "Rends une décision d'approbation ou refus pour cette dépense : {{input}}. Analyse ROI, priorité, disponibilité budgétaire.", needsInput: "Dépense (nature, montant, justification)" },
+  ],
+  chloe: [
+    { id: "u-ecriture-vente",  label: "Écriture de vente",         description: "Génère l'écriture SYSCOHADA", prompt: "Génère l'écriture comptable SYSCOHADA pour cette vente : {{input}}. Journal, comptes, TVA collectée, montants HT/TTC.", needsInput: "Détails vente" },
+    { id: "u-ecriture-achat",  label: "Écriture d'achat",          description: "Génère l'écriture SYSCOHADA", prompt: "Génère l'écriture comptable SYSCOHADA pour cet achat : {{input}}. Journal, comptes, TVA déductible, montants HT/TTC.", needsInput: "Détails achat" },
+    { id: "u-balance",         label: "Balance générale",          description: "Prépare la balance", prompt: "Prépare la balance générale simplifiée pour la période {{input}}. Toutes classes SYSCOHADA, débit/crédit/solde.", needsInput: "Période" },
+    { id: "u-tva-declar",      label: "Déclaration TVA",           description: "Prépare la déclaration TVA mensuelle", prompt: "Prépare la déclaration TVA mensuelle TBI pour {{input}}. TVA collectée 18%, TVA déductible, solde à payer. Format déclaratif.", needsInput: "Mois/année", saveAsReport: true },
+    { id: "u-grand-livre",     label: "Grand livre d'un compte",   description: "Détail mouvements d'un compte", prompt: "Grand livre du compte {{input}} pour l'exercice en cours. Mouvements, solde. Analyse rapide.", needsInput: "Numéro de compte SYSCOHADA (ex: 411)" },
+  ],
+  kevin: [
+    { id: "u-negociation-ech", label: "Négocier échéancier",       description: "Propose un plan de paiement", prompt: "Un client demande un échéancier. Contexte : {{input}}. Propose 3 options d'échéancier + conditions à obtenir en échange.", needsInput: "Client + montant + situation" },
+    { id: "u-lettre-relance",  label: "Lettre de relance",         description: "Rédige la lettre de relance", prompt: "Rédige la lettre de relance officielle (ton adapté au niveau : rappel, ferme, mise en demeure) pour : {{input}}", needsInput: "Client + facture + jours retard" },
+    { id: "u-contentieux",     label: "Dossier contentieux",       description: "Prépare le dossier avocat", prompt: "Prépare le dossier contentieux à transmettre à l'avocat pour : {{input}}. Historique, pièces, préjudice, demandes.", needsInput: "Client + historique" },
+    { id: "u-suivi-encours",   label: "Suivi encours clients",     description: "État des créances client", prompt: "État des créances clients TBI. Top 10 des encours par ancienneté. Actions par tranche (<30j / 30-60j / >60j).", saveAsReport: true },
+  ],
+  ingrid: [
+    { id: "u-simulation-bud",  label: "Simulation budgétaire",     description: "Scénarios budget alternatifs", prompt: "Fais 3 simulations budgétaires TBI Technology : {{input}}. Best case / base case / worst case. Impact CA, coûts, résultat.", needsInput: "Scénario à simuler" },
+    { id: "u-anomalies",       label: "Détection anomalies",       description: "Anomalies dans les chiffres", prompt: "Analyse les données financières TBI et détecte les anomalies (dépassements, variations inhabituelles, incohérences). Explique et propose corrections." },
+    { id: "u-kpi-dashboard",   label: "Tableau de bord KPI",       description: "KPIs financiers clés", prompt: "Génère le tableau de bord des KPIs financiers TBI : marge, DSO, DPO, BFR, cash burn, runway. Interprétation + actions.", saveAsReport: true },
+    { id: "u-cout-acquisition",label: "Coût d'acquisition client", description: "Calcul CAC + LTV", prompt: "Calcule le CAC (coût d'acquisition client) et LTV (valeur vie client) de TBI Technology. Ratio LTV/CAC + recommandations." },
+  ],
+};
+
+// Merge universal caps into AGENTS metadata + attach the generic executor endpoint
+for (const agent of AGENTS) {
+  const extras = UNIVERSAL_CAPS[agent.id] || [];
+  agent.capabilities = [
+    ...agent.capabilities,
+    ...extras.map((c) => ({
+      id: c.id,
+      label: c.label,
+      description: c.description,
+      endpoint: `/api/agents/${agent.id}/execute/${c.id}`,
+      method: "POST" as const,
+      needsBody: !!c.needsInput,
+    })),
+    // Universal "action libre" — user gives any natural language instruction
+    {
+      id: "u-free",
+      label: "⚡ Action libre",
+      description: `Donner n'importe quel ordre à ${agent.name}`,
+      endpoint: `/api/agents/${agent.id}/execute/u-free`,
+      method: "POST" as const,
+      needsBody: true,
+    },
+  ];
+}
+
+function findUniversalCap(agentId: string, capId: string): UniversalCap | null {
+  return (UNIVERSAL_CAPS[agentId] || []).find((c) => c.id === capId) || null;
+}
+
+
+
 // ─── DB run logging ────────────────────────────────────────────────
 let runsTableReady = false;
 async function ensureAgentRunsTable() {
@@ -995,6 +1127,51 @@ Règles de réponse :
   }
 });
 
+
+
+
+// ─── UNIVERSAL EXECUTOR — Unlimited capabilities per agent ─────────
+// POST /api/agents/:agentId/execute/:capId  { input?: string }
+// Handles every capability declared in UNIVERSAL_CAPS + the special "u-free" (free-form command).
+app.post("/api/agents/:agentId/execute/:capId", async (req, res) => {
+  const agentId = req.params.agentId;
+  const capId = req.params.capId;
+  const meta = AGENTS.find((a) => a.id === agentId);
+  if (!meta) return res.status(404).json({ success: false, error: "Agent inconnu" });
+
+  const persona = AGENT_PERSONAS[agentId] || `Tu es ${meta.name}, ${meta.role} chez TBI Technology.`;
+  const input = String(req.body?.input || req.body?.message || "").substring(0, 4000);
+
+  let userPrompt = "";
+  let capLabel = capId;
+  let shouldSaveReport = false;
+
+  if (capId === "u-free") {
+    if (!input) return res.status(400).json({ success: false, error: "Instruction requise" });
+    userPrompt = input;
+    capLabel = "Action libre";
+  } else {
+    const cap = findUniversalCap(agentId, capId);
+    if (!cap) return res.status(404).json({ success: false, error: "Capacité inconnue" });
+    if (cap.needsInput && !input) return res.status(400).json({ success: false, error: `Champ requis : ${cap.needsInput}` });
+    userPrompt = cap.prompt.replace(/\{\{input\}\}/g, input);
+    capLabel = cap.label;
+    shouldSaveReport = !!cap.saveAsReport;
+  }
+
+  const t0 = Date.now();
+  try {
+    const reply = await askClaude(persona + "\n\nExécute la demande de façon exécutive, concrète et actionnable.", userPrompt);
+    await logRun({ agent_id: agentId, capability: capId, status: "success", input: { input }, output: { reply: reply.substring(0, 8000) }, triggered_by: (req as any).user?.uid, duration_ms: Date.now() - t0 });
+    if (shouldSaveReport) {
+      await saveAgentReport({ agent_id: agentId, capability: capId, title: `${capLabel} — ${new Date().toLocaleDateString("fr-FR")}`, summary: reply });
+    }
+    res.json({ success: true, agent: agentId, capability: capId, label: capLabel, reply, saved_to_reports: shouldSaveReport });
+  } catch (err: any) {
+    await logRun({ agent_id: agentId, capability: capId, status: "error", error_message: err?.message || String(err), duration_ms: Date.now() - t0 });
+    res.status(500).json({ success: false, agent: agentId, capability: capId, error: err?.message || "Erreur exécution" });
+  }
+});
 
 
 // ─── PLATFORM APIs (any agent can access ALL) ─────────────────────
