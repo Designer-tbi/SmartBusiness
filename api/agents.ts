@@ -28,7 +28,7 @@ async function query(text: string, params: any[] = []) {
 }
 
 // ─── Claude client (REST, no SDK) ───────────────────────────────────
-const MODEL = process.env.CLAUDE_MODEL || "claude-sonnet-4-6";
+const MODEL = process.env.CLAUDE_MODEL || "claude-sonnet-4-5";
 const MAX_TOKENS = parseInt(process.env.CLAUDE_MAX_TOKENS || "4096", 10);
 const CLAUDE_INFO = { model: MODEL, max_tokens: MAX_TOKENS, configured: !!process.env.ANTHROPIC_API_KEY };
 type UserMessage = { role: "user" | "assistant"; content: string };
