@@ -1041,7 +1041,7 @@ app.get("/api/agents/runs/recent", async (req, res) => {
     const args: any[] = []; let where = "";
     if (agent_id) { args.push(agent_id); where = "WHERE agent_id = $1"; }
     args.push(Number(limit) || 50);
-    const r = await q(`SELECT id, agent_id, capability, status, error_message, duration_ms, created_at, CASE WHEN LENGTH(output::text) > 2000 THEN '<<truncated>>' ELSE output END AS output_preview FROM agent_runs ${where} ORDER BY created_at DESC LIMIT $${args.length}`, args);
+    const r = await q(`SELECT id, agent_id, capability, status, error_message, duration_ms, created_at, CASE WHEN LENGTH(output::text) > 2000 THEN to_jsonb('<<truncated>>'::text) ELSE output END AS output_preview FROM agent_runs ${where} ORDER BY created_at DESC LIMIT $${args.length}`, args);
     res.json({ success: true, runs: r.rows });
   } catch (err: any) { res.status(500).json({ success: false, error: err.message }); }
 });

@@ -75,6 +75,17 @@ French (fr-FR)
   - Table `agent_runs` (logs durée, statut, input, output, errors)
   - LinkedIn par agent (mode simulation par défaut, real API si token OAuth présent)
   - Adapter `internalCRM.ts` (direct DB calls, remplace l'HTTP adapter du prototype original)
+- ✅ **Livraison AI Massive** (4 mars 2026) — Multiples améliorations IA + mobile
+  - Migration vers **Claude Fable 5** avec `thinking: {type: "adaptive"}` (native fetch, PAS de @anthropic-ai/sdk pour éviter FUNCTION_INVOCATION_FAILED)
+  - Backend monolithique `/api/agents.ts` (1379 lignes, NE PAS SPLITTER — casse le bundle Vercel)
+  - **Command Bar globale** : chat conversationnel flottant avec tous les agents (`POST /api/agents/:agentId/chat`)
+  - **104 capacités fixes** + **Action libre** (u-free) permettant exécution de n'importe quelle tâche en texte libre
+  - **Outils externes** (Web Fetching) : `POST /api/agents/tools/fetch-url`, `/analyze`, `/extract-to-crm` — permet aux agents de scraper le web et injecter directement dans le CRM
+  - Composant `ExternalToolsPanel` sur `/ai-team` pour piloter ces outils
+  - **UI mobile-first globale** : hamburger drawer, sidebar avec départements + badges `[IA]`, `.responsive-table` CSS (tables collapse en cards mobile), safe-areas iOS
+  - **OAuth LinkedIn 3-legged** : `/api/agents/oauth/linkedin/:agentId/start` + callback, tokens stockés par agent dans `agent_linkedin_tokens`. Nécessite `LINKEDIN_CLIENT_ID_<AGENT>` + `LINKEDIN_CLIENT_SECRET_<AGENT>` dans Vercel env.
+  - **AI-to-CRM Write** : les agents écrivent directement dans `leads`, `quotes`, `reports` via `internalCRM` adapter
+  - **Fix SQL** (4 mars) : `/api/agents/runs/recent` — CASE mixant jsonb + text → utilisation de `to_jsonb('<<truncated>>'::text)`
 
 ## Backlog / Roadmap
 
@@ -113,10 +124,11 @@ French (fr-FR)
 - `EXTERNAL_API_KEY` (SmartDesk)
 - `SMARTDESK_API_URL` (SmartDesk)
 - `SMTP_FROM` (optional, default demo@smart-desk.pro)
-- `ANTHROPIC_API_KEY` ⚡ — clé Claude Sonnet 4.6 pour les 13 agents IA (Super Admin)
-- `CLAUDE_MODEL` (default: claude-sonnet-4-6)
+- `ANTHROPIC_API_KEY` ⚡ — clé Claude Fable 5 (le user a fourni sa propre clé, PAS emergent llm key)
+- `CLAUDE_MODEL` (default: claude-fable-5)
 - `CLAUDE_MAX_TOKENS` (default: 4096)
-- `LINKEDIN_TOKEN_<AGENT_UC>` + `LINKEDIN_MEMBER_ID_<AGENT_UC>` (optionnel — sinon mode simulation)
+- `LINKEDIN_CLIENT_ID_<AGENT_UC>` + `LINKEDIN_CLIENT_SECRET_<AGENT_UC>` — OAuth 3-legged flow (ex: `LINKEDIN_CLIENT_ID_TIMOTHY`). Sinon mode simulation.
+- `LINKEDIN_REDIRECT_URI` (optionnel, default: https://smart-business-sigma.vercel.app/api/agents/oauth/linkedin/callback)
 
 ## Test credentials
 See `/app/memory/test_credentials.md`
