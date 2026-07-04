@@ -535,12 +535,15 @@ function AgentPanel({ agent, onClose, onRefresh, linkedinStatus }: { agent: Agen
             </div>
           </div>
           {linkedinStatus && (
-            <div className="mt-4 flex items-center gap-2 text-sm">
+            <div className="mt-4 flex items-center gap-2 text-sm flex-wrap">
               <Linkedin size={14} className="text-white/90" />
               {linkedinStatus.connected ? (
-                <span className="inline-flex items-center gap-1 bg-white/20 backdrop-blur px-2.5 py-1 rounded-full text-xs">
-                  <CheckCircle2 size={12} /> LinkedIn connecté {linkedinStatus.member_id ? `(${linkedinStatus.member_id.substring(0, 8)}…)` : ''}
-                </span>
+                <>
+                  <span className="inline-flex items-center gap-1 bg-white/20 backdrop-blur px-2.5 py-1 rounded-full text-xs">
+                    <CheckCircle2 size={12} /> LinkedIn connecté {linkedinStatus.member_id ? `(${linkedinStatus.member_id.substring(0, 8)}…)` : ''}
+                  </span>
+                  <span className="text-[10px] text-white/70">Posts réels ✓ · Messages/Invitations ✗ (limitation LinkedIn)</span>
+                </>
               ) : linkedinStatus.has_credentials ? (
                 <a
                   href={`/api/agents/oauth/linkedin/${agent.id}/start`}
@@ -550,7 +553,7 @@ function AgentPanel({ agent, onClose, onRefresh, linkedinStatus }: { agent: Agen
                   <Linkedin size={12} /> Connecter LinkedIn
                 </a>
               ) : (
-                <span className="text-xs text-white/70 italic">LinkedIn en simulation (pas de credentials app)</span>
+                <span className="text-xs text-white/70 italic">LinkedIn en simulation (ajoutez LINKEDIN_CLIENT_ID_{agent.id.toUpperCase()} dans Vercel)</span>
               )}
             </div>
           )}
@@ -601,6 +604,41 @@ function AgentPanel({ agent, onClose, onRefresh, linkedinStatus }: { agent: Agen
                 </span>
                 <button onClick={() => setResult(null)} className="text-xs hover:underline">Effacer</button>
               </div>
+              {/* Smart status banner — real vs simulated */}
+              {(() => {
+                const r = result?.result || result?.linkedin_result || result;
+                const isSimulated = r?.simulated === true;
+                const isLive = r?.live === true || result?.live === true;
+                if (isSimulated) {
+                  return (
+                    <div className="px-4 py-3 bg-amber-50 border-b border-amber-200 text-amber-900" data-testid="agent-result-simulated">
+                      <div className="flex items-start gap-2">
+                        <AlertTriangle size={16} className="mt-0.5 shrink-0 text-amber-600" />
+                        <div className="text-xs md:text-sm">
+                          <p className="font-bold">⚠️ Action NON exécutée en réel (mode simulation)</p>
+                          {r?.reason && <p className="mt-1 text-amber-800/90">{r.reason}</p>}
+                          {r?.workaround && <p className="mt-2 pt-2 border-t border-amber-200 text-amber-800/90"><strong>Solution :</strong> {r.workaround}</p>}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
+                if (isLive) {
+                  return (
+                    <div className="px-4 py-2.5 bg-emerald-50 border-b border-emerald-200 text-emerald-800 text-xs md:text-sm flex items-start gap-2" data-testid="agent-result-live">
+                      <CheckCircle2 size={14} className="mt-0.5 shrink-0 text-emerald-600" />
+                      <div>
+                        <span className="font-bold">✅ Exécuté en temps réel</span>
+                        {r?.delivered && <span> — {r.delivered}</span>}
+                        {r?.post_url && (
+                          <a href={r.post_url} target="_blank" rel="noreferrer" className="ml-2 underline font-medium">Voir sur LinkedIn ↗</a>
+                        )}
+                      </div>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
               <pre className="bg-slate-900 text-emerald-200 p-4 text-xs overflow-x-auto max-h-96" data-testid="agent-result">{JSON.stringify(result, null, 2)}</pre>
             </div>
           </div>

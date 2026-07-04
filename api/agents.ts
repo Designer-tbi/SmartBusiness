@@ -205,16 +205,23 @@ async function liSearchProspects(agentId: string, { keywords = "", location = "B
       const params = new URLSearchParams({ keywords, count: String(limit) });
       const data = await liApiCall(`https://api.linkedin.com/v2/people-search?${params}`, t.access_token);
       return { agent: acc.agentName, results: data.elements || [], total: data.paging?.total || 0, live: true };
-    } catch (e: any) { console.warn(`[LI ${agentId} search fallback]`, e.message); }
+    } catch (e: any) {
+      console.warn(`[LI ${agentId} search fallback]`, e.message);
+      // Return simulated set BUT explicitly flag the reason so the UI can warn the superadmin.
+      const mock = [
+        { id: "LI001", name: "Jean-Baptiste Mbemba", title: "DG - Société Mbemba Transport", location: "Brazzaville", industry: "Transport", connections: 2 },
+        { id: "LI002", name: "Odette Nkounkou",      title: "PDG - Nkounkou Commerce",       location: "Pointe-Noire", industry: "Commerce",  connections: 1 },
+        { id: "LI003", name: "Pierre Moukala",       title: "DSI - Groupe Moukala",          location: "Brazzaville", industry: "Industrie", connections: 3 },
+      ].slice(0, limit);
+      return { agent: acc.agentName, results: mock, total: mock.length, simulated: true, simulated_reason: `LinkedIn API refuse la recherche (${String(e.message).substring(0, 120)}). LinkedIn restreint ce endpoint aux partenaires approuvés (Marketing Developer Platform).`, query: keywords, location };
+    }
   }
   const mock = [
     { id: "LI001", name: "Jean-Baptiste Mbemba", title: "DG - Société Mbemba Transport", location: "Brazzaville", industry: "Transport", connections: 2 },
     { id: "LI002", name: "Odette Nkounkou",      title: "PDG - Nkounkou Commerce",       location: "Pointe-Noire", industry: "Commerce",  connections: 1 },
     { id: "LI003", name: "Pierre Moukala",       title: "DSI - Groupe Moukala",          location: "Brazzaville", industry: "Industrie", connections: 3 },
-    { id: "LI004", name: "Sandrine Ibara",       title: "DAF - Hotel Ibara",             location: "Brazzaville", industry: "Hôtellerie",connections: 2 },
-    { id: "LI005", name: "Clément Bouenguidi",   title: "CEO - StartUp Congo",           location: "Kinshasa",    industry: "Tech",       connections: 1 },
   ].slice(0, limit);
-  return { agent: acc.agentName, results: mock, total: mock.length, simulated: true, query: keywords, location };
+  return { agent: acc.agentName, results: mock, total: mock.length, simulated: true, simulated_reason: `Aucun token OAuth pour ${acc.agentName}. Connectez son compte LinkedIn via /ai-team → Connecter LinkedIn.`, query: keywords, location };
 }
 async function liSendConnection(agentId: string, targetId: string, message: string = "") {
   const acc = LINKEDIN_ACCOUNTS[agentId]!;
@@ -222,10 +229,28 @@ async function liSendConnection(agentId: string, targetId: string, message: stri
   if (t?.access_token) {
     try {
       await liApiCall("https://api.linkedin.com/v2/invitations", t.access_token, { method: "POST", body: { invitee: { "com.linkedin.voyager.growth.invitation.InviteeProfile": { profileId: targetId } }, message: message.substring(0, 300) } });
-      return { success: true, agent: acc.agentName, sentTo: targetId, live: true, message: message.substring(0, 300) };
-    } catch (e: any) { console.warn(`[LI ${agentId} connect fallback]`, e.message); }
+      return { success: true, agent: acc.agentName, sentTo: targetId, live: true, message: message.substring(0, 300), delivered: "L'invitation a été envoyée en temps réel sur LinkedIn." };
+    } catch (e: any) {
+      console.warn(`[LI ${agentId} connect fail]`, e.message);
+      return {
+        success: false,
+        agent: acc.agentName,
+        sentTo: targetId,
+        simulated: true,
+        error: "Invitation NON envoyée",
+        reason: `LinkedIn refuse l'envoi d'invitations via l'API publique. L'endpoint /v2/invitations nécessite l'approbation "Marketing Developer Platform" (MDP) de LinkedIn — accès partenaire uniquement, refusé par défaut. Détail : ${String(e.message).substring(0, 200)}`,
+        workaround: "Utilisez la capacité 'Publier un post LinkedIn' à la place — c'est le seul canal fonctionnel avec OAuth basique.",
+      };
+    }
   }
-  return { success: true, agent: acc.agentName, sentTo: targetId, simulated: true, message: message.substring(0, 300) };
+  return {
+    success: false,
+    agent: acc.agentName,
+    sentTo: targetId,
+    simulated: true,
+    error: "Invitation NON envoyée",
+    reason: `Aucun token OAuth trouvé pour ${acc.agentName}. Connectez d'abord son compte LinkedIn (/ai-team → sélectionner l'agent → Connecter LinkedIn).`,
+  };
 }
 async function liSendMessage(agentId: string, targetId: string, subject: string, body: string) {
   const acc = LINKEDIN_ACCOUNTS[agentId]!;
@@ -233,26 +258,77 @@ async function liSendMessage(agentId: string, targetId: string, subject: string,
   if (t?.access_token) {
     try {
       await liApiCall("https://api.linkedin.com/v2/messaging/conversations", t.access_token, { method: "POST", body: { recipients: [`urn:li:person:${targetId}`], subject, body: body.substring(0, 1900) } });
-      return { success: true, agent: acc.agentName, subject, chars: body.length, live: true, sentTo: targetId };
-    } catch (e: any) { console.warn(`[LI ${agentId} msg fallback]`, e.message); }
+      return { success: true, agent: acc.agentName, subject, chars: body.length, live: true, sentTo: targetId, delivered: "Message envoyé en temps réel sur LinkedIn." };
+    } catch (e: any) {
+      console.warn(`[LI ${agentId} msg fail]`, e.message);
+      return {
+        success: false,
+        agent: acc.agentName,
+        subject,
+        chars: body.length,
+        sentTo: targetId,
+        simulated: true,
+        error: "Message NON envoyé au destinataire",
+        reason: `LinkedIn refuse l'envoi de messages via l'API publique. L'endpoint /v2/messaging/conversations nécessite l'approbation "Marketing Developer Platform" (MDP) — accès partenaire, plusieurs semaines de validation, souvent refusée. Détail LinkedIn : ${String(e.message).substring(0, 200)}`,
+        workaround: "Alternatives : (1) Publier un post LinkedIn (marche 100%) — l'agent Timothy/Alex publie le message pour toucher son réseau ; (2) Utiliser LinkedIn Sales Navigator manuellement ; (3) Demander l'approbation MDP à LinkedIn.",
+      };
+    }
   }
-  return { success: true, agent: acc.agentName, subject, chars: body.length, simulated: true, sentTo: targetId };
+  return {
+    success: false,
+    agent: acc.agentName,
+    subject,
+    chars: body.length,
+    sentTo: targetId,
+    simulated: true,
+    error: "Message NON envoyé — token OAuth manquant",
+    reason: `Aucun token OAuth pour ${acc.agentName}. Depuis /ai-team, sélectionnez ${acc.agentName} puis cliquez 'Connecter LinkedIn' pour autoriser le compte.`,
+  };
 }
 async function liPublishPost(agentId: string, text: string) {
   const acc = LINKEDIN_ACCOUNTS[agentId]!;
   const t = await liGetTokenFromDB(agentId);
   if (t?.access_token && t.member_id) {
     try {
-      await liApiCall("https://api.linkedin.com/v2/ugcPosts", t.access_token, { method: "POST", body: {
+      const result: any = await liApiCall("https://api.linkedin.com/v2/ugcPosts", t.access_token, { method: "POST", body: {
         author: `urn:li:person:${t.member_id}`,
         lifecycleState: "PUBLISHED",
         specificContent: { "com.linkedin.ugc.ShareContent": { shareCommentary: { text }, shareMediaCategory: "NONE" } },
         visibility: { "com.linkedin.ugc.MemberNetworkVisibility": "PUBLIC" },
       }});
-      return { success: true, agent: acc.agentName, characters: text.length, live: true };
-    } catch (e: any) { console.warn(`[LI ${agentId} post fallback]`, e.message); }
+      const postId = result?.id || result?.["x-restli-id"] || null;
+      return {
+        success: true,
+        agent: acc.agentName,
+        characters: text.length,
+        live: true,
+        delivered: "Post publié en temps réel sur LinkedIn.",
+        post_id: postId,
+        post_url: postId ? `https://www.linkedin.com/feed/update/${encodeURIComponent(postId)}/` : null,
+      };
+    } catch (e: any) {
+      console.warn(`[LI ${agentId} post fail]`, e.message);
+      return {
+        success: false,
+        agent: acc.agentName,
+        characters: text.length,
+        simulated: true,
+        error: "Post NON publié",
+        reason: `LinkedIn a refusé la publication. Détail : ${String(e.message).substring(0, 300)}. Vérifiez que le scope 'w_member_social' est bien accordé lors de l'OAuth.`,
+      };
+    }
   }
-  return { success: true, agent: acc.agentName, characters: text.length, simulated: true };
+  const reasonNoToken = !t?.access_token
+    ? `Aucun token OAuth pour ${acc.agentName}. Cliquez 'Connecter LinkedIn' depuis /ai-team.`
+    : `Le member_id de ${acc.agentName} est manquant. Reconnectez son compte LinkedIn (l'OAuth doit inclure le scope 'openid profile').`;
+  return {
+    success: false,
+    agent: acc.agentName,
+    characters: text.length,
+    simulated: true,
+    error: "Post NON publié",
+    reason: reasonNoToken,
+  };
 }
 
 // ─── COMPREHENSIVE CRM ADAPTER (all platform APIs) ──────────────────
