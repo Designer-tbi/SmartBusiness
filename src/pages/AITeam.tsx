@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import React from 'react';
 import type { ReactNode } from 'react';
+import { useLocation } from 'react-router-dom';
 import { Sparkles, Loader2, ChevronRight, Play, RefreshCw, X, Crown, Briefcase, Users, DollarSign, History, Linkedin, CheckCircle2, AlertTriangle, Send, MessageSquare } from 'lucide-react';
 
 type Capability = {
@@ -59,6 +60,18 @@ export default function AITeam() {
   const [showRuns, setShowRuns] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [linkedinStatus, setLinkedinStatus] = useState<Record<string, { connected: boolean; has_credentials?: boolean; member_id?: string }>>({});
+  const location = useLocation();
+
+  // Re-open agent panel whenever URL ?agent=<id> changes (also handles same-route navigation)
+  useEffect(() => {
+    if (agents.length === 0) return;
+    const params = new URLSearchParams(location.search);
+    const wanted = params.get('agent');
+    if (wanted) {
+      const found = agents.find((a) => a.id === wanted);
+      if (found) setSelectedAgent(found);
+    }
+  }, [location.search, agents]);
 
   useEffect(() => {
     (async () => {
@@ -71,15 +84,6 @@ export default function AITeam() {
         const data = await r.json();
         setAgents(data.agents || []);
         setClaudeInfo(data.claude || {});
-        // Auto-open agent panel from URL ?agent=<id>
-        try {
-          const params = new URLSearchParams(window.location.search);
-          const wanted = params.get('agent');
-          if (wanted) {
-            const found = (data.agents || []).find((a: any) => a.id === wanted);
-            if (found) setSelectedAgent(found);
-          }
-        } catch { /* ignore */ }
         // Fetch LinkedIn status (non-blocking)
         fetch('/api/agents/linkedin/status').then(r => r.ok ? r.json() : null).then(s => { if (s?.agents) setLinkedinStatus(s.agents); }).catch(() => {});
       } catch (e: any) {

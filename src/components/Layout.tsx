@@ -49,10 +49,10 @@ export default function Layout() {
     return () => window.removeEventListener('sb-hide-sidebar', handleHideSidebar);
   }, []);
 
-  // Auto-close mobile drawer when navigating
+  // Auto-close mobile drawer when navigating (pathname OR search)
   React.useEffect(() => {
     setIsMobileMenuOpen(false);
-  }, [location.pathname]);
+  }, [location.pathname, location.search]);
 
   const handleLogout = async () => {
     await logout();
