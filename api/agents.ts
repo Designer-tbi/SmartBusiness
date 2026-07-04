@@ -28,11 +28,18 @@ async function query(text: string, params: any[] = []) {
 }
 
 // ─── Claude client (REST, no SDK) ───────────────────────────────────
-const MODEL = process.env.CLAUDE_MODEL || "claude-sonnet-4-5";
-const MAX_TOKENS = parseInt(process.env.CLAUDE_MAX_TOKENS || "4096", 10);
+const MODEL = process.env.CLAUDE_MODEL || "claude-fable-5";
+const MAX_TOKENS = parseInt(process.env.CLAUDE_MAX_TOKENS || "8192", 10);
 const CLAUDE_INFO = { model: MODEL, max_tokens: MAX_TOKENS, configured: !!process.env.ANTHROPIC_API_KEY };
 type UserMessage = { role: "user" | "assistant"; content: string };
 function toMessages(m: string | UserMessage[]): UserMessage[] { return Array.isArray(m) ? m : [{ role: "user", content: m }]; }
+
+// Fable 5 (Mythos class) requires adaptive thinking. Detect and inject if needed.
+const isFable = MODEL.includes("fable") || MODEL.includes("mythos");
+function withFableDefaults(body: any) {
+  if (isFable && !body.thinking) body.thinking = { type: "adaptive" };
+  return body;
+}
 
 async function callAnthropic(body: any): Promise<any> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -40,7 +47,7 @@ async function callAnthropic(body: any): Promise<any> {
   const resp = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-    body: JSON.stringify(body),
+    body: JSON.stringify(withFableDefaults(body)),
   });
   if (!resp.ok) throw new Error(`Anthropic ${resp.status}: ${(await resp.text().catch(() => "")).substring(0, 500)}`);
   return resp.json();
@@ -48,8 +55,9 @@ async function callAnthropic(body: any): Promise<any> {
 
 async function askClaude(systemPrompt: string, userMsg: string | UserMessage[], options: Record<string, unknown> = {}): Promise<string> {
   const r = await callAnthropic({ model: MODEL, max_tokens: MAX_TOKENS, system: systemPrompt, messages: toMessages(userMsg), ...options });
-  const b = r.content?.[0];
-  return b && b.type === "text" ? b.text : "";
+  // Fable 5 returns thinking blocks + text blocks — extract only text
+  const textBlock = (r.content || []).find((b: any) => b.type === "text");
+  return textBlock ? textBlock.text : "";
 }
 async function askClaudeWithSearch(systemPrompt: string, userMsg: string | UserMessage[]): Promise<string> {
   const r = await callAnthropic({ model: MODEL, max_tokens: MAX_TOKENS, system: systemPrompt, messages: toMessages(userMsg), tools: [{ type: "web_search_20250305", name: "web_search" }] });
