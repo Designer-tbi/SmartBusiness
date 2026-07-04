@@ -445,13 +445,56 @@ async function withRun<T>(m: { agent_id: string; capability: string; input?: any
   catch (err: any) { await logRun({ ...m, status: "error", error_message: err?.message||String(err), duration_ms: Date.now()-t0 }); throw err; }
 }
 
+// Persist an agent-generated report into the CRM `reports` table so it appears
+// in the "Rapports" module alongside human reports.
+async function saveAgentReport(opts: {
+  agent_id: string;
+  capability: string;
+  title: string;
+  summary: string;
+  challenges?: string;
+  next_actions?: string;
+  metrics?: Partial<{ calls_count: number; meetings_count: number; quotes_count: number; quotes_amount: number; new_leads: number; new_customers: number; invoices_amount: number }>;
+}) {
+  try {
+    const agentName = AGENTS.find((a) => a.id === opts.agent_id)?.name || opts.agent_id;
+    const today = new Date().toISOString().split("T")[0];
+    const m = opts.metrics || {};
+    const r = await q(
+      `INSERT INTO reports (agent_id, agent_name, title, period_start, period_end,
+        calls_count, meetings_count, quotes_count, quotes_amount, new_leads, new_customers, invoices_amount,
+        summary, challenges, next_actions, status)
+       VALUES ($1,$2,$3,$4,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'submitted') RETURNING id`,
+      [
+        `ai_${opts.agent_id}`, `🤖 ${agentName} (IA)`,
+        opts.title, today,
+        m.calls_count || 0, m.meetings_count || 0, m.quotes_count || 0, m.quotes_amount || 0,
+        m.new_leads || 0, m.new_customers || 0, m.invoices_amount || 0,
+        opts.summary.substring(0, 20000),
+        (opts.challenges || "").substring(0, 5000),
+        (opts.next_actions || "").substring(0, 5000),
+      ]
+    );
+    return r.rows[0]?.id;
+  } catch (err) {
+    console.error("[saveAgentReport]", err);
+    return null;
+  }
+}
+
+function toReportSummary(data: any, fallback = ""): string {
+  if (!data) return fallback;
+  if (typeof data === "string") return data;
+  try { return JSON.stringify(data, null, 2); } catch { return fallback; }
+}
+
 // ─── EDEN (CEO) ─────────────────────────────────────────────────────
 const EDEN_SYS = `Tu es EDEN, DG de TBI Technology (Congo, RDC). Tu diriges Timothy (Commercial), Flore (RH) et Paul (CFO). Vision long terme, données chiffrées, orienté croissance Afrique. Montants en FCFA.`;
 
 async function edenDashboard() {
   const [opps, inv, tr, over, emp] = await Promise.allSettled([platform.listOpportunities({ status: "open" }), platform.listInvoices({ period: "current_month" }), platform.treasury(), platform.listOverdueInvoices(), platform.listEmployees()]);
   const g = (r: any) => r.status === "fulfilled" ? r.value?.data : {};
-  return askClaudeJSON(EDEN_SYS, `Génère le tableau de bord exécutif :
+  const result: any = await askClaudeJSON(EDEN_SYS, `Génère le tableau de bord exécutif :
 COMMERCIAL: ${JSON.stringify(g(opps)).substring(0, 600)}
 FACTURATION: ${JSON.stringify(g(inv)).substring(0, 500)}
 TRÉSORERIE: ${JSON.stringify(g(tr))}
@@ -459,16 +502,31 @@ IMPAYÉS: ${JSON.stringify(g(over)).substring(0, 400)}
 EFFECTIFS: ${JSON.stringify(g(emp)).substring(0, 400)}
 
 Retourne JSON: { date, health_score, company_health, kpis:{revenue_mtd_fcfa,pipeline_value_fcfa,cash_position_fcfa,overdue_fcfa,headcount}, team_reports:{timothy,flore,paul}, alerts:[{severity,owner,message,action}], week_priorities:[], executive_summary }`);
+  await saveAgentReport({
+    agent_id: "eden", capability: "dashboard",
+    title: `Dashboard Exécutif — ${new Date().toLocaleDateString("fr-FR")}`,
+    summary: result?.executive_summary || toReportSummary(result),
+    challenges: (result?.alerts || []).map((a: any) => `[${a.severity}] ${a.message}`).join("\n"),
+    next_actions: (result?.week_priorities || []).join("\n"),
+    metrics: { quotes_amount: result?.kpis?.pipeline_value_fcfa || 0, invoices_amount: result?.kpis?.revenue_mtd_fcfa || 0 },
+  });
+  return result;
 }
 async function edenDelegate({ to, mission, context = "", deadline = "" }: any) {
-  return askClaude(EDEN_SYS, `Rédige une instruction officielle pour ${String(to).toUpperCase()} — Mission: ${mission}. Contexte: ${context}. Échéance: ${deadline||"asap"}. Inclure: objectif mesurable, ressources, indicateurs, reporting.`);
+  const out = await askClaude(EDEN_SYS, `Rédige une instruction officielle pour ${String(to).toUpperCase()} — Mission: ${mission}. Contexte: ${context}. Échéance: ${deadline||"asap"}. Inclure: objectif mesurable, ressources, indicateurs, reporting.`);
+  await saveAgentReport({ agent_id: "eden", capability: "delegate", title: `Délégation à ${to} — ${mission.substring(0, 60)}`, summary: out });
+  return out;
 }
 async function edenBoardReport(month: any, year: any) {
   const dash = await edenDashboard().catch(() => ({}));
-  return askClaude(EDEN_SYS, `Rapport mensuel Conseil d'Administration TBI ${month}/${year}. Dashboard: ${JSON.stringify(dash).substring(0, 1500)}. Structure: 1.FAITS MARQUANTS 2.PERFORMANCE 3.COMMERCIAL 4.RH 5.RISQUES 6.OPPORTUNITÉS 7.DÉCISIONS 8.OBJECTIFS. 400 mots max.`);
+  const out = await askClaude(EDEN_SYS, `Rapport mensuel Conseil d'Administration TBI ${month}/${year}. Dashboard: ${JSON.stringify(dash).substring(0, 1500)}. Structure: 1.FAITS MARQUANTS 2.PERFORMANCE 3.COMMERCIAL 4.RH 5.RISQUES 6.OPPORTUNITÉS 7.DÉCISIONS 8.OBJECTIFS. 400 mots max.`);
+  await saveAgentReport({ agent_id: "eden", capability: "board-report", title: `Rapport CA — ${month}/${year}`, summary: out });
+  return out;
 }
 async function edenStrategicWatch() {
-  return askClaudeWithSearch(EDEN_SYS, `Veille stratégique TBI Technology: 1) Appels d'offres IT Congo/RDC 2) Concurrence 3) Tendances tech Afrique 2026 4) Réglementations ARPCE 5) Financement BAD/AFD. 300 mots + top 3 actions.`);
+  const out = await askClaudeWithSearch(EDEN_SYS, `Veille stratégique TBI Technology: 1) Appels d'offres IT Congo/RDC 2) Concurrence 3) Tendances tech Afrique 2026 4) Réglementations ARPCE 5) Financement BAD/AFD. 300 mots + top 3 actions.`);
+  await saveAgentReport({ agent_id: "eden", capability: "strategic-watch", title: `Veille stratégique — ${new Date().toLocaleDateString("fr-FR")}`, summary: out });
+  return out;
 }
 async function edenLinkedInPost(topic: string) {
   const content = await askClaude(EDEN_SYS, `Post LinkedIn stratégique CEO TBI sur "${topic}". 1re personne, leadership Afrique Centrale, insight, question. 800-1000 chars. 3-5 hashtags. Post direct sans intro.`);
@@ -481,8 +539,17 @@ const TIMOTHY_SYS = `Tu es TIMOTHY, Directeur Commercial de TBI Technology. Tu c
 
 async function timothyPipeline() {
   const { data: opps } = await platform.listOpportunities({ status: "open" });
-  return askClaudeJSON(TIMOTHY_SYS, `Analyse pipeline: ${JSON.stringify(opps).substring(0, 1500)}
+  const result: any = await askClaudeJSON(TIMOTHY_SYS, `Analyse pipeline: ${JSON.stringify(opps).substring(0, 1500)}
 Retourne JSON: { pipeline_health, total_value_fcfa, weighted_forecast_fcfa, deals_count, by_stage:[{stage,count,value}], hot_deals:[{company,value,probability,action}], at_risk:[{company,reason,action}], sub_agent_actions:{alex,sara,marc,lisa}, report_to_eden }`);
+  await saveAgentReport({
+    agent_id: "timothy", capability: "pipeline",
+    title: `Analyse Pipeline — ${new Date().toLocaleDateString("fr-FR")}`,
+    summary: result?.report_to_eden || toReportSummary(result),
+    challenges: (result?.at_risk || []).map((r: any) => `${r.company}: ${r.reason}`).join("\n"),
+    next_actions: (result?.hot_deals || []).map((h: any) => `${h.company} (${h.value} FCFA): ${h.action}`).join("\n"),
+    metrics: { quotes_count: result?.deals_count || 0, quotes_amount: result?.total_value_fcfa || 0 },
+  });
+  return result;
 }
 async function timothyFindProspects({ keywords = "directeur PME Congo", location = "Brazzaville", limit = 10 } = {}) {
   const search = await liSearchProspects("timothy", { keywords, location, limit });
@@ -520,12 +587,21 @@ async function alexProspect({ sector, location = "Brazzaville", limit = 15 }: an
   const qual: any = await askClaudeJSON(TIMOTHY_SYS, `Qualifie prospects secteur ${sector}: ${JSON.stringify(search.results)}
 Retourne JSON: { hot_prospects:[{id,name,company,score,pain_point,service_fit,invitation_message,next_step}], summary }`);
   const invs: any[] = [];
+  let leadsCreated = 0;
   for (const p of qual.hot_prospects || []) {
     invs.push(await liSendConnection("alex", p.id, p.invitation_message));
-    await platform.createLead({ name: p.name, company: p.company, source: "linkedin_alex", assigned_to: "timothy" }).catch(() => {});
+    const created = await platform.createLead({ name: p.name, company: p.company, source: "linkedin_alex", assigned_to: "timothy" }).catch(() => null);
+    if (created) leadsCreated++;
     await sleep(400);
   }
-  return { search, qualification: qual, invitations_sent: invs.length };
+  await saveAgentReport({
+    agent_id: "alex", capability: "prospect",
+    title: `Prospection ${sector} — ${location}`,
+    summary: qual?.summary || `Recherche menée: ${search.results?.length || 0} profils analysés, ${qual.hot_prospects?.length || 0} qualifiés chauds, ${leadsCreated} leads créés dans le CRM.`,
+    next_actions: (qual.hot_prospects || []).slice(0, 5).map((p: any) => `${p.name} (${p.company}) — ${p.next_step}`).join("\n"),
+    metrics: { new_leads: leadsCreated },
+  });
+  return { search, qualification: qual, invitations_sent: invs.length, leads_created_in_crm: leadsCreated };
 }
 
 // ─── SARA (Avant-vente) ─────────────────────────────────────────────
@@ -533,7 +609,16 @@ async function saraProposal({ prospectId, prospectName, company, service, linked
   const p: any = await askClaudeJSON(TIMOTHY_SYS, `Génère proposition pour ${prospectName} - ${company}, service ${service}. Contexte: ${linkedinContext}
 Retourne JSON: { proposal_title, executive_summary, problem_statement, proposed_solution, deliverables:[], timeline_weeks, investment:{total_fcfa,payment_schedule:[{milestone,pct,fcfa}]}, roi_estimate, why_tbi, next_step, linkedin_followup_message }`);
   if (p.linkedin_followup_message && prospectId) await liSendMessage("sara", prospectId, `Proposition TBI — ${service}`, p.linkedin_followup_message).catch(() => {});
-  return p;
+  // Auto-create the quote in the CRM
+  const created = await platform.createQuote({ number: `AI-${Date.now()}`, amount: p?.investment?.total_fcfa || 0, currency: "XAF", status: "Brouillon" }).catch(() => null);
+  await saveAgentReport({
+    agent_id: "sara", capability: "proposal",
+    title: `Proposition — ${company || prospectName}`,
+    summary: p?.executive_summary || toReportSummary(p),
+    next_actions: p?.next_step,
+    metrics: { quotes_count: created ? 1 : 0, quotes_amount: p?.investment?.total_fcfa || 0 },
+  });
+  return { ...p, crm_quote_id: created?.data?.id };
 }
 
 // ─── MARC (Pipeline) ────────────────────────────────────────────────
@@ -584,8 +669,16 @@ async function floreTrainingPlan(year: any) {
 }
 async function floreReportEden(month: string) {
   const { data: emp } = await platform.listEmployees();
-  return askClaudeJSON(FLORE_SYS, `Rapport mensuel RH pour Eden ${month}. Effectifs: ${JSON.stringify(emp).substring(0, 500)}
+  const result: any = await askClaudeJSON(FLORE_SYS, `Rapport mensuel RH pour Eden ${month}. Effectifs: ${JSON.stringify(emp).substring(0, 500)}
 Retourne JSON: { headcount, new_hires, departures, open_positions, linkedin_activity:{nina_connections,jobs_posted,candidates_in_pipeline}, payroll_total_fcfa, highlights:[], risks:[], eden_summary }`);
+  await saveAgentReport({
+    agent_id: "flore", capability: "report-eden",
+    title: `Rapport RH pour Eden — ${month}`,
+    summary: result?.eden_summary || toReportSummary(result),
+    challenges: (result?.risks || []).join("\n"),
+    next_actions: (result?.highlights || []).join("\n"),
+  });
+  return result;
 }
 
 // ─── PAUL (CFO) ─────────────────────────────────────────────────────
@@ -594,12 +687,22 @@ const PAUL_SYS = `Tu es PAUL, CFO de TBI Technology. Coordonne Chloé (Compta SY
 async function paulDashboard(period?: string) {
   const p = period || new Date().toISOString().slice(0, 7);
   const [stats, tr, over] = await Promise.all([platform.financeStats(p), platform.treasury(), platform.listOverdueInvoices()]);
-  return askClaudeJSON(PAUL_SYS, `Tableau financier ${p}. Stats: ${JSON.stringify(stats.data)} Trésorerie: ${JSON.stringify(tr.data)} Impayés (${over.data.length}): ${JSON.stringify(over.data.slice(0, 5))}
+  const result: any = await askClaudeJSON(PAUL_SYS, `Tableau financier ${p}. Stats: ${JSON.stringify(stats.data)} Trésorerie: ${JSON.stringify(tr.data)} Impayés (${over.data.length}): ${JSON.stringify(over.data.slice(0, 5))}
 Retourne JSON: { period, ca_ht_fcfa, marge_nette_pct, tresorerie_fcfa, creances_clients_fcfa, sub_agent_status:{chloe,kevin,ingrid}, alerts:[{type,severity,message,action}], eden_summary }`);
+  await saveAgentReport({
+    agent_id: "paul", capability: "dashboard",
+    title: `Dashboard Financier — ${p}`,
+    summary: result?.eden_summary || toReportSummary(result),
+    challenges: (result?.alerts || []).map((a: any) => `[${a.severity}] ${a.message}`).join("\n"),
+    metrics: { invoices_amount: result?.ca_ht_fcfa || 0 },
+  });
+  return result;
 }
 async function paulReportEden(month: any, year: any) {
   const dash = await paulDashboard(`${year}-${String(month).padStart(2, "0")}`).catch(() => ({}));
-  return askClaude(PAUL_SYS, `Rapport financier mensuel Paul pour Eden ${month}/${year}. ${JSON.stringify(dash).substring(0, 1200)}. 300 mots: 1.Perf vs objectifs 2.Trésorerie & alertes 3.Actions Chloé/Kevin/Ingrid 4.Attention Eden 5.Prévisions.`);
+  const out = await askClaude(PAUL_SYS, `Rapport financier mensuel Paul pour Eden ${month}/${year}. ${JSON.stringify(dash).substring(0, 1200)}. 300 mots: 1.Perf vs objectifs 2.Trésorerie & alertes 3.Actions Chloé/Kevin/Ingrid 4.Attention Eden 5.Prévisions.`);
+  await saveAgentReport({ agent_id: "paul", capability: "report-eden", title: `Rapport Finance pour Eden — ${month}/${year}`, summary: out });
+  return out;
 }
 async function chloeInvoice({ type, vendor, amount, date, description }: any) {
   return askClaudeJSON(PAUL_SYS, `Écriture SYSCOHADA — Type ${type}, Tiers ${vendor}, ${amount} FCFA, ${date}. ${description}
@@ -612,15 +715,27 @@ async function chloeClose(month: any, year: any) {
 async function kevinRecovery() {
   const { data: overs } = await platform.listOverdueInvoices();
   const results: any[] = [];
+  let escalated = 0;
   for (const inv of overs) {
     const days = Math.floor((Date.now() - new Date(inv.due_date).getTime()) / 86400000);
     const a: any = await askClaudeJSON(PAUL_SYS, `Facture impayée ${inv.client_name} ${inv.amount} FCFA retard ${days}j.
 Retourne JSON: { action, channel, penalites_fcfa, total_reclame_fcfa, message, objet, escalade_paul }`);
     await platform.updateInvoice(inv.id, { recovery_stage: a.action }).catch(() => {});
-    if (a.escalade_paul) await platform.createAlert({ type: "recouvrement_escalade", message: `Paul — ${inv.client_name} : ${inv.amount} FCFA (${days}j)` }).catch(() => {});
+    if (a.escalade_paul) {
+      await platform.createAlert({ type: "recouvrement_escalade", message: `Paul — ${inv.client_name} : ${inv.amount} FCFA (${days}j)` }).catch(() => {});
+      escalated++;
+    }
     results.push({ invoice: inv.id, client: inv.client_name, action: a.action });
   }
-  return { processed: overs.length, results };
+  await saveAgentReport({
+    agent_id: "kevin", capability: "recovery",
+    title: `Cycle de recouvrement — ${new Date().toLocaleDateString("fr-FR")}`,
+    summary: `${overs.length} factures impayées traitées, ${escalated} escaladées à Paul.`,
+    challenges: escalated > 0 ? `${escalated} dossiers nécessitent l'intervention de Paul.` : "",
+    next_actions: results.slice(0, 10).map((r: any) => `${r.client}: ${r.action}`).join("\n"),
+    metrics: { invoices_amount: overs.reduce((s: number, i: any) => s + Number(i.amount || 0), 0) },
+  });
+  return { processed: overs.length, escalated, results };
 }
 async function ingridVariance(period?: string) {
   const p = period || new Date().toISOString().slice(0, 7);

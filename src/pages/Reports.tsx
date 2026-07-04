@@ -115,10 +115,15 @@ export default function ReportsPage() {
             <th className="text-right px-6 py-4">Actions</th>
           </tr></thead>
           <tbody className="divide-y divide-slate-50">
-            {reports.map(r => (
-              <tr key={r.id} className="hover:bg-slate-50/50" data-testid={`report-row-${r.id}`}>
+            {reports.map(r => {
+              const isAI = r.agent_id?.startsWith('ai_') || r.agent_name?.includes('🤖');
+              return (
+              <tr key={r.id} className={`hover:bg-slate-50/50 ${isAI ? 'bg-indigo-50/30' : ''}`} data-testid={`report-row-${r.id}`}>
                 <td className="px-6 py-4">
-                  <p className="font-medium text-sm text-slate-800">{r.title}</p>
+                  <p className="font-medium text-sm text-slate-800 flex items-center gap-1.5">
+                    {isAI && <span className="inline-block bg-gradient-to-r from-indigo-500 to-violet-500 text-white text-[9px] font-black px-1.5 py-0.5 rounded uppercase tracking-wider">IA</span>}
+                    {r.title}
+                  </p>
                   <p className="text-xs text-slate-400">{new Date(r.created_at).toLocaleDateString('fr-FR')}</p>
                 </td>
                 {isAdmin && <td className="px-4 py-4 text-sm text-slate-600">{r.agent_name}</td>}
@@ -141,7 +146,8 @@ export default function ReportsPage() {
                   </div>
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
         {reports.length === 0 && <div className="text-center py-16 text-slate-400">{isAdmin ? 'Aucun rapport reçu' : 'Aucun rapport soumis'}</div>}
