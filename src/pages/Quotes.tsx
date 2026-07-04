@@ -3,6 +3,8 @@ import { FileText, Plus, Search, Trash2, Edit2, Filter, Calendar, X, Save, PlusC
 import { format } from 'date-fns';
 import { useAuth } from '../contexts/AuthContext';
 import { getZoneConfig, formatCurrency, getCurrencyLabel } from '../lib/countryConfig';
+import { useLivePoll } from '../hooks/useLivePoll';
+import { LiveBadge } from '../components/LiveBadge';
 
 export default function Quotes() {
   const { profile } = useAuth();
@@ -11,6 +13,7 @@ export default function Quotes() {
   const currencyLabel = getCurrencyLabel(userZone);
   const [quotes, setQuotes] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [newQuoteIds, setNewQuoteIds] = useState<Set<number>>(new Set());
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [showModal, setShowModal] = useState(false);
@@ -48,6 +51,30 @@ export default function Quotes() {
   }, [showModal]);
 
   useEffect(() => { fetchQuotes(); fetchData(); }, []);
+
+  // ─── LIVE POLLING (3s) — detect new quotes and flag them ───────
+  useLivePoll<any[]>('/api/quotes', {
+    intervalMs: 3000,
+    onNewData: (fresh, prev) => {
+      if (!Array.isArray(fresh) || !Array.isArray(prev)) return;
+      const prevIds = new Set(prev.map((q: any) => q.id));
+      const additions = fresh.filter((q: any) => !prevIds.has(q.id)).map((q: any) => q.id);
+      if (additions.length > 0) {
+        setNewQuoteIds(current => {
+          const next = new Set(current);
+          additions.forEach((id: number) => next.add(id));
+          return next;
+        });
+        setTimeout(() => setNewQuoteIds(current => {
+          const next = new Set(current);
+          additions.forEach((id: number) => next.delete(id));
+          return next;
+        }), 15000);
+      }
+      setQuotes(fresh);
+      setLoading(false);
+    },
+  });
 
   const fetchQuotes = async () => {
     try { const r = await fetch('/api/quotes'); if (r.ok) setQuotes(await r.json()); } catch (err) { console.error(err); } finally { setLoading(false); }
@@ -199,7 +226,7 @@ export default function Quotes() {
     <div className="space-y-6" data-testid="quotes-page">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-slate-800">Devis</h2>
+          <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">Devis <LiveBadge /></h2>
           <p className="text-slate-500 text-sm">Gérez vos propositions commerciales</p>
         </div>
         <button onClick={() => setShowModal(true)} data-testid="new-quote-btn" className="flex items-center gap-2 bg-indigo-600 text-white px-5 py-2.5 rounded-xl hover:bg-indigo-700 transition-all shadow-sm font-medium">
@@ -235,8 +262,11 @@ export default function Quotes() {
           </thead>
           <tbody className="divide-y divide-slate-50">
             {filtered.map(q => (
-              <tr key={q.id} className="hover:bg-slate-50/50 transition-colors" data-testid={`quote-row-${q.id}`}>
-                <td className="px-6 py-4 font-medium text-sm text-slate-800">{q.number}</td>
+              <tr key={q.id} className={`hover:bg-slate-50/50 transition-colors ${newQuoteIds.has(q.id) ? 'bg-emerald-50/70' : ''}`} data-testid={`quote-row-${q.id}`}>
+                <td className="px-6 py-4 font-medium text-sm text-slate-800">
+                  {newQuoteIds.has(q.id) && <span className="inline-block mr-2 text-[9px] font-bold bg-emerald-500 text-white px-1.5 py-0.5 rounded-full uppercase tracking-wider">Nouveau</span>}
+                  {q.number}
+                </td>
                 <td className="px-4 py-4 text-sm text-slate-600">{q.customerName || 'N/A'}</td>
                 <td className="px-4 py-4 text-sm text-slate-500 hidden md:table-cell">{q.date ? new Date(q.date).toLocaleDateString('fr-FR') : '-'}</td>
                 <td className="px-4 py-4 text-sm font-bold text-slate-800">{formatCurrency(q.amount, userZone)}</td>

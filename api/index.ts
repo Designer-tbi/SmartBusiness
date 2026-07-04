@@ -379,6 +379,48 @@ app.get("/api/auth/me", authenticateToken, async (req: any, res) => {
   } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 
+// ─── Presence (who is online) ─────────────────────────────────────
+// user_presence table: last_seen updated by frontend heartbeat every 20s.
+// Users active within the last 60s are considered "online".
+let _presenceTableReady = false;
+async function ensurePresenceTable() {
+  if (_presenceTableReady) return;
+  await query(`CREATE TABLE IF NOT EXISTS user_presence (
+    user_uid TEXT PRIMARY KEY,
+    name TEXT,
+    email TEXT,
+    role TEXT,
+    zone TEXT,
+    last_seen TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    current_page TEXT
+  )`);
+  await query("CREATE INDEX IF NOT EXISTS idx_presence_last_seen ON user_presence(last_seen DESC)");
+  _presenceTableReady = true;
+}
+app.post("/api/presence/heartbeat", authenticateToken, async (req: any, res) => {
+  try {
+    await ensurePresenceTable();
+    const { currentPage } = req.body || {};
+    // Fetch minimal user profile once (JWT only has uid+role)
+    const u = await query('SELECT name, email, role, zone FROM users WHERE uid=$1', [req.user.uid]);
+    const p = u.rows[0] || {};
+    await query(`INSERT INTO user_presence (user_uid, name, email, role, zone, last_seen, current_page)
+      VALUES ($1,$2,$3,$4,$5,NOW(),$6)
+      ON CONFLICT (user_uid) DO UPDATE SET last_seen=NOW(), current_page=EXCLUDED.current_page, name=EXCLUDED.name, role=EXCLUDED.role`,
+      [req.user.uid, p.name || null, p.email || null, p.role || req.user.role || null, p.zone || null, String(currentPage || "").substring(0, 200) || null]);
+    res.json({ ok: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+app.get("/api/presence/online", authenticateToken, async (_req, res) => {
+  try {
+    await ensurePresenceTable();
+    const r = await query(`SELECT user_uid, name, email, role, zone, last_seen, current_page,
+      EXTRACT(EPOCH FROM (NOW() - last_seen))::INT AS seconds_ago
+      FROM user_presence WHERE last_seen > NOW() - INTERVAL '60 seconds' ORDER BY last_seen DESC LIMIT 50`);
+    res.json({ users: r.rows, count: r.rows.length, serverTime: new Date().toISOString() });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
 // Categories
 app.get("/api/categories", authenticateToken, async (req, res) => {
   try { res.json((await query('SELECT c.*, u.name as "createdByName" FROM categories c LEFT JOIN users u ON c.created_by = u.uid ORDER BY name ASC')).rows); } catch (err) { res.status(500).json({ error: "Server error" }); }

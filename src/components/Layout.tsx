@@ -1,6 +1,8 @@
 import React from 'react';
 import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { usePresence } from '../hooks/usePresence';
+import { PresenceIndicator } from './PresenceIndicator';
 import { 
   LogOut, 
   LayoutDashboard, 
@@ -42,6 +44,12 @@ export default function Layout() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = React.useState(false);
   const [forceHideSidebar, setForceHideSidebar] = React.useState(false);
   const [collapsedSections, setCollapsedSections] = React.useState<Record<string, boolean>>({});
+
+  // ─── LIVE PRESENCE ────────────────────────────────
+  const { online, count } = usePresence(!!profile);
+  // Exclude self from the visible list
+  const others = React.useMemo(() => online.filter(u => u.user_uid !== profile?.uid), [online, profile?.uid]);
+  const othersCount = others.length;
 
   React.useEffect(() => {
     const handleHideSidebar = (e: any) => setForceHideSidebar(e.detail);
@@ -384,6 +392,7 @@ export default function Layout() {
           </div>
           
           <div className="flex items-center gap-2 md:gap-3 shrink-0">
+            <PresenceIndicator users={others} count={othersCount} />
             <div className="hidden md:flex flex-col items-end">
               <span className="text-sm font-bold text-slate-900">{profile?.name}</span>
               <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">{profile?.role}</span>

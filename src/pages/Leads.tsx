@@ -5,12 +5,15 @@ import { getZoneConfig } from '../lib/countryConfig';
 import PhoneInput from '../components/PhoneInput';
 import CurrencySelector from '../components/CurrencySelector';
 import CommentsSection from '../components/CommentsSection';
+import { useLivePoll } from '../hooks/useLivePoll';
+import { LiveBadge } from '../components/LiveBadge';
 
 export default function Leads() {
   const { profile } = useAuth();
   const zoneCfg = getZoneConfig(profile?.zone);
   const [leads, setLeads] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [newLeadIds, setNewLeadIds] = useState<Set<number>>(new Set());
   const [showModal, setShowModal] = useState(false);
   const [editingLead, setEditingLead] = useState<any>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -52,6 +55,33 @@ export default function Leads() {
   useEffect(() => {
     fetchLeads();
   }, []);
+
+  // ─── LIVE POLLING (3s) — detect new leads and flag them ───────
+  useLivePoll<any[]>('/api/leads', {
+    intervalMs: 3000,
+    onNewData: (fresh, prev) => {
+      if (!Array.isArray(fresh) || !Array.isArray(prev)) return;
+      const prevIds = new Set(prev.map((l: any) => l.id));
+      const additions = fresh.filter((l: any) => !prevIds.has(l.id)).map((l: any) => l.id);
+      if (additions.length > 0) {
+        setNewLeadIds(current => {
+          const next = new Set(current);
+          additions.forEach((id: number) => next.add(id));
+          return next;
+        });
+        // Auto-clear NEW badge after 15s
+        setTimeout(() => {
+          setNewLeadIds(current => {
+            const next = new Set(current);
+            additions.forEach((id: number) => next.delete(id));
+            return next;
+          });
+        }, 15000);
+      }
+      setLeads(fresh);
+      setLoading(false);
+    },
+  });
 
   const resetForm = () => {
     setType('individual');
@@ -214,7 +244,7 @@ export default function Leads() {
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-slate-800">Leads (Prospects)</h2>
+          <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">Leads (Prospects) <LiveBadge /></h2>
           <p className="text-slate-500 text-sm">Gérez vos prospects avant qu'ils ne deviennent des clients</p>
         </div>
         <button
@@ -270,8 +300,11 @@ export default function Leads() {
             <tbody className="divide-y divide-slate-200">
               {filteredLeads.map((lead) => (
                 <React.Fragment key={lead.id}>
-                <tr className="hover:bg-slate-50 transition-colors">
+                <tr className={`hover:bg-slate-50 transition-colors ${newLeadIds.has(lead.id) ? 'bg-emerald-50/70' : ''}`} data-testid={`lead-row-${lead.id}`}>
                   <td className="px-6 py-4">
+                    {newLeadIds.has(lead.id) && (
+                      <span className="inline-block mr-2 text-[9px] font-bold bg-emerald-500 text-white px-1.5 py-0.5 rounded-full uppercase tracking-wider" data-testid={`lead-new-badge-${lead.id}`}>Nouveau</span>
+                    )}
                     {lead.type === 'company' ? (
                       <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
                         <Building2 size={12} />

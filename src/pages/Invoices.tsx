@@ -2,11 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { Receipt, Plus, Search, Trash2, Filter, DollarSign, CheckCircle2, Clock, X, Save, Eye, FileText, User, Calendar as CalIcon } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { getZoneConfig, formatCurrency } from '../lib/countryConfig';
+import { useLivePoll } from '../hooks/useLivePoll';
+import { LiveBadge } from '../components/LiveBadge';
 
 export default function Invoices() {
   const { profile } = useAuth();
   const zoneCfg = getZoneConfig(profile?.zone);
   const [invoices, setInvoices] = useState<any[]>([]);
+  const [newInvoiceIds, setNewInvoiceIds] = useState<Set<number>>(new Set());
   const [customers, setCustomers] = useState<any[]>([]);
   const [quotes, setQuotes] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -29,6 +32,30 @@ export default function Invoices() {
   };
 
   useEffect(() => { fetchInvoices(); fetchCustomers(); fetchQuotes(); }, []);
+
+  // ─── LIVE POLLING (3s) — detect new invoices ─────────────────
+  useLivePoll<any[]>('/api/invoices', {
+    intervalMs: 3000,
+    onNewData: (fresh, prev) => {
+      if (!Array.isArray(fresh) || !Array.isArray(prev)) return;
+      const prevIds = new Set(prev.map((i: any) => i.id));
+      const additions = fresh.filter((i: any) => !prevIds.has(i.id)).map((i: any) => i.id);
+      if (additions.length > 0) {
+        setNewInvoiceIds(current => {
+          const next = new Set(current);
+          additions.forEach((id: number) => next.add(id));
+          return next;
+        });
+        setTimeout(() => setNewInvoiceIds(current => {
+          const next = new Set(current);
+          additions.forEach((id: number) => next.delete(id));
+          return next;
+        }), 15000);
+      }
+      setInvoices(fresh);
+      setLoading(false);
+    },
+  });
 
   // When user picks a quote, auto-fill customer + amount
   const handleQuoteChange = (quoteId: string) => {
@@ -82,7 +109,7 @@ export default function Invoices() {
   return (
     <div className="space-y-6" data-testid="invoices-page">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div><h2 className="text-2xl font-bold text-slate-800">Factures</h2><p className="text-slate-500 text-sm">{invoices.length} facture{invoices.length > 1 ? 's' : ''}</p></div>
+        <div><h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">Factures <LiveBadge /></h2><p className="text-slate-500 text-sm">{invoices.length} facture{invoices.length > 1 ? 's' : ''}</p></div>
         <button onClick={() => setShowForm(true)} data-testid="new-invoice-btn" className="flex items-center gap-2 bg-indigo-600 text-white px-5 py-2.5 rounded-xl hover:bg-indigo-700 font-medium shadow-sm"><Plus size={20} /> Nouvelle Facture</button>
       </div>
 
@@ -102,8 +129,11 @@ export default function Invoices() {
           <thead className="bg-slate-50 text-xs font-semibold text-slate-400 uppercase tracking-wider border-b"><tr><th className="px-6 py-3">N°</th><th className="px-4 py-3">Client</th><th className="px-4 py-3">Montant</th><th className="px-4 py-3 hidden md:table-cell">Date</th><th className="px-4 py-3">Statut</th><th className="px-4 py-3 text-right">Actions</th></tr></thead>
           <tbody className="divide-y divide-slate-100">
             {filteredInvoices.map(i => (
-              <tr key={i.id} className="hover:bg-slate-50/50" data-testid={`invoice-row-${i.id}`}>
-                <td className="px-6 py-3 font-medium text-slate-800">{i.number}</td>
+              <tr key={i.id} className={`hover:bg-slate-50/50 ${newInvoiceIds.has(i.id) ? 'bg-emerald-50/70' : ''}`} data-testid={`invoice-row-${i.id}`}>
+                <td className="px-6 py-3 font-medium text-slate-800">
+                  {newInvoiceIds.has(i.id) && <span className="inline-block mr-2 text-[9px] font-bold bg-emerald-500 text-white px-1.5 py-0.5 rounded-full uppercase tracking-wider">Nouveau</span>}
+                  {i.number}
+                </td>
                 <td className="px-4 py-3 text-slate-600">{i.customerName || 'N/A'}</td>
                 <td className="px-4 py-3 font-bold text-slate-800">{formatCurrency(i.amount, profile?.zone)}</td>
                 <td className="px-4 py-3 text-slate-500 hidden md:table-cell">{i.date ? new Date(i.date).toLocaleDateString('fr-FR') : '-'}</td>

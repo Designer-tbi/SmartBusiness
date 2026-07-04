@@ -94,6 +94,44 @@ async function askClaudeJSON<T = any>(systemPrompt: string, userMsg: string | Us
   catch { return { error: "Parsing JSON échoué", raw }; }
 }
 
+// Streaming variant — yields text deltas as they arrive from Claude.
+// Uses Anthropic's Server-Sent Events streaming API.
+async function* streamClaude(systemPrompt: string, userMsg: string | UserMessage[], maxTokens = 2048): AsyncGenerator<string> {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) throw new Error("ANTHROPIC_API_KEY manquant");
+  const body = withFableDefaults({ model: MODEL, max_tokens: maxTokens, system: systemPrompt, messages: toMessages(userMsg), stream: true });
+  const resp = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok || !resp.body) throw new Error(`Anthropic ${resp.status}: ${(await resp.text().catch(() => "")).substring(0, 300)}`);
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    // Parse SSE events split by double newline
+    let idx;
+    while ((idx = buffer.indexOf("\n\n")) >= 0) {
+      const rawEvent = buffer.slice(0, idx);
+      buffer = buffer.slice(idx + 2);
+      const dataLine = rawEvent.split("\n").find((l) => l.startsWith("data: "));
+      if (!dataLine) continue;
+      const jsonStr = dataLine.slice(6).trim();
+      if (!jsonStr || jsonStr === "[DONE]") continue;
+      try {
+        const evt = JSON.parse(jsonStr);
+        if (evt.type === "content_block_delta" && evt.delta?.type === "text_delta" && evt.delta.text) {
+          yield evt.delta.text;
+        }
+      } catch { /* ignore malformed chunk */ }
+    }
+  }
+}
+
 // ─── LinkedIn accounts + simulation fallback ────────────────────────
 type LinkedInAccount = { agentName: string; role: string; email: string; profileUrl: string; displayName: string; headline: string; connections: number; };
 const LINKEDIN_ACCOUNTS: Record<string, LinkedInAccount> = {
@@ -587,7 +625,24 @@ async function ensureAgentRunsTable() {
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
   )`);
   await q("CREATE INDEX IF NOT EXISTS idx_agent_runs_agent ON agent_runs(agent_id, created_at DESC)");
+  await q("CREATE INDEX IF NOT EXISTS idx_agent_runs_status ON agent_runs(status, created_at DESC)");
   runsTableReady = true;
+}
+// Insert a run in "running" state and return its id (used for realtime tracking).
+async function startRun(o: { agent_id: string; capability: string; input?: any; triggered_by?: string }): Promise<number | null> {
+  try {
+    await ensureAgentRunsTable();
+    const r = await q(`INSERT INTO agent_runs (agent_id, capability, status, input, triggered_by) VALUES ($1,$2,'running',$3,$4) RETURNING id`,
+      [o.agent_id, o.capability, o.input ? JSON.stringify(o.input) : null, o.triggered_by || null]);
+    return r.rows[0]?.id ?? null;
+  } catch (e) { console.error("[startRun]", e); return null; }
+}
+async function finishRun(id: number | null, o: { status: "success"|"error"; output?: any; error_message?: string; duration_ms?: number }): Promise<void> {
+  if (!id) return;
+  try {
+    await q(`UPDATE agent_runs SET status=$1, output=$2, error_message=$3, duration_ms=$4 WHERE id=$5`,
+      [o.status, o.output ? JSON.stringify(o.output).substring(0, 50000) : null, o.error_message || null, o.duration_ms || null, id]);
+  } catch (e) { console.error("[finishRun]", e); }
 }
 async function logRun(o: { agent_id: string; capability: string; status: "success"|"error"; input?: any; output?: any; error_message?: string; triggered_by?: string; duration_ms?: number }) {
   try {
@@ -1045,6 +1100,15 @@ app.get("/api/agents/runs/recent", async (req, res) => {
     res.json({ success: true, runs: r.rows });
   } catch (err: any) { res.status(500).json({ success: false, error: err.message }); }
 });
+// Live/in-progress runs (status='running' within last 10 min — orphan-safe)
+app.get("/api/agents/runs/live", async (_req, res) => {
+  try {
+    const r = await q(`SELECT id, agent_id, capability, status, triggered_by, created_at,
+      EXTRACT(EPOCH FROM (NOW() - created_at))::INT AS elapsed_seconds
+      FROM agent_runs WHERE status='running' AND created_at > NOW() - INTERVAL '10 minutes' ORDER BY created_at DESC LIMIT 50`);
+    res.json({ success: true, running: r.rows });
+  } catch (err: any) { res.status(500).json({ success: false, error: err.message }); }
+});
 app.get("/api/agents/runs/:id", async (req, res) => {
   try { const r = await q("SELECT * FROM agent_runs WHERE id=$1", [req.params.id]); if (r.rows.length === 0) return res.status(404).json({ error: "not found" }); res.json({ success: true, run: r.rows[0] }); }
   catch (err: any) { res.status(500).json({ success: false, error: err.message }); }
@@ -1149,6 +1213,58 @@ Règles de réponse :
   } catch (err: any) {
     console.error("[chat]", err?.message || err);
     res.status(500).json({ success: false, error: err?.message || "Erreur chat" });
+  }
+});
+
+// ─── SSE STREAMING chat — Real-time token-by-token replies ─────────
+// POST /api/agents/:agentId/chat/stream  { message, history? }
+// Response: text/event-stream with { type: 'delta'|'done'|'error', ... }
+app.post("/api/agents/:agentId/chat/stream", async (req, res) => {
+  const agentId = req.params.agentId;
+  const meta = AGENTS.find((a) => a.id === agentId);
+  if (!meta) return res.status(404).json({ success: false, error: "Agent inconnu" });
+  const { message, history = [] } = req.body || {};
+  if (!message) return res.status(400).json({ success: false, error: "message requis" });
+
+  // SSE headers
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  res.flushHeaders?.();
+
+  const send = (obj: any) => { try { res.write(`data: ${JSON.stringify(obj)}\n\n`); } catch { /* ignore */ } };
+
+  const runId = await startRun({ agent_id: agentId, capability: "chat_stream", input: { message: String(message).substring(0, 500) }, triggered_by: (req as any).user?.uid });
+  send({ type: "start", agent: agentId, agentName: meta.name, runId });
+
+  const basePersona = AGENT_PERSONAS[agentId] || `Tu es ${meta.name}, ${meta.role} chez TBI Technology.`;
+  const capsList = meta.capabilities.map((c) => `- ${c.label}: ${c.description}`).slice(0, 15).join("\n");
+  const system = `${basePersona}
+
+Tu réponds à un ordre du SUPERADMIN. Sois EXÉCUTIF, concis, direct.
+Capacités : ${capsList}
+Règles : français, max 300 mots, plan d'action bullet si pertinent.`;
+
+  const messages = [
+    ...(Array.isArray(history) ? history.slice(-6) : []),
+    { role: "user" as const, content: String(message).substring(0, 3000) },
+  ];
+
+  const t0 = Date.now();
+  let full = "";
+  try {
+    for await (const chunk of streamClaude(system, messages, 2048)) {
+      full += chunk;
+      send({ type: "delta", text: chunk });
+    }
+    send({ type: "done", full, duration_ms: Date.now() - t0 });
+    await finishRun(runId, { status: "success", output: { reply: full.substring(0, 4000) }, duration_ms: Date.now() - t0 });
+  } catch (err: any) {
+    send({ type: "error", error: err?.message || "Erreur streaming" });
+    await finishRun(runId, { status: "error", error_message: err?.message || String(err), duration_ms: Date.now() - t0 });
+  } finally {
+    res.end();
   }
 });
 

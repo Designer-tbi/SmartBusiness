@@ -5,6 +5,8 @@ import React from 'react';
 import type { ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
 import { Sparkles, Loader2, ChevronRight, Play, RefreshCw, X, Crown, Briefcase, Users, DollarSign, History, Linkedin, CheckCircle2, AlertTriangle, Send, MessageSquare } from 'lucide-react';
+import { useLivePoll } from '../hooks/useLivePoll';
+import { LiveBadge } from '../components/LiveBadge';
 
 type Capability = {
   id: string;
@@ -94,6 +96,13 @@ export default function AITeam() {
     })();
   }, []);
 
+  // Live polling of recent runs when the runs modal is open
+  const { data: runsData } = useLivePoll<{ runs: RunRow[] }>(
+    showRuns ? '/api/agents/runs/recent?limit=30' : null,
+    { intervalMs: 3000, enabled: showRuns }
+  );
+  useEffect(() => { if (runsData?.runs) setRuns(runsData.runs); }, [runsData]);
+
   const fetchRuns = async () => {
     try {
       const r = await fetch('/api/agents/runs/recent?limit=30');
@@ -127,6 +136,7 @@ export default function AITeam() {
           <h1 className="text-2xl md:text-3xl font-black text-slate-900 flex items-center gap-2 md:gap-3">
             <Sparkles className="text-indigo-600" size={28} />
             Équipe IA — TBI Technology
+            <LiveBadge label="Live" />
           </h1>
           <p className="text-slate-500 mt-1">
             {agents.length} agents IA pilotent l&apos;application en parallèle.
@@ -156,6 +166,9 @@ export default function AITeam() {
           <AgentCard agent={ceo} onClick={() => setSelectedAgent(ceo)} isCeo />
         </div>
       )}
+
+      {/* Live in-progress runs */}
+      <LiveRunsPanel agents={agents} />
 
       {/* External Tools Panel */}
       <ExternalToolsPanel agents={agents} />
@@ -190,6 +203,40 @@ export default function AITeam() {
   );
 }
 
+// ─── LIVE IN-PROGRESS RUNS ──────────────────────────────────────────
+type LiveRun = { id: number; agent_id: string; capability: string; status: string; triggered_by?: string; elapsed_seconds: number; created_at: string };
+function LiveRunsPanel({ agents }: { agents: AgentMeta[] }) {
+  const { data } = useLivePoll<{ running: LiveRun[] }>('/api/agents/runs/live', { intervalMs: 2500 });
+  const running = data?.running || [];
+  if (running.length === 0) return null;
+  return (
+    <div className="bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 rounded-2xl p-4 md:p-5" data-testid="live-runs-panel">
+      <div className="flex items-center gap-2 mb-3">
+        <span className="relative flex h-2.5 w-2.5">
+          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+          <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
+        </span>
+        <h3 className="font-bold text-emerald-900 text-sm md:text-base">Tâches IA en cours ({running.length})</h3>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+        {running.map(r => {
+          const agent = agents.find(a => a.id === r.agent_id);
+          return (
+            <div key={r.id} className="bg-white/70 backdrop-blur rounded-xl px-3 py-2 border border-emerald-100 flex items-center gap-2" data-testid={`live-run-${r.id}`}>
+              <span className="text-xl">{agent?.avatar || '🤖'}</span>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold text-slate-800 truncate">{agent?.name || r.agent_id}</p>
+                <p className="text-[11px] text-slate-500 truncate">{r.capability}</p>
+              </div>
+              <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded-full whitespace-nowrap">{r.elapsed_seconds}s</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ─── COMMAND BAR ─────────────────────────────────────────────────────
 type ChatEntry = { role: 'user' | 'assistant'; content: string; agent?: string; ts: number };
 function CommandBar({ agents }: { agents: AgentMeta[] }) {
@@ -209,20 +256,60 @@ function CommandBar({ agents }: { agents: AgentMeta[] }) {
     if (!text || busy) return;
     setBusy(true);
     const userEntry: ChatEntry = { role: 'user', content: text, agent: target, ts: Date.now() };
-    setHistory(h => [...h, userEntry]);
+    // Add user message + placeholder assistant for streaming
+    setHistory(h => [...h, userEntry, { role: 'assistant', content: '', agent: target, ts: Date.now() }]);
     setInput('');
     try {
       const past = history.slice(-6).map(h => ({ role: h.role, content: h.content }));
-      const r = await fetch(`/api/agents/${target}/chat`, {
+      const r = await fetch(`/api/agents/${target}/chat/stream`, {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: text, history: past }),
       });
-      const data = await r.json();
-      if (!r.ok || !data.success) throw new Error(data.error || `HTTP ${r.status}`);
-      setHistory(h => [...h, { role: 'assistant', content: data.reply, agent: data.agent, ts: Date.now() }]);
+      if (!r.ok || !r.body) throw new Error(`HTTP ${r.status}`);
+      const reader = r.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let idx;
+        while ((idx = buffer.indexOf('\n\n')) >= 0) {
+          const raw = buffer.slice(0, idx); buffer = buffer.slice(idx + 2);
+          const line = raw.split('\n').find(l => l.startsWith('data: '));
+          if (!line) continue;
+          try {
+            const evt = JSON.parse(line.slice(6));
+            if (evt.type === 'delta' && evt.text) {
+              setHistory(h => {
+                const next = [...h];
+                const last = next[next.length - 1];
+                if (last && last.role === 'assistant') next[next.length - 1] = { ...last, content: last.content + evt.text };
+                return next;
+              });
+            } else if (evt.type === 'error') {
+              throw new Error(evt.error || 'Erreur streaming');
+            }
+          } catch (parseErr) {
+            // Ignore malformed chunk unless it is a real error
+            if (parseErr instanceof Error && parseErr.message.includes('streaming')) throw parseErr;
+          }
+        }
+      }
     } catch (e: any) {
-      setHistory(h => [...h, { role: 'assistant', content: `⚠️ Erreur : ${e.message}`, agent: target, ts: Date.now() }]);
+      setHistory(h => {
+        const next = [...h];
+        const last = next[next.length - 1];
+        if (last && last.role === 'assistant' && !last.content) {
+          next[next.length - 1] = { ...last, content: `⚠️ Erreur : ${e.message}` };
+        } else {
+          next.push({ role: 'assistant', content: `⚠️ Erreur : ${e.message}`, agent: target, ts: Date.now() });
+        }
+        return next;
+      });
     } finally {
       setBusy(false);
     }
@@ -292,19 +379,22 @@ function CommandBar({ agents }: { agents: AgentMeta[] }) {
               <div key={i} className={`flex ${entry.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                 <div className={`max-w-[85%] rounded-xl px-3 py-2 text-sm whitespace-pre-wrap break-words ${entry.role === 'user' ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-800 border border-slate-200'}`}>
                   {entry.role === 'assistant' && entry.agent && (
-                    <div className="text-[10px] font-bold text-indigo-600 mb-1 uppercase tracking-wider">{agents.find(a => a.id === entry.agent)?.name || entry.agent}</div>
+                    <div className="text-[10px] font-bold text-indigo-600 mb-1 uppercase tracking-wider flex items-center gap-1.5">
+                      {agents.find(a => a.id === entry.agent)?.name || entry.agent}
+                      {busy && i === history.length - 1 && !entry.content && (
+                        <span className="inline-flex items-center gap-1 text-slate-500 normal-case font-normal">
+                          <Loader2 size={10} className="animate-spin" /> réfléchit…
+                        </span>
+                      )}
+                      {busy && i === history.length - 1 && entry.content && (
+                        <span className="w-1.5 h-3 bg-indigo-500 animate-pulse rounded-sm" title="Streaming" />
+                      )}
+                    </div>
                   )}
-                  {entry.content}
+                  {entry.content || (entry.role === 'assistant' && busy && i === history.length - 1 ? '…' : '')}
                 </div>
               </div>
             ))}
-            {busy && (
-              <div className="flex justify-start">
-                <div className="bg-slate-100 border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-500 flex items-center gap-2">
-                  <Loader2 size={14} className="animate-spin" /> {targetAgent?.name || 'Agent'} réfléchit…
-                </div>
-              </div>
-            )}
           </div>
 
           {/* Suggestions */}
