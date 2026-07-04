@@ -71,6 +71,15 @@ export default function AITeam() {
         const data = await r.json();
         setAgents(data.agents || []);
         setClaudeInfo(data.claude || {});
+        // Auto-open agent panel from URL ?agent=<id>
+        try {
+          const params = new URLSearchParams(window.location.search);
+          const wanted = params.get('agent');
+          if (wanted) {
+            const found = (data.agents || []).find((a: any) => a.id === wanted);
+            if (found) setSelectedAgent(found);
+          }
+        } catch { /* ignore */ }
         // Fetch LinkedIn status (non-blocking)
         fetch('/api/agents/linkedin/status').then(r => r.ok ? r.json() : null).then(s => { if (s?.agents) setLinkedinStatus(s.agents); }).catch(() => {});
       } catch (e: any) {

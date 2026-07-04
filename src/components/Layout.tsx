@@ -61,39 +61,70 @@ export default function Layout() {
 
   const navItems = [
     { name: 'Tableau de bord', href: '/', icon: LayoutDashboard },
-    { 
-      name: 'CRM', 
-      icon: Users,
+    {
+      name: 'Commercial',
+      icon: Briefcase,
       children: [
         { name: 'Portefeuille client', href: '/portfolio', icon: Briefcase },
         { name: 'Opportunités', href: '/opportunities', icon: Target },
         { name: 'Leads', href: '/leads', icon: UserPlus },
         { name: 'Clients', href: '/customers', icon: Users },
+        { name: 'Prospection LinkedIn', href: '/ai-team?agent=alex', icon: Sparkles, aiLinked: true },
+        { name: 'Contrats & Juridique', href: '/ai-team?agent=lisa', icon: Sparkles, aiLinked: true },
       ]
     },
-    { 
-      name: 'Ventes & Facturation', 
+    {
+      name: 'Facturation',
       icon: FileText,
       children: [
         { name: 'Devis', href: '/quotes', icon: FileText },
         { name: 'Factures', href: '/invoices', icon: Receipt },
+        { name: 'Recouvrement', href: '/ai-team?agent=kevin', icon: Sparkles, aiLinked: true },
         { name: 'Mes Paiements', href: '/payments', icon: CreditCard },
         { name: 'Commissions', href: '/commissions', icon: DollarSign },
         { name: 'Analyse Ventes', href: '/sales-analysis', icon: PieChart },
       ]
     },
-    { 
-      name: 'Opérations', 
+    {
+      name: 'Finance',
+      icon: DollarSign,
+      children: [
+        { name: 'Comptabilité SYSCOHADA', href: '/ai-team?agent=chloe', icon: Sparkles, aiLinked: true },
+        { name: 'Budget & Trésorerie', href: '/ai-team?agent=ingrid', icon: Sparkles, aiLinked: true },
+        { name: 'Dashboard Financier', href: '/ai-team?agent=paul', icon: Sparkles, aiLinked: true },
+      ]
+    },
+    {
+      name: 'Ressources Humaines',
+      icon: Users,
+      children: [
+        { name: 'Recrutement & Talents', href: '/ai-team?agent=nina', icon: Sparkles, aiLinked: true },
+        { name: 'Paie & Admin', href: '/ai-team?agent=omar', icon: Sparkles, aiLinked: true },
+        { name: 'Équipe TBI', href: '/ai-team?agent=flore', icon: Sparkles, aiLinked: true },
+      ]
+    },
+    {
+      name: 'Direction',
+      icon: Trophy,
+      children: [
+        { name: 'Dashboard Exécutif', href: '/ai-team?agent=eden', icon: Sparkles, aiLinked: true },
+        { name: 'Veille Stratégique', href: '/ai-team?agent=eden&cap=strategic-watch', icon: Sparkles, aiLinked: true },
+        { name: 'Pipeline Commercial', href: '/ai-team?agent=timothy', icon: Sparkles, aiLinked: true },
+      ]
+    },
+    {
+      name: 'Opérations',
       icon: Activity,
       children: [
         { name: 'Suivi', href: '/tracking', icon: Activity },
         { name: 'Activités', href: '/activities', icon: CheckSquare },
         { name: 'Calendrier', href: '/calendar', icon: Calendar },
         { name: 'Objectifs', href: '/goals', icon: Trophy },
+        { name: 'Appels', href: '/calls', icon: PhoneCall },
       ]
     },
-    { 
-      name: 'Catalogue & Projets', 
+    {
+      name: 'Catalogue & Projets',
       icon: BookOpen,
       children: [
         { name: 'Catalogue', href: '/catalog', icon: BookOpen },
@@ -102,25 +133,34 @@ export default function Layout() {
         { name: 'Documents', href: '/documents', icon: Files },
       ]
     },
-    { name: 'Appels', href: '/calls', icon: PhoneCall },
   ];
 
+  // Filter AI-linked items so only superadmin sees them
+  const isSuperadmin = profile?.role === 'superadmin';
+  const filteredNavItems = navItems.map((item: any) => {
+    if (!item.children) return item;
+    const filteredChildren = item.children.filter((c: any) => !c.aiLinked || isSuperadmin);
+    // If a section has ONLY aiLinked children and user is not superadmin, hide it entirely
+    if (filteredChildren.length === 0) return null;
+    return { ...item, children: filteredChildren };
+  }).filter(Boolean);
+
   // Rapports visible par tous
-  navItems.push({
+  filteredNavItems.push({
     name: 'Mes Rapports',
     href: '/reports',
     icon: BarChart3,
-  });
+  } as any);
 
   if (profile?.role === 'admin' || profile?.role === 'superadmin') {
     // Standalone top-level item — highly visible for admins
-    navItems.push({
+    filteredNavItems.push({
       name: 'Stratégies Commerciales',
       href: '/strategies',
       icon: Target,
       highlight: true,
     } as any);
-    navItems.push({ 
+    filteredNavItems.push({ 
       name: 'Administration', 
       icon: Settings,
       children: [
@@ -130,10 +170,10 @@ export default function Layout() {
         { name: 'Sessions', href: '/sessions', icon: Monitor },
         { name: 'Super Admin', href: '/super-admin', icon: Settings },
       ]
-    });
+    } as any);
     // Super-admin only: AI Team
     if (profile?.role === 'superadmin') {
-      navItems.push({
+      filteredNavItems.push({
         name: 'Équipe IA',
         href: '/ai-team',
         icon: Sparkles,
@@ -142,7 +182,7 @@ export default function Layout() {
     }
   } else {
     // Commerciaux : lecture seule
-    navItems.push({
+    filteredNavItems.push({
       name: 'Stratégies',
       href: '/strategies',
       icon: Target,
@@ -150,7 +190,7 @@ export default function Layout() {
   }
 
   const getPageTitle = () => {
-    for (const item of navItems) {
+    for (const item of filteredNavItems as any[]) {
       if (item.href === location.pathname) return item.name;
       if (item.children) {
         const child = item.children.find(c => c.href === location.pathname);
@@ -198,7 +238,7 @@ export default function Layout() {
         </div>
         
         <nav className="flex-1 px-4 space-y-1 mt-4 overflow-y-auto custom-scrollbar">
-          {navItems.map((item) => {
+          {filteredNavItems.map((item) => {
             const Icon = item.icon;
             
             if (item.children) {
@@ -243,8 +283,13 @@ export default function Layout() {
                             )}
                             title={!isSidebarOpen ? child.name : ""}
                           >
-                            <ChildIcon size={18} />
-                            {isSidebarOpen && <span className="font-medium">{child.name}</span>}
+                            <ChildIcon size={18} className={(child as any).aiLinked ? "text-violet-400" : ""} />
+                            {isSidebarOpen && (
+                              <span className="font-medium flex-1 flex items-center gap-1.5">
+                                {child.name}
+                                {(child as any).aiLinked && <span className="text-[9px] font-black bg-gradient-to-r from-indigo-500 to-violet-500 text-white px-1 py-0.5 rounded uppercase">IA</span>}
+                              </span>
+                            )}
                           </Link>
                         );
                       })}
