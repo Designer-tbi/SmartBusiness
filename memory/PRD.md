@@ -97,6 +97,13 @@ French (fr-FR)
   - **Pages CRM live** : Leads, Devis, Factures avec auto-refresh 3s + badge "🟢 Nouveau" sur nouveaux items (auto-clear 15s)
   - **LinkedIn honnêteté** : les fonctions `liSendMessage/liSendConnection/liPublishPost/liSearchProspects` ne mentent plus. Au lieu de retourner `success:true` en simulation silencieuse, elles renvoient `{success:false, simulated:true, error, reason, workaround}` avec la vraie raison (Marketing Developer Platform requis pour messages, etc.)
   - **UI transparence** : Panel AgentPanel affiche bannière amber "⚠️ Action NON exécutée en réel" (data-testid=`agent-result-simulated`) ou emerald "✅ Exécuté en temps réel" (data-testid=`agent-result-live`) selon `result.simulated`/`result.live`
+- ✅ **Livraison Agent Actions Executor** (4 mars 2026, prêt à déployer)
+  - **`executeAgentActions()`** helper — parse les blocs `<actions>[{type,data}]</actions>` dans les réponses Claude et exécute les vraies INSERT/UPDATE en base
+  - **Types d'actions supportés** : `create_lead/customer/opportunity/quote/portfolio/product/activity/category` + `update_*` + `mark_invoice_paid` (17 types au total)
+  - **`ACTIONS_INSTRUCTIONS`** — bloc de prompt système en français appendé à `/chat`, `/chat/stream`, `/execute/:capId` — instruit Claude à inclure `<actions>` quand l'utilisateur demande création/modif
+  - **Résolution bug "agent parle mais ne fait rien"** — l'agent Timothy peut désormais VRAIMENT ajouter 5 établissements dans le portefeuille via une commande naturelle
+  - **UI** : Command Bar affiche sous chaque bulle assistant un bloc `✓/✗ N action(s) exécutée(s)` (data-testid=`cmd-actions`) avec type + id + name/error
+  - **Suppression des simulations restantes** : mock LinkedIn search removed (returns honest error), `createActivity` throws on DB error (no silent simulated:true), `sendWhatsApp` returns explicit "non implémenté"
 
 ## Backlog / Roadmap
 
