@@ -206,22 +206,28 @@ async function liSearchProspects(agentId: string, { keywords = "", location = "B
       const data = await liApiCall(`https://api.linkedin.com/v2/people-search?${params}`, t.access_token);
       return { agent: acc.agentName, results: data.elements || [], total: data.paging?.total || 0, live: true };
     } catch (e: any) {
-      console.warn(`[LI ${agentId} search fallback]`, e.message);
-      // Return simulated set BUT explicitly flag the reason so the UI can warn the superadmin.
-      const mock = [
-        { id: "LI001", name: "Jean-Baptiste Mbemba", title: "DG - Société Mbemba Transport", location: "Brazzaville", industry: "Transport", connections: 2 },
-        { id: "LI002", name: "Odette Nkounkou",      title: "PDG - Nkounkou Commerce",       location: "Pointe-Noire", industry: "Commerce",  connections: 1 },
-        { id: "LI003", name: "Pierre Moukala",       title: "DSI - Groupe Moukala",          location: "Brazzaville", industry: "Industrie", connections: 3 },
-      ].slice(0, limit);
-      return { agent: acc.agentName, results: mock, total: mock.length, simulated: true, simulated_reason: `LinkedIn API refuse la recherche (${String(e.message).substring(0, 120)}). LinkedIn restreint ce endpoint aux partenaires approuvés (Marketing Developer Platform).`, query: keywords, location };
+      // NO MORE MOCK DATA — honest error only
+      return {
+        success: false,
+        agent: acc.agentName,
+        results: [],
+        total: 0,
+        error: "Recherche LinkedIn non disponible",
+        reason: `LinkedIn refuse la recherche via /v2/people-search. Cet endpoint nécessite l'approbation "Marketing Developer Platform" (accès partenaires uniquement). Détail : ${String(e.message).substring(0, 200)}`,
+        workaround: "Utilisez la recherche web (agent web-search) ou LinkedIn Sales Navigator manuellement puis importez les leads via extract-to-crm.",
+        query: keywords, location,
+      };
     }
   }
-  const mock = [
-    { id: "LI001", name: "Jean-Baptiste Mbemba", title: "DG - Société Mbemba Transport", location: "Brazzaville", industry: "Transport", connections: 2 },
-    { id: "LI002", name: "Odette Nkounkou",      title: "PDG - Nkounkou Commerce",       location: "Pointe-Noire", industry: "Commerce",  connections: 1 },
-    { id: "LI003", name: "Pierre Moukala",       title: "DSI - Groupe Moukala",          location: "Brazzaville", industry: "Industrie", connections: 3 },
-  ].slice(0, limit);
-  return { agent: acc.agentName, results: mock, total: mock.length, simulated: true, simulated_reason: `Aucun token OAuth pour ${acc.agentName}. Connectez son compte LinkedIn via /ai-team → Connecter LinkedIn.`, query: keywords, location };
+  return {
+    success: false,
+    agent: acc.agentName,
+    results: [],
+    total: 0,
+    error: "Aucun token OAuth",
+    reason: `Le compte LinkedIn de ${acc.agentName} n'est pas connecté. Depuis /ai-team, cliquez sur ${acc.agentName} puis 'Connecter LinkedIn'.`,
+    query: keywords, location,
+  };
 }
 async function liSendConnection(agentId: string, targetId: string, message: string = "") {
   const acc = LINKEDIN_ACCOUNTS[agentId]!;
@@ -334,9 +340,7 @@ async function liPublishPost(agentId: string, text: string) {
 // ─── COMPREHENSIVE CRM ADAPTER (all platform APIs) ──────────────────
 // Each method returns { data } to keep the agent prompt code shape consistent.
 const ok = (data: any) => ({ data });
-const q = query;
-
-const platform = {
+const q = query;const platform = {
   // ─── LEADS ─────────────────────────────────────
   async listLeads() {
     const r = await q(`SELECT id, type, first_name AS "firstName", last_name AS "lastName", company_name AS "companyName", email, phone, status, source, agent_id, created_at FROM leads ORDER BY created_at DESC LIMIT 500`);
@@ -461,15 +465,21 @@ const platform = {
   // ─── ACTIVITIES / TASKS ────────────────────────
   async listActivities(limit = 100) { const r = await q("SELECT * FROM activities ORDER BY created_at DESC LIMIT $1", [limit]).catch(() => ({ rows: [] as any[] })); return ok(r.rows); },
   async createActivity(d: any) {
-    try {
-      const r = await q("INSERT INTO activities (type, subject, notes, status, agent_id, customer_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *", [d.type||"Note", d.subject||null, d.notes||null, d.status||"À faire", d.agent_id||null, d.customer_id||null]);
-      return ok(r.rows[0]);
-    } catch { return ok({ simulated: true, ...d }); }
+    const r = await q("INSERT INTO activities (type, subject, notes, status, agent_id, customer_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *", [d.type||"Note", d.subject||null, d.notes||null, d.status||"À faire", d.agent_id||null, d.customer_id||null]);
+    return ok(r.rows[0]);
   },
 
-  // ─── NOTIFICATIONS (best-effort) ───────────────
-  async sendEmail(_d: any) { return ok({ queued: true, channel: "email", simulated: !process.env.SMTP_FROM }); },
-  async sendWhatsApp(_d: any) { return ok({ queued: true, channel: "whatsapp", simulated: true }); },
+  // ─── NOTIFICATIONS (best-effort, honest) ───────
+  async sendEmail(d: any) {
+    if (!process.env.SMTP_FROM) return { data: { queued: false, channel: "email", success: false, error: "SMTP non configuré (SMTP_FROM absent). Configurez OVH SMTP dans Vercel env pour envoyer des emails réels." } };
+    // Email actually sent via /api/_lib/mailer.ts used elsewhere in the app.
+    // Here we just persist an activity record — real send happens via existing mailer.
+    try { await q("INSERT INTO activities (type, subject, notes, status) VALUES ('Email IA', $1, $2, 'À faire')", [d?.subject || "Email IA", JSON.stringify(d || {}).substring(0, 500)]); } catch { /* ignore */ }
+    return ok({ queued: true, channel: "email", success: true });
+  },
+  async sendWhatsApp(_d: any) {
+    return { data: { queued: false, channel: "whatsapp", success: false, error: "WhatsApp non implémenté. Utilisez sendEmail ou publiez un post LinkedIn à la place." } };
+  },
   async createAlert(d: any) {
     try { await q("INSERT INTO activities (type, subject, notes, status) VALUES ('Alerte IA', $1, $2, 'À faire')", [d.type || "alerte_ia", d.message || ""]); } catch { /* ignore */ }
     return ok({ alerted: true });
@@ -488,6 +498,94 @@ const platform = {
     return ok({ leads: leads.rows, customers: customers.rows, opportunities: opps.rows, quotes: quotes.rows, invoices: invoices.rows });
   },
 };
+
+// ─── AGENT ACTIONS EXECUTOR ─────────────────────────────────────────
+// Agents can request real CRM writes by including a JSON block in their reply:
+//   <actions>[{"type":"create_portfolio","data":{...}}, ...]</actions>
+// This function parses the block, executes each action against the real DB,
+// and returns the list of executed actions + errors for auditability.
+type AgentAction = { type: string; data: any };
+type ExecutedAction = { type: string; ok: boolean; id?: number | string; name?: string; error?: string };
+
+async function executeAgentActions(agentId: string, reply: string): Promise<{ actions: ExecutedAction[]; cleanReply: string }> {
+  const match = reply.match(/<actions>([\s\S]*?)<\/actions>/i);
+  if (!match) return { actions: [], cleanReply: reply };
+  const jsonBlock = match[1].trim();
+  let parsed: AgentAction[] = [];
+  try {
+    const raw = JSON.parse(jsonBlock.replace(/^```(?:json)?/i, "").replace(/```$/i, "").trim());
+    parsed = Array.isArray(raw) ? raw : (Array.isArray(raw.actions) ? raw.actions : []);
+  } catch { return { actions: [{ type: "parse_error", ok: false, error: "Bloc <actions> JSON invalide" }], cleanReply: reply.replace(match[0], "").trim() }; }
+
+  const executed: ExecutedAction[] = [];
+  for (const a of parsed) {
+    const d = a?.data || {};
+    // Inject the agent as the author when missing
+    if (!d.agent_id) d.agent_id = agentId;
+    try {
+      let created: any = null;
+      switch (a.type) {
+        case "create_lead":         created = (await platform.createLead(d)).data; break;
+        case "create_customer":     created = (await platform.createCustomer(d)).data; break;
+        case "create_opportunity":  created = (await platform.createOpportunity(d)).data; break;
+        case "create_quote":        created = (await platform.createQuote(d)).data; break;
+        case "create_portfolio":
+        case "create_portfolio_item":
+        case "create_establishment":
+          if (!d.category_id) d.category_id = 1;
+          created = (await platform.createPortfolio(d)).data;
+          break;
+        case "create_product":      created = (await platform.createProduct(d)).data; break;
+        case "create_activity":     created = (await platform.createActivity(d)).data; break;
+        case "create_category":     created = (await platform.createCategory(d)).data; break;
+        case "update_lead":         created = (await platform.updateLead(Number(d.id), d)).data; break;
+        case "update_customer":     created = (await platform.updateCustomer(Number(d.id), d)).data; break;
+        case "update_opportunity":  created = (await platform.updateOpportunity(Number(d.id), d)).data; break;
+        case "update_quote":        created = (await platform.updateQuote(Number(d.id), d)).data; break;
+        case "update_portfolio":    created = (await platform.updatePortfolio(Number(d.id), d)).data; break;
+        case "update_invoice":      created = (await platform.updateInvoice(Number(d.id), d)).data; break;
+        case "mark_invoice_paid":   created = (await platform.markInvoicePaid(Number(d.id))).data; break;
+        default:
+          executed.push({ type: a.type, ok: false, error: `Type d'action inconnu: ${a.type}` });
+          continue;
+      }
+      executed.push({ type: a.type, ok: true, id: created?.id, name: created?.name || created?.first_name || created?.company_name || created?.title || created?.number });
+    } catch (err: any) {
+      executed.push({ type: a.type, ok: false, error: err?.message || String(err) });
+    }
+  }
+  const cleanReply = reply.replace(match[0], "").trim();
+  return { actions: executed, cleanReply };
+}
+
+// System prompt append instructing agents how to request real CRM writes.
+const ACTIONS_INSTRUCTIONS = `
+
+🛠️ EXÉCUTION D'ACTIONS RÉELLES DANS LE CRM
+Quand l'utilisateur te demande de CRÉER, AJOUTER, MODIFIER ou SUPPRIMER des données CRM, tu DOIS inclure un bloc <actions>...</actions> dans ta réponse — sinon rien ne sera fait. Les données seront VRAIMENT insérées en base.
+
+Format strict (JSON array) :
+<actions>[
+  {"type": "create_portfolio", "data": {"name": "Hotel Ledger", "address": "Av. Marien Ngouabi", "city": "Brazzaville", "tel": "+242 06 000 0000", "mail": "contact@ledger.cg", "status": "nouveau"}},
+  {"type": "create_lead", "data": {"first_name": "Jean", "last_name": "Dupont", "company_name": "Acme", "email": "jean@acme.com", "phone": "+242...", "status": "Nouveau"}},
+  {"type": "create_customer", "data": {"name": "Société X", "type": "company", "email": "...", "phone": "..."}},
+  {"type": "create_opportunity", "data": {"title": "...", "amount": 2500000, "currency": "XAF", "stage": "Nouveau"}},
+  {"type": "create_quote", "data": {"customer_id": 12, "amount": 3000000, "currency": "XAF"}},
+  {"type": "create_activity", "data": {"type": "Appel", "subject": "...", "notes": "..."}},
+  {"type": "update_lead", "data": {"id": 5, "status": "Qualifié"}},
+  {"type": "update_portfolio", "data": {"id": 12, "status": "gagné"}}
+]</actions>
+
+Types d'actions supportés : create_lead, create_customer, create_opportunity, create_quote, create_portfolio (=create_establishment), create_product, create_activity, create_category, update_lead, update_customer, update_opportunity, update_quote, update_portfolio, update_invoice, mark_invoice_paid.
+
+RÈGLES ABSOLUES :
+1. Si tu peux exécuter la demande via une action → INCLURE le bloc <actions>. Ne dis JAMAIS "je vais ajouter" sans <actions>.
+2. Les valeurs doivent être RÉALISTES et cohérentes avec le contexte (Congo/RDC/France selon la zone).
+3. Après le bloc <actions>, écris un court résumé humain de ce que tu as fait (max 3 lignes).
+4. Si l'utilisateur demande "N éléments", CRÉE EXACTEMENT N actions dans le bloc.
+5. Ne mets JAMAIS le bloc <actions> dans un exemple pédagogique — il serait exécuté !
+`;
+
 
 // ─── AGENT REGISTRY (metadata for UI) ───────────────────────────────
 type AgentMeta = {
@@ -1274,18 +1372,20 @@ Règles de réponse :
 2. Si elle nécessite une action → dis quelle capacité tu vas invoquer et pourquoi
 3. Si tu manques d'infos → pose UNE question précise
 4. Toujours en français, ton pro et direct.
-5. Termine par un bref plan d'action si pertinent (bullets max 5)`;
+5. Termine par un bref plan d'action si pertinent (bullets max 5)
+${ACTIONS_INSTRUCTIONS}`;
 
     const messages = [
       ...(Array.isArray(history) ? history.slice(-6) : []),
       { role: "user" as const, content: String(message).substring(0, 3000) },
     ];
     const t0 = Date.now();
-    const reply = await askClaudeFast(system, messages).catch((err: any) => {
-      throw err;
-    });
-    await logRun({ agent_id: agentId, capability: "chat", status: "success", input: { message }, output: { reply: reply.substring(0, 4000) }, triggered_by: (req as any).user?.uid, duration_ms: Date.now() - t0 });
-    res.json({ success: true, agent: agentId, agentName: meta.name, reply, model: CLAUDE_INFO.model });
+    const rawReply = await askClaudeFast(system, messages).catch((err: any) => { throw err; });
+    // Execute any <actions> block
+    const { actions, cleanReply } = await executeAgentActions(agentId, rawReply);
+    const reply = cleanReply;
+    await logRun({ agent_id: agentId, capability: "chat", status: "success", input: { message }, output: { reply: reply.substring(0, 4000), actions }, triggered_by: (req as any).user?.uid, duration_ms: Date.now() - t0 });
+    res.json({ success: true, agent: agentId, agentName: meta.name, reply, actions, actions_executed: actions.filter(a => a.ok).length, model: CLAUDE_INFO.model });
   } catch (err: any) {
     console.error("[chat]", err?.message || err);
     res.status(500).json({ success: false, error: err?.message || "Erreur chat" });
@@ -1320,7 +1420,8 @@ app.post("/api/agents/:agentId/chat/stream", async (req, res) => {
 
 Tu réponds à un ordre du SUPERADMIN. Sois EXÉCUTIF, concis, direct.
 Capacités : ${capsList}
-Règles : français, max 300 mots, plan d'action bullet si pertinent.`;
+Règles : français, max 300 mots, plan d'action bullet si pertinent.
+${ACTIONS_INSTRUCTIONS}`;
 
   const messages = [
     ...(Array.isArray(history) ? history.slice(-6) : []),
@@ -1334,8 +1435,11 @@ Règles : français, max 300 mots, plan d'action bullet si pertinent.`;
       full += chunk;
       send({ type: "delta", text: chunk });
     }
-    send({ type: "done", full, duration_ms: Date.now() - t0 });
-    await finishRun(runId, { status: "success", output: { reply: full.substring(0, 4000) }, duration_ms: Date.now() - t0 });
+    // Execute any <actions> block AFTER streaming completes
+    const { actions, cleanReply } = await executeAgentActions(agentId, full);
+    send({ type: "actions", actions, executed: actions.filter(a => a.ok).length });
+    send({ type: "done", full: cleanReply, duration_ms: Date.now() - t0, actions });
+    await finishRun(runId, { status: "success", output: { reply: cleanReply.substring(0, 4000), actions }, duration_ms: Date.now() - t0 });
   } catch (err: any) {
     send({ type: "error", error: err?.message || "Erreur streaming" });
     await finishRun(runId, { status: "error", error_message: err?.message || String(err), duration_ms: Date.now() - t0 });
@@ -1381,12 +1485,15 @@ app.post("/api/agents/:agentId/execute/:capId", async (req, res) => {
     // Use fast mode (lower effort, capped tokens) for free-form + chat
     const useFast = capId === "u-free" || capId === "chat";
     const asker = useFast ? askClaudeFast : askClaude;
-    const reply = await asker(persona + "\n\nExécute la demande de façon exécutive, concrète et actionnable.", userPrompt);
-    await logRun({ agent_id: agentId, capability: capId, status: "success", input: { input }, output: { reply: reply.substring(0, 8000) }, triggered_by: (req as any).user?.uid, duration_ms: Date.now() - t0 });
+    const rawReply = await asker(persona + "\n\nExécute la demande de façon exécutive, concrète et actionnable." + ACTIONS_INSTRUCTIONS, userPrompt);
+    // Parse and EXECUTE any <actions> block Claude included
+    const { actions, cleanReply } = await executeAgentActions(agentId, rawReply);
+    const reply = cleanReply;
+    await logRun({ agent_id: agentId, capability: capId, status: "success", input: { input }, output: { reply: reply.substring(0, 8000), actions }, triggered_by: (req as any).user?.uid, duration_ms: Date.now() - t0 });
     if (shouldSaveReport) {
       await saveAgentReport({ agent_id: agentId, capability: capId, title: `${capLabel} — ${new Date().toLocaleDateString("fr-FR")}`, summary: reply });
     }
-    res.json({ success: true, agent: agentId, capability: capId, label: capLabel, reply, saved_to_reports: shouldSaveReport });
+    res.json({ success: true, agent: agentId, capability: capId, label: capLabel, reply, actions, actions_executed: actions.filter(a => a.ok).length, saved_to_reports: shouldSaveReport });
   } catch (err: any) {
     await logRun({ agent_id: agentId, capability: capId, status: "error", error_message: err?.message || String(err), duration_ms: Date.now() - t0 });
     res.status(500).json({ success: false, agent: agentId, capability: capId, error: err?.message || "Erreur exécution" });

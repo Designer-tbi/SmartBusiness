@@ -238,7 +238,8 @@ function LiveRunsPanel({ agents }: { agents: AgentMeta[] }) {
 }
 
 // ─── COMMAND BAR ─────────────────────────────────────────────────────
-type ChatEntry = { role: 'user' | 'assistant'; content: string; agent?: string; ts: number };
+type ExecutedAction = { type: string; ok: boolean; id?: number | string; name?: string; error?: string };
+type ChatEntry = { role: 'user' | 'assistant'; content: string; agent?: string; ts: number; actions?: ExecutedAction[] };
 function CommandBar({ agents }: { agents: AgentMeta[] }) {
   const [open, setOpen] = useState(false);
   const [target, setTarget] = useState<string>('eden');
@@ -288,6 +289,21 @@ function CommandBar({ agents }: { agents: AgentMeta[] }) {
                 const next = [...h];
                 const last = next[next.length - 1];
                 if (last && last.role === 'assistant') next[next.length - 1] = { ...last, content: last.content + evt.text };
+                return next;
+              });
+            } else if (evt.type === 'actions' && Array.isArray(evt.actions)) {
+              setHistory(h => {
+                const next = [...h];
+                const last = next[next.length - 1];
+                if (last && last.role === 'assistant') next[next.length - 1] = { ...last, actions: evt.actions };
+                return next;
+              });
+            } else if (evt.type === 'done' && typeof evt.full === 'string') {
+              // Replace streamed content with the clean version (without <actions> tags)
+              setHistory(h => {
+                const next = [...h];
+                const last = next[next.length - 1];
+                if (last && last.role === 'assistant') next[next.length - 1] = { ...last, content: evt.full, actions: evt.actions || last.actions };
                 return next;
               });
             } else if (evt.type === 'error') {
@@ -392,6 +408,27 @@ function CommandBar({ agents }: { agents: AgentMeta[] }) {
                     </div>
                   )}
                   {entry.content || (entry.role === 'assistant' && busy && i === history.length - 1 ? '…' : '')}
+                  {/* Executed CRM actions */}
+                  {entry.role === 'assistant' && entry.actions && entry.actions.length > 0 && (
+                    <div className="mt-2 pt-2 border-t border-slate-300/60 space-y-1" data-testid="cmd-actions">
+                      <p className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider">
+                        ⚡ {entry.actions.filter(a => a.ok).length}/{entry.actions.length} action{entry.actions.length > 1 ? 's' : ''} exécutée{entry.actions.length > 1 ? 's' : ''} en base
+                      </p>
+                      <ul className="text-[11px] space-y-0.5">
+                        {entry.actions.map((a, ai) => (
+                          <li key={ai} className={`flex items-start gap-1 ${a.ok ? 'text-emerald-700' : 'text-rose-600'}`}>
+                            <span className="shrink-0">{a.ok ? '✓' : '✗'}</span>
+                            <span className="flex-1 min-w-0">
+                              <code className="text-[10px] font-mono">{a.type}</code>
+                              {a.ok && a.id && <span className="ml-1">#{a.id}</span>}
+                              {a.ok && a.name && <span className="ml-1">— {a.name}</span>}
+                              {!a.ok && a.error && <span className="ml-1">{a.error}</span>}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
