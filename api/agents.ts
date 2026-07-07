@@ -1155,7 +1155,18 @@ const requireSuperadmin = (req: any, res: any, next: any) => {
 
 // Diagnostic (no auth)
 app.get("/api/agents/ping", (_req, res) => {
-  res.json({ ok: true, message: "agents monolith loaded", claude: CLAUDE_INFO });
+  res.json({
+    ok: true,
+    message: "agents monolith loaded",
+    claude: CLAUDE_INFO,
+    // Version markers — bump this string when adding new features so you can
+    // instantly verify from the browser which build is live on Vercel.
+    build: {
+      release: "actions-executor-v1",   // iter6: <actions> parser + real DB writes
+      features: ["actions_executor", "sse_streaming_chat", "runs_live", "presence", "linkedin_honest"],
+      deployed_at_first_hit: new Date().toISOString(),
+    },
+  });
 });
 
 // ─── LinkedIn OAuth 3-legged flow ──────────────────────────────────
